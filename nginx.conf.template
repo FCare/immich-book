@@ -37,6 +37,19 @@ server {
         proxy_read_timeout 120s;
     }
 
+    # Proxy to the photobook storage backend - saved page styles,
+    # captions, ordering etc. per album, so a photobook can be resumed
+    # from any device rather than being tied to one browser's storage.
+    location /photobooks {
+        proxy_pass http://immich-book-backend:8000/photobooks;
+        proxy_set_header Host $host;
+    }
+
+    location /globalconfig {
+        proxy_pass http://immich-book-backend:8000/globalconfig;
+        proxy_set_header Host $host;
+    }
+
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|wasm)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";

@@ -10,9 +10,24 @@ services:
     restart: unless-stopped
     environment:
       - IMMICH_API_KEY=${IMMICH_API_KEY:?Set IMMICH_API_KEY in .env}
+    depends_on:
+      - immich-book-backend
+    networks:
+      - ansible
+
+  immich-book-backend:
+    build:
+      context: ./backend
+    container_name: immich-book-backend
+    restart: unless-stopped
+    volumes:
+      - immich-book-data:/data
     networks:
       - ansible
 
 networks:
   ansible:
     external: true
+
+volumes:
+  immich-book-data:

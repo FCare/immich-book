@@ -139,6 +139,21 @@ interface AlbumConfig extends GlobalConfig {
   pageCaptions: Record<number, string>;
   // User-written captions per photo (polaroid card), keyed by asset id
   cardCaptions: Record<string, string>;
+  // How many photo slots on a page are turned into text cards (0-3),
+  // keyed by logical page number.
+  textCardCounts: Record<number, number>;
+  // Text card contents, keyed by the card's synthetic id
+  // ("text-{pageNumber}-{index}", see pageLayout.ts).
+  textCardContents: Record<string, string>;
+  // Manual per-page slot assignment (drag-and-drop swaps), keyed by
+  // logical page number - see LayoutOptions.slotOverrides in
+  // pageLayout.ts for why this exists instead of just reordering assets.
+  slotOverrides: Record<number, string[]>;
+  // Card/asset ids the user has manually swapped at least once, purely
+  // for the "reordered" indicator dot - a swap only ever touches exactly
+  // the two ids involved, unlike the old splice-based reorder it replaced
+  // which could shift a neighboring card's index without moving it.
+  manuallyMovedIds: string[];
 }
 
 const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
@@ -153,12 +168,15 @@ const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   fontSize: 12,
 };
 
-// Helper functions for config persistence
-function loadGlobalConfig(): GlobalConfig {
+// Helper functions for config persistence - stored server-side (see
+// backend/main.py, proxied at /photobooks and /globalconfig) rather than
+// in this browser's localStorage, so a photobook can be resumed from any
+// device/client, not just the one it was edited on.
+async function loadGlobalConfig(): Promise<GlobalConfig> {
   try {
-    const stored = localStorage.getItem("immich-book-global-config");
-    if (stored) {
-      return { ...DEFAULT_GLOBAL_CONFIG, ...JSON.parse(stored) };
+    const res = await fetch("/globalconfig");
+    if (res.ok) {
+      return { ...DEFAULT_GLOBAL_CONFIG, ...(await res.json()) };
     }
   } catch (e) {
     console.error("Failed to load global config:", e);
@@ -166,37 +184,21 @@ function loadGlobalConfig(): GlobalConfig {
   return DEFAULT_GLOBAL_CONFIG;
 }
 
-function saveGlobalConfig(config: GlobalConfig) {
+async function saveGlobalConfig(config: GlobalConfig) {
   try {
-    localStorage.setItem("immich-book-global-config", JSON.stringify(config));
+    await fetch("/globalconfig", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
   } catch (e) {
     console.error("Failed to save global config:", e);
   }
 }
 
-function loadAlbumConfig(albumId: string): AlbumConfig {
-  const globalConfig = loadGlobalConfig();
-
-  try {
-    const stored = localStorage.getItem(`immich-book-config-${albumId}`);
-    if (stored) {
-      const albumSpecific = JSON.parse(stored);
-      return {
-        ...globalConfig,
-        customOrdering: null,
-        pageStyles: {},
-        layoutVariants: {},
-        pageCounts: {},
-        pageCaptions: {},
-        cardCaptions: {},
-        ...albumSpecific,
-      };
-    }
-  } catch (e) {
-    console.error("Failed to load album config:", e);
-  }
-
-  return {
+async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
+  const globalConfig = await loadGlobalConfig();
+  const defaults: AlbumConfig = {
     ...globalConfig,
     customOrdering: null,
     pageStyles: {},
@@ -204,17 +206,35 @@ function loadAlbumConfig(albumId: string): AlbumConfig {
     pageCounts: {},
     pageCaptions: {},
     cardCaptions: {},
+    textCardCounts: {},
+    textCardContents: {},
+    slotOverrides: {},
+    manuallyMovedIds: [],
   };
+
+  try {
+    const res = await fetch(`/photobooks/${encodeURIComponent(albumId)}`);
+    if (res.ok) {
+      const albumSpecific = await res.json();
+      return { ...defaults, ...albumSpecific };
+    }
+  } catch (e) {
+    console.error("Failed to load album config:", e);
+  }
+
+  return defaults;
 }
 
-function saveAlbumConfig(albumId: string, config: AlbumConfig) {
+async function saveAlbumConfig(albumId: string, config: AlbumConfig) {
   try {
-    localStorage.setItem(
-      `immich-book-config-${albumId}`,
-      JSON.stringify(config),
-    );
+    await fetch(`/photobooks/${encodeURIComponent(albumId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
 
-    // Also update global config with page and layout settings
+    // Also update global config with page and layout settings, used to
+    // seed the defaults for the next album that has no photobook yet.
     const globalConfig: GlobalConfig = {
       pageWidth: config.pageWidth,
       pageHeight: config.pageHeight,
@@ -226,7 +246,7 @@ function saveAlbumConfig(albumId: string, config: AlbumConfig) {
       showCaptions: config.showCaptions,
       fontSize: config.fontSize,
     };
-    saveGlobalConfig(globalConfig);
+    await saveGlobalConfig(globalConfig);
   } catch (e) {
     console.error("Failed to save album config:", e);
   }
@@ -245,14 +265,58 @@ const staticStyles = StyleSheet.create({
   },
 });
 
-function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
+// Fetches this album's photobook config from the backend before mounting
+// the actual editor - PhotoGridEditor's many useState(initialConfig.x)
+// calls need a resolved config up front, so this wrapper turns the async
+// load into a plain loading state instead of threading a promise through
+// every field.
+function PhotoGrid(props: PhotoGridProps) {
+  const [initialConfig, setInitialConfig] = useState<AlbumConfig | null>(
+    null,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setInitialConfig(null);
+    loadAlbumConfig(props.album.id).then((config) => {
+      if (!cancelled) setInitialConfig(config);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.album.id]);
+
+  if (!initialConfig) {
+    return (
+      <div className="text-center py-12">
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+        <p className="mt-4 text-gray-600">Loading photobook...</p>
+      </div>
+    );
+  }
+
+  // key={album.id} forces a fresh mount per album, so every piece of
+  // state below starts from this album's own config instead of leftover
+  // state from whichever album was open before.
+  return (
+    <PhotoGridEditor key={props.album.id} {...props} initialConfig={initialConfig} />
+  );
+}
+
+interface PhotoGridEditorProps extends PhotoGridProps {
+  initialConfig: AlbumConfig;
+}
+
+function PhotoGridEditor({
+  immichConfig,
+  album,
+  onBack,
+  initialConfig,
+}: PhotoGridEditorProps) {
   const [assets, setAssets] = useState<AssetResponseDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"preview" | "pdf">("preview");
-
-  // Load config on mount
-  const initialConfig = useMemo(() => loadAlbumConfig(album.id), [album.id]);
 
   // Page settings
   const [pageWidth, setPageWidth] = useState(initialConfig.pageWidth);
@@ -332,6 +396,34 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
   const [cardCaptions, setCardCaptions] = useState<Map<string, string>>(
     () => new Map(Object.entries(initialConfig.cardCaptions)),
   );
+  const [textCardCounts, setTextCardCounts] = useState<Map<number, number>>(
+    () =>
+      new Map(
+        Object.entries(initialConfig.textCardCounts).map(([k, v]) => [
+          Number(k),
+          v,
+        ]),
+      ),
+  );
+  const [textCardContents, setTextCardContents] = useState<
+    Map<string, string>
+  >(() => new Map(Object.entries(initialConfig.textCardContents)));
+  // Manual per-page slot assignment - see LayoutOptions.slotOverrides.
+  const [slotOverrides, setSlotOverrides] = useState<Map<number, string[]>>(
+    () =>
+      new Map(
+        Object.entries(initialConfig.slotOverrides).map(([k, v]) => [
+          Number(k),
+          v,
+        ]),
+      ),
+  );
+  // Ids the user has manually swapped at least once - drives the
+  // "reordered" indicator dot precisely (a swap only ever touches the two
+  // ids involved).
+  const [manuallyMovedIds, setManuallyMovedIds] = useState<Set<string>>(
+    () => new Set(initialConfig.manuallyMovedIds),
+  );
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
   const [captionProgress, setCaptionProgress] = useState<{
     done: number;
@@ -339,12 +431,16 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
   } | null>(null);
   const [captionError, setCaptionError] = useState<string | null>(null);
 
-  // Drag state for reordering
+  // Drag state for reordering - dropping one card onto another swaps
+  // them outright (see the pointermove/pointerup effect below), rather
+  // than splicing the dragged card into the sequence at the drop
+  // position, which is why we only need the dragged id here.
   const [reorderDragState, setReorderDragState] = useState<{
     draggedAssetId: string;
-    draggedIndex: number;
   } | null>(null);
-  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+  const [dropTargetAssetId, setDropTargetAssetId] = useState<string | null>(
+    null,
+  );
 
   // Width available to the preview column - pages (especially combined
   // spreads) are scaled down to fit it, rather than relying on horizontal
@@ -394,6 +490,10 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
       pageCounts: Object.fromEntries(pageCounts),
       pageCaptions: Object.fromEntries(pageCaptions),
       cardCaptions: Object.fromEntries(cardCaptions),
+      textCardCounts: Object.fromEntries(textCardCounts),
+      textCardContents: Object.fromEntries(textCardContents),
+      slotOverrides: Object.fromEntries(slotOverrides),
+      manuallyMovedIds: Array.from(manuallyMovedIds),
     };
     saveAlbumConfig(album.id, config);
   }, [
@@ -413,6 +513,10 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
     pageCounts,
     pageCaptions,
     cardCaptions,
+    textCardCounts,
+    textCardContents,
+    slotOverrides,
+    manuallyMovedIds,
     isPageWidthValid,
     isPageHeightValid,
     isMarginValid,
@@ -476,55 +580,77 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
     });
   };
 
-  // Drag & drop handlers for reordering
-  const handleReorderDragStart = (
-    assetId: string,
-    index: number,
-    event: React.DragEvent,
+  // Set how many of a page's slots are text cards instead of photos (0-3)
+  const handleSetTextCardCount = (
+    logicalPageNumber: number,
+    count: number,
   ) => {
-    event.dataTransfer.effectAllowed = "move";
-    setReorderDragState({ draggedAssetId: assetId, draggedIndex: index });
+    setTextCardCounts((prev) => {
+      const next = new Map(prev);
+      if (count === 0) {
+        next.delete(logicalPageNumber);
+      } else {
+        next.set(logicalPageNumber, count);
+      }
+      return next;
+    });
   };
 
-  const handleReorderDragOver = (index: number, event: React.DragEvent) => {
+  // Drag & drop for reordering - implemented with pointer events and
+  // manual hit-testing (element.closest("[data-reorder-asset-id]") under
+  // the pointer) rather than native HTML5 drag-and-drop. Native DnD turned
+  // out to be unreliable here: it breaks under a scaled/transformed
+  // ancestor (the preview's fit-to-width zoom), silently swallows drops on
+  // tiles with no onDrop handler (text cards), and needs browser-specific
+  // dataTransfer setup. Pointer events sidestep all of that.
+  const handleReorderPointerDown = (
+    assetId: string,
+    event: React.PointerEvent,
+  ) => {
+    if (event.button !== 0) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    setDropTargetIndex(index);
+    setReorderDragState({ draggedAssetId: assetId });
   };
 
-  const handleReorderDragEnd = () => {
-    setReorderDragState(null);
-    setDropTargetIndex(null);
-  };
-
-  const handleReorderDrop = (targetIndex: number, event: React.DragEvent) => {
-    event.preventDefault();
-
-    if (!reorderDragState) return;
-
-    const { draggedIndex } = reorderDragState;
-
-    if (draggedIndex === targetIndex) {
-      handleReorderDragEnd();
-      return;
-    }
-
-    // Create new ordering based on current filtered assets
-    const currentOrder = filteredAssets.map((asset) => asset.id);
-    const newOrder = [...currentOrder];
-
-    // Remove from old position
-    const [removed] = newOrder.splice(draggedIndex, 1);
-    // Insert at new position
-    newOrder.splice(targetIndex, 0, removed);
-
-    setCustomOrdering(newOrder);
-    handleReorderDragEnd();
+  // Undo a manual swap for one card: un-flag it, drop its page's slot
+  // override (that whole page falls back to fresh auto tiling - a manual
+  // arrangement only makes sense as the set the user actually placed, not
+  // a partial remnant of it), and if it was swapped across pages, restore
+  // its default position in the master sequence too.
+  const handleResetCard = (assetId: string) => {
+    setManuallyMovedIds((prev) => {
+      if (!prev.has(assetId)) return prev;
+      const next = new Set(prev);
+      next.delete(assetId);
+      return next;
+    });
+    setSlotOverrides((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const [pageNumber, ids] of prev) {
+        if (ids.includes(assetId)) {
+          next.delete(pageNumber);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    setCustomOrdering((prev) => {
+      if (!prev || !prev.includes(assetId)) return prev;
+      const defaultIndex = defaultFilteredAssets.findIndex(
+        (a) => a.id === assetId,
+      );
+      const next = prev.filter((id) => id !== assetId);
+      next.splice(defaultIndex, 0, assetId);
+      return next;
+    });
   };
 
   // Reset ordering to default
   const handleResetOrdering = () => {
     setCustomOrdering(null);
+    setSlotOverrides(new Map());
+    setManuallyMovedIds(new Set());
   };
 
   // Filter assets based on user preferences (default order)
@@ -567,6 +693,8 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
       pageStyles,
       layoutVariants,
       pageCounts,
+      textCardCounts,
+      slotOverrides,
     });
   }, [
     filteredAssets,
@@ -578,7 +706,94 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
     pageStyles,
     layoutVariants,
     pageCounts,
+    textCardCounts,
+    slotOverrides,
   ]);
+
+  // While a reorder drag is active, track the pointer over the whole
+  // window (not just the card it started on) and hit-test which card is
+  // underneath via elementFromPoint - this works correctly regardless of
+  // the preview's CSS zoom, since elementFromPoint uses actual rendered
+  // coordinates. Dropping one card onto another swaps them outright:
+  // same page swaps their slot assignment directly (the auto layout's
+  // aspect-ratio-driven grouping doesn't otherwise respect a specific
+  // drop position - see slotOverrides in pageLayout.ts); across pages,
+  // there's no shared slot list to swap within, so it swaps their
+  // positions in the master sequence instead, which changes which page
+  // each naturally belongs to.
+  useEffect(() => {
+    if (!reorderDragState) return;
+    const { draggedAssetId } = reorderDragState;
+
+    const cardUnderPointer = (clientX: number, clientY: number) => {
+      const el = document.elementFromPoint(clientX, clientY);
+      const card = el?.closest<HTMLElement>("[data-reorder-asset-id]");
+      return card?.dataset.reorderAssetId ?? null;
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      setDropTargetAssetId(cardUnderPointer(event.clientX, event.clientY));
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const targetAssetId = cardUnderPointer(event.clientX, event.clientY);
+
+      if (targetAssetId && targetAssetId !== draggedAssetId) {
+        let draggedPage: number | null = null;
+        let targetPage: number | null = null;
+        for (const page of pages) {
+          const ids = page.photos.map((p) => p.id);
+          if (ids.includes(draggedAssetId)) draggedPage = page.pageNumber;
+          if (ids.includes(targetAssetId)) targetPage = page.pageNumber;
+        }
+
+        if (draggedPage !== null && targetPage !== null) {
+          if (draggedPage === targetPage) {
+            const order = pages
+              .find((p) => p.pageNumber === draggedPage)!
+              .photos.map((p) => p.id);
+            const di = order.indexOf(draggedAssetId);
+            const ti = order.indexOf(targetAssetId);
+            [order[di], order[ti]] = [order[ti], order[di]];
+            setSlotOverrides((prev) => new Map(prev).set(draggedPage!, order));
+          } else {
+            const currentOrder = filteredAssets.map((a) => a.id);
+            const i = currentOrder.indexOf(draggedAssetId);
+            const j = currentOrder.indexOf(targetAssetId);
+            [currentOrder[i], currentOrder[j]] = [
+              currentOrder[j],
+              currentOrder[i],
+            ];
+            setCustomOrdering(currentOrder);
+            // Stale now that each page's card membership has changed -
+            // let both pages fall back to a fresh auto tiling.
+            setSlotOverrides((prev) => {
+              const next = new Map(prev);
+              next.delete(draggedPage!);
+              next.delete(targetPage!);
+              return next;
+            });
+          }
+          setManuallyMovedIds((prev) => {
+            const next = new Set(prev);
+            next.add(draggedAssetId);
+            next.add(targetAssetId);
+            return next;
+          });
+        }
+      }
+
+      setReorderDragState(null);
+      setDropTargetAssetId(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [reorderDragState, pages, filteredAssets]);
 
   // Group page photos by logical page number - matches the numbering
   // already used for pageStyles/pageCaptions/the "Page X of Y" UI: in
@@ -658,6 +873,19 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
             </option>
           ))}
         </select>
+        <select
+          value={textCardCounts.get(logicalPageNumber) ?? 0}
+          onChange={(e) =>
+            handleSetTextCardCount(logicalPageNumber, Number(e.target.value))
+          }
+          className="px-1 py-1 text-xs border border-gray-300 rounded bg-white text-gray-600"
+          title="Turn some of this page's slots into text cards"
+        >
+          <option value="0">No text cards</option>
+          <option value="1">1 text card</option>
+          <option value="2">2 text cards</option>
+          <option value="3">3 text cards</option>
+        </select>
       </div>
     );
   };
@@ -672,7 +900,7 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
       .map((lp) => ({
         number: lp.number,
         descriptions: lp.photos
-          .map((p) => p.asset.exifInfo?.description)
+          .map((p) => p.asset?.exifInfo?.description)
           .filter((d): d is string => !!d && d.trim().length > 0),
       }))
       .filter((c) => c.descriptions.length > 0);
@@ -831,14 +1059,15 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
           )}
         </div>
 
-        <div className="space-y-2 w-full lg:w-auto">
+        <div className="space-y-3 w-full lg:w-auto">
           {/* 1. Page Setup */}
-          <div className="p-2 bg-gray-50 rounded border border-gray-300">
+          <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-              <h3 className="text-xs font-semibold text-gray-700 sm:w-28">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 sm:w-24">
+                <span className="w-2 h-2 rounded-full bg-blue-500" />
                 Page
               </h3>
-              <div className="flex flex-wrap items-center gap-2 sm:gap-1">
+              <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={
                     PAGE_FORMAT_PRESETS.find(
@@ -856,7 +1085,7 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                       setPageHeight(mmToPixels(preset.heightMm));
                     }
                   }}
-                  className="px-1 py-0.5 text-xs border border-gray-300 rounded"
+                  className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   title="Quick format - width/height stay editable below"
                 >
                   <option value="custom">Custom</option>
@@ -866,8 +1095,8 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                     </option>
                   ))}
                 </select>
-                <div className="flex items-center gap-1">
-                  <label htmlFor="pageWidth" className="text-gray-600 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="pageWidth" className="text-gray-600 text-sm">
                     Width:
                   </label>
                   <input
@@ -883,16 +1112,16 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                     min={Math.round(pixelsToMm(1000))}
                     max={Math.round(pixelsToMm(10000))}
                     step="1"
-                    className={`px-1 py-0.5 w-16 text-xs border rounded ${
+                    className={`px-2 py-1.5 w-[4.5rem] text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                       isPageWidthValid
                         ? "border-gray-300"
                         : "border-red-500 bg-red-50"
                     }`}
                   />
-                  <span className="text-xs text-gray-500">mm</span>
+                  <span className="text-xs text-gray-400">mm</span>
                 </div>
-                <div className="flex items-center gap-1">
-                  <label htmlFor="pageHeight" className="text-gray-600 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="pageHeight" className="text-gray-600 text-sm">
                     Height:
                   </label>
                   <input
@@ -908,42 +1137,41 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                     min={Math.round(pixelsToMm(1000))}
                     max={Math.round(pixelsToMm(10000))}
                     step="1"
-                    className={`px-1 py-0.5 w-16 text-xs border rounded ${
+                    className={`px-2 py-1.5 w-[4.5rem] text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                       isPageHeightValid
                         ? "border-gray-300"
                         : "border-red-500 bg-red-50"
                     }`}
                   />
-                  <span className="text-xs text-gray-500">mm</span>
+                  <span className="text-xs text-gray-400">mm</span>
                 </div>
-                <div className="flex items-center gap-1">
+                <label
+                  htmlFor="combinePages"
+                  className="flex items-center gap-1.5 cursor-pointer"
+                >
                   <input
                     type="checkbox"
                     id="combinePages"
                     checked={combinePages}
                     onChange={(e) => setCombinePages(e.target.checked)}
-                    className="h-3 w-3"
+                    className="h-4 w-4 accent-blue-600 rounded"
                   />
-                  <label
-                    htmlFor="combinePages"
-                    className="text-xs text-gray-700"
-                  >
-                    Combine Pages
-                  </label>
-                </div>
+                  <span className="text-sm text-gray-700">Combine Pages</span>
+                </label>
               </div>
             </div>
           </div>
 
           {/* 2. Layout */}
-          <div className="p-2 bg-gray-50 rounded border border-gray-300">
+          <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-              <h3 className="text-xs font-semibold text-gray-700 sm:w-28">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 sm:w-24">
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
                 Layout
               </h3>
-              <div className="flex flex-wrap items-center gap-2 sm:gap-1">
-                <div className="flex items-center gap-1">
-                  <label htmlFor="margin" className="text-gray-600 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="margin" className="text-gray-600 text-sm">
                     Margin:
                   </label>
                   <input
@@ -959,16 +1187,16 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                     min="0"
                     max={Math.round(pixelsToMm(pageWidth) / 2)}
                     step="1"
-                    className={`px-1 py-0.5 w-14 text-xs border rounded ${
+                    className={`px-2 py-1.5 w-16 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
                       isMarginValid
                         ? "border-gray-300"
                         : "border-red-500 bg-red-50"
                     }`}
                   />
-                  <span className="text-xs text-gray-500">mm</span>
+                  <span className="text-xs text-gray-400">mm</span>
                 </div>
-                <div className="flex items-center gap-1">
-                  <label htmlFor="spacing" className="text-gray-600 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="spacing" className="text-gray-600 text-sm">
                     Spacing:
                   </label>
                   <input
@@ -984,76 +1212,74 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                     min="0"
                     max={Math.round(pixelsToMm(100))}
                     step="1"
-                    className={`px-1 py-0.5 w-12 text-xs border rounded ${
+                    className={`px-2 py-1.5 w-16 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
                       isSpacingValid
                         ? "border-gray-300"
                         : "border-red-500 bg-red-50"
                     }`}
                   />
-                  <span className="text-xs text-gray-500">mm</span>
+                  <span className="text-xs text-gray-400">mm</span>
                 </div>
               </div>
             </div>
           </div>
 
           {/* 3. Presentation */}
-          <div className="p-2 bg-gray-50 rounded border border-gray-300">
+          <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-              <h3 className="text-xs font-semibold text-gray-700 sm:w-28">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 sm:w-24">
+                <span className="w-2 h-2 rounded-full bg-gray-400" />
                 Presentation
               </h3>
-              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <label
+                  htmlFor="filterVideos"
+                  className="flex items-center gap-1.5 cursor-pointer"
+                >
                   <input
                     type="checkbox"
                     id="filterVideos"
                     checked={filterVideos}
                     onChange={(e) => setFilterVideos(e.target.checked)}
-                    className="h-3 w-3"
+                    className="h-4 w-4 accent-blue-600 rounded"
                   />
-                  <label
-                    htmlFor="filterVideos"
-                    className="text-xs text-gray-700"
-                  >
-                    Exclude Videos
-                  </label>
-                </div>
-                <div className="flex items-center gap-1">
+                  <span className="text-sm text-gray-700">Exclude Videos</span>
+                </label>
+                <label
+                  htmlFor="showDates"
+                  className="flex items-center gap-1.5 cursor-pointer"
+                >
                   <input
                     type="checkbox"
                     id="showDates"
                     checked={showDates}
                     onChange={(e) => setShowDates(e.target.checked)}
-                    className="h-3 w-3"
+                    className="h-4 w-4 accent-blue-600 rounded"
                   />
-                  <label htmlFor="showDates" className="text-xs text-gray-700">
-                    Show Dates
-                  </label>
-                </div>
-                <div className="flex items-center gap-1">
+                  <span className="text-sm text-gray-700">Show Dates</span>
+                </label>
+                <label
+                  htmlFor="showCaptions"
+                  className="flex items-center gap-1.5 cursor-pointer"
+                >
                   <input
                     type="checkbox"
                     id="showCaptions"
                     checked={showCaptions}
                     onChange={(e) => setShowCaptions(e.target.checked)}
-                    className="h-3 w-3"
+                    className="h-4 w-4 accent-purple-600 rounded"
                   />
-                  <label
-                    htmlFor="showCaptions"
-                    className="text-xs text-gray-700"
-                  >
-                    Page Captions
-                  </label>
-                </div>
-                <div className="flex items-center gap-1">
-                  <label htmlFor="fontSize" className="text-gray-600 text-xs">
+                  <span className="text-sm text-gray-700">Page Captions</span>
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="fontSize" className="text-gray-600 text-sm">
                     Font Size:
                   </label>
                   <select
                     id="fontSize"
                     value={fontSize}
                     onChange={(e) => setFontSize(Number(e.target.value))}
-                    className="px-1 py-0.5 text-xs border border-gray-300 rounded"
+                    className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="8">8 pt</option>
                     <option value="9">9 pt</option>
@@ -1074,14 +1300,15 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
 
           {/* 4. Customizations (only shown when there are any) */}
           {customOrdering !== null && (
-            <div className="p-2 bg-gray-50 rounded border border-gray-300">
+            <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                <h3 className="text-xs font-semibold text-gray-700 sm:w-28">
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 sm:w-24">
+                  <span className="w-2 h-2 rounded-full bg-green-500" />
                   Customizations
                 </h3>
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <div className="flex items-center gap-2">
-                    <span className="flex items-center gap-1 text-xs text-gray-600">
+                    <span className="flex items-center gap-1 text-sm text-gray-600">
                       <span className="w-2 h-2 bg-green-500 rounded-full" />
                       Custom order
                     </span>
@@ -1208,19 +1435,101 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                       })}
 
                     {pageData.photos.map((photoBox) => {
+                      const width = toPoints(photoBox.width);
+                      const height = toPoints(photoBox.height);
+                      const frameInset = Math.max(4, width * 0.035);
+                      const tilt = photoTiltDeg(photoBox.id);
+                      const tape = tapeStyle(photoBox.id);
+                      const tapeWidth = width * 0.22;
+
+                      // Text card - no backing photo, an editable note
+                      // mounted the same way as a photo card.
+                      if (!photoBox.asset) {
+                        return (
+                          <View
+                            key={photoBox.id}
+                            style={{
+                              position: "absolute",
+                              left: toPoints(photoBox.x),
+                              top: toPoints(photoBox.y),
+                              width,
+                              height,
+                            }}
+                          >
+                            <View
+                              style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width,
+                                height,
+                                transform: `rotate(${tilt}deg) scale(0.93)`,
+                              }}
+                            >
+                              <View
+                                style={{
+                                  position: "absolute",
+                                  top: 4,
+                                  left: 3,
+                                  width,
+                                  height,
+                                  backgroundColor: SCRAPBOOK.shadow,
+                                }}
+                              />
+                              <View
+                                style={{
+                                  position: "absolute",
+                                  top: 0,
+                                  left: 0,
+                                  width,
+                                  height,
+                                  backgroundColor: SCRAPBOOK.mat,
+                                  padding: frameInset * 2,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    fontFamily: "Caveat",
+                                    fontWeight: 500,
+                                    fontSize: fontSize * 1.5,
+                                    color: SCRAPBOOK.ink,
+                                    textAlign: "center",
+                                  }}
+                                >
+                                  {textCardContents.get(photoBox.id) || ""}
+                                </Text>
+                              </View>
+                              <View
+                                style={{
+                                  position: "absolute",
+                                  top: -frameInset * 0.5,
+                                  left: (width - tapeWidth) / 2,
+                                  width: tapeWidth,
+                                  height: frameInset * 1.6,
+                                  backgroundColor: tape.color,
+                                  opacity: 0.8,
+                                  transform: `rotate(${tape.tiltDeg}deg)`,
+                                }}
+                              />
+                            </View>
+                          </View>
+                        );
+                      }
+
+                      const asset = photoBox.asset;
                       // Full original resolution for print quality (the
                       // web preview below uses the much lighter "preview"
                       // thumbnail instead - this only matters for the PDF).
                       // Requires the Immich API key to have the
                       // asset.download permission.
-                      const imageUrl = `${immichConfig.baseUrl}/assets/${photoBox.asset.id}/original?apiKey=${immichConfig.apiKey}`;
-                      const width = toPoints(photoBox.width);
-                      const height = toPoints(photoBox.height);
-                      const frameInset = Math.max(4, width * 0.035);
+                      const imageUrl = `${immichConfig.baseUrl}/assets/${asset.id}/original?apiKey=${immichConfig.apiKey}`;
                       const dateStripHeight = showDates
                         ? fontSize * 1.6
                         : 0;
-                      const cardCaption = cardCaptions.get(photoBox.asset.id);
+                      const cardCaption = cardCaptions.get(asset.id);
                       // Only cards that actually have a caption reserve the
                       // extra strip - an empty card keeps its full image.
                       const captionStripHeight = cardCaption
@@ -1228,13 +1537,10 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                         : 0;
                       const bottomStripHeight =
                         dateStripHeight + captionStripHeight;
-                      const tilt = photoTiltDeg(photoBox.asset.id);
-                      const tape = tapeStyle(photoBox.asset.id);
-                      const tapeWidth = width * 0.22;
 
                       return (
                         <View
-                          key={photoBox.asset.id}
+                          key={photoBox.id}
                           style={{
                             position: "absolute",
                             left: toPoints(photoBox.x),
@@ -1312,7 +1618,7 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                                   </Text>
                                 </View>
                               )}
-                              {showDates && photoBox.asset.fileCreatedAt && (
+                              {showDates && asset.fileCreatedAt && (
                                 <View
                                   style={{
                                     position: "absolute",
@@ -1334,7 +1640,7 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                                     }}
                                   >
                                     {new Date(
-                                      photoBox.asset.fileCreatedAt,
+                                      asset.fileCreatedAt,
                                     ).toLocaleDateString(undefined, {
                                       year: "numeric",
                                       month: "short",
@@ -1431,22 +1737,20 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                   </div>
                 )}
 
-                {/* Page container - rendered at its true (unscaled) size,
-                    then visually scaled down to fit the preview column via
-                    the clipping wrapper below, so every absolute-positioned
+                {/* Page container - laid out at its true (unscaled) size,
+                    then shrunk to fit the preview column with CSS `zoom`
+                    (not `transform: scale`) so every absolute-positioned
                     child (captions, photos) keeps using displayWidth-based
-                    coordinates unchanged. */}
+                    coordinates unchanged. `zoom` actually resizes the box
+                    in layout, unlike `transform`, whose CSS transform on an
+                    ancestor breaks native HTML5 drag-and-drop for photo
+                    reordering in Chromium. */}
                 <div
-                  className="mx-auto overflow-hidden"
-                  style={{ width: `${scaledWidth}px`, height: `${scaledHeight}px` }}
-                >
-                <div
-                  className="relative bg-white shadow-lg border border-gray-200"
+                  className="mx-auto relative bg-white shadow-lg border border-gray-200"
                   style={{
                     width: `${displayWidth}px`,
                     height: `${displayHeight}px`,
-                    transform: `scale(${scale})`,
-                    transformOrigin: "top left",
+                    zoom: scale,
                   }}
                 >
                   {/* Page break indicator for combined pages */}
@@ -1527,28 +1831,109 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
 
                   {/* Photos */}
                   {page.photos.map((photoBox) => {
-                    const imageUrl = `${immichConfig.baseUrl}/assets/${photoBox.asset.id}/thumbnail?size=preview&apiKey=${immichConfig.apiKey}`;
-
-                    // Find global index in filtered assets for drag & drop
-                    const globalIndex = filteredAssets.findIndex(
-                      (a) => a.id === photoBox.asset.id,
-                    );
-                    const isBeingDragged =
-                      reorderDragState?.draggedAssetId === photoBox.asset.id;
-                    const isDropTarget = dropTargetIndex === globalIndex;
-
-                    // Check if this asset has been reordered (compare to default filtered order)
-                    const defaultIndex = defaultFilteredAssets.findIndex(
-                      (a) => a.id === photoBox.asset.id,
-                    );
-                    const isReordered =
-                      customOrdering !== null && globalIndex !== defaultIndex;
-
                     const containerWidth = toPoints(photoBox.width);
                     const containerHeight = toPoints(photoBox.height);
                     const frameInset = Math.max(6, containerWidth * 0.035);
+                    const tilt = photoTiltDeg(photoBox.id);
+                    const tape = tapeStyle(photoBox.id);
+                    const tapeWidth = containerWidth * 0.22;
+
+                    // Text card - no backing photo, an editable note
+                    // mounted the same way as a photo card.
+                    if (!photoBox.asset) {
+                      return (
+                        <div
+                          key={photoBox.id}
+                          className="absolute"
+                          style={{
+                            left: `${toPoints(photoBox.x)}px`,
+                            top: `${toPoints(photoBox.y)}px`,
+                            width: `${containerWidth}px`,
+                            height: `${containerHeight}px`,
+                          }}
+                        >
+                          <div
+                            className="absolute inset-0"
+                            style={{
+                              transform: `rotate(${tilt}deg) scale(0.93)`,
+                              boxShadow: `2px 5px 10px ${SCRAPBOOK.shadow}`,
+                              backgroundColor: SCRAPBOOK.mat,
+                            }}
+                          >
+                            {/* Flex wrapper centers the (auto-growing)
+                                textarea both horizontally and vertically -
+                                a native <textarea> has no way to vertically
+                                center its own text, so the box itself has
+                                to hug its content and be centered instead. */}
+                            <div
+                              className="absolute flex items-center justify-center"
+                              style={{
+                                inset: frameInset * 2,
+                              }}
+                            >
+                              <textarea
+                                ref={(el) => {
+                                  if (!el) return;
+                                  el.style.height = "auto";
+                                  el.style.height = `${Math.min(
+                                    el.scrollHeight,
+                                    containerHeight - frameInset * 4,
+                                  )}px`;
+                                }}
+                                value={textCardContents.get(photoBox.id) || ""}
+                                onChange={(e) => {
+                                  setTextCardContents((prev) => {
+                                    const next = new Map(prev);
+                                    if (e.target.value) {
+                                      next.set(photoBox.id, e.target.value);
+                                    } else {
+                                      next.delete(photoBox.id);
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                placeholder="Write something..."
+                                className="w-full bg-transparent text-center resize-none overflow-hidden focus:outline-none focus:bg-white/70 rounded placeholder:text-gray-300"
+                                style={{
+                                  maxHeight: `${containerHeight - frameInset * 4}px`,
+                                  fontFamily: "Caveat",
+                                  fontWeight: 500,
+                                  fontSize: `${fontSize * 1.5}px`,
+                                  color: SCRAPBOOK.ink,
+                                  lineHeight: 1.2,
+                                }}
+                              />
+                            </div>
+                            <div
+                              className="absolute"
+                              style={{
+                                top: -frameInset * 0.5,
+                                left: `calc(50% - ${tapeWidth / 2}px)`,
+                                width: tapeWidth,
+                                height: frameInset * 1.6,
+                                backgroundColor: tape.color,
+                                opacity: 0.8,
+                                transform: `rotate(${tape.tiltDeg}deg)`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const asset = photoBox.asset;
+                    const imageUrl = `${immichConfig.baseUrl}/assets/${asset.id}/thumbnail?size=preview&apiKey=${immichConfig.apiKey}`;
+
+                    const isBeingDragged =
+                      reorderDragState?.draggedAssetId === asset.id;
+                    const isDropTarget = dropTargetAssetId === asset.id;
+                    const isReordered = manuallyMovedIds.has(asset.id);
+
                     const dateStripHeight = showDates ? fontSize * 1.6 : 0;
-                    const cardCaption = cardCaptions.get(photoBox.asset.id) || "";
+                    const cardCaption = cardCaptions.get(asset.id) || "";
                     const hasCardCaption = cardCaption.length > 0;
                     // Only cards that actually have a caption reserve the
                     // extra strip - an empty card keeps its full image, with
@@ -1558,33 +1943,22 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                       : 0;
                     const bottomStripHeight =
                       dateStripHeight + captionStripHeight;
-                    const tilt = photoTiltDeg(photoBox.asset.id);
-                    const tape = tapeStyle(photoBox.asset.id);
-                    const tapeWidth = containerWidth * 0.22;
 
                     return (
                       <div
-                        key={photoBox.asset.id}
+                        key={photoBox.id}
+                        data-reorder-asset-id={asset.id}
                         className={`absolute group cursor-move ${isBeingDragged ? "opacity-50" : ""}`}
                         style={{
                           left: `${toPoints(photoBox.x)}px`,
                           top: `${toPoints(photoBox.y)}px`,
                           width: `${containerWidth}px`,
                           height: `${containerHeight}px`,
+                          touchAction: "none",
                         }}
-                        draggable
-                        onDragStart={(e) =>
-                          handleReorderDragStart(
-                            photoBox.asset.id,
-                            globalIndex,
-                            e,
-                          )
+                        onPointerDown={(e) =>
+                          handleReorderPointerDown(asset.id, e)
                         }
-                        onDragOver={(e) =>
-                          handleReorderDragOver(globalIndex, e)
-                        }
-                        onDragEnd={handleReorderDragEnd}
-                        onDrop={(e) => handleReorderDrop(globalIndex, e)}
                       >
                         {/* Drop indicator - shown on left edge when hovering during drag */}
                         {isDropTarget && reorderDragState && (
@@ -1611,7 +1985,7 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                           >
                             <img
                               src={imageUrl}
-                              alt={photoBox.asset.originalFileName}
+                              alt={asset.originalFileName}
                               className="object-contain w-full h-full"
                               loading="lazy"
                             />
@@ -1631,20 +2005,27 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                                 setCardCaptions((prev) => {
                                   const next = new Map(prev);
                                   if (e.target.value) {
-                                    next.set(photoBox.asset.id, e.target.value);
+                                    next.set(asset.id, e.target.value);
                                   } else {
-                                    next.delete(photoBox.asset.id);
+                                    next.delete(asset.id);
                                   }
                                   return next;
                                 });
                               }}
                               onClick={(e) => e.stopPropagation()}
                               onMouseDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
                               placeholder="+ caption"
+                              // When empty, this sits invisible over part of
+                              // the image - without pointer-events-none it
+                              // silently swallows the mousedown that should
+                              // start a drag-to-reorder, making dragging
+                              // "work sometimes" depending on where the user
+                              // grabs the card.
                               className={`absolute text-center focus:outline-none rounded transition-opacity ${
                                 hasCardCaption
                                   ? "bg-transparent focus:bg-white/70"
-                                  : "opacity-0 group-hover:opacity-70 focus:opacity-100 bg-white/80"
+                                  : "opacity-0 pointer-events-none group-hover:opacity-70 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto bg-white/80"
                               }`}
                               style={{
                                 left: frameInset,
@@ -1661,7 +2042,7 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                               }}
                             />
                           }
-                          {showDates && photoBox.asset.fileCreatedAt && (
+                          {showDates && asset.fileCreatedAt && (
                             <div
                               className="absolute flex items-end justify-center text-center"
                               style={{
@@ -1677,7 +2058,7 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                               }}
                             >
                               {new Date(
-                                photoBox.asset.fileCreatedAt,
+                                asset.fileCreatedAt,
                               ).toLocaleDateString(undefined, {
                                 year: "numeric",
                                 month: "short",
@@ -1709,28 +2090,13 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                         )}
 
                         {/* Reset button - shown on hover for reordered images */}
-                        {isReordered && customOrdering && (
+                        {isReordered && (
                           <div
                             className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded shadow-lg text-xs font-medium"
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              // Reset custom ordering by rebuilding the array without this asset
-                              // This moves the asset back to its default position
-                              const assetId = photoBox.asset.id;
-                              const defaultIndex = defaultFilteredAssets.findIndex(
-                                (a) => a.id === assetId,
-                              );
-
-                              // Remove asset from custom ordering
-                              const newOrdering = customOrdering.filter(
-                                (id) => id !== assetId,
-                              );
-
-                              // Insert it back at its default position
-                              newOrdering.splice(defaultIndex, 0, assetId);
-
-                              setCustomOrdering(newOrdering);
+                              handleResetCard(asset.id);
                             }}
                             title="Reset order"
                           >
@@ -1740,7 +2106,6 @@ function PhotoGrid({ immichConfig, album, onBack }: PhotoGridProps) {
                       </div>
                     );
                   })}
-                </div>
                 </div>
               </div>
             );

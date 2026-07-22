@@ -7,6 +7,22 @@ interface AlbumSelectorProps {
   onSelectAlbum: (album: AlbumResponseDto) => void;
 }
 
+// Photobooks are stored server-side keyed by album id (see backend/main.py)
+// and never automatically expire, so albums deleted in Immich would
+// otherwise leave orphaned data behind forever.
+async function cleanupOrphanedPhotobooks(currentAlbumIds: Set<string>) {
+  const res = await fetch("/photobooks");
+  if (!res.ok) return;
+  const { albumIds } = (await res.json()) as { albumIds: string[] };
+
+  const orphans = albumIds.filter((id) => !currentAlbumIds.has(id));
+  await Promise.all(
+    orphans.map((id) =>
+      fetch(`/photobooks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    ),
+  );
+}
+
 function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
   const [albums, setAlbums] = useState<AlbumResponseDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,6 +61,13 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
       });
 
       setAlbums(uniqueAlbums);
+
+      // Prune any stored photobook whose Immich album no longer exists
+      // (deleted, or this user lost access to it) - fire-and-forget, not
+      // worth failing the album list over.
+      cleanupOrphanedPhotobooks(new Set(uniqueAlbums.map((a) => a.id))).catch(
+        (err) => console.error("Failed to clean up orphaned photobooks:", err),
+      );
     } catch (err) {
       const error = err as any;
       let errorMessage = error.message || "Failed to load albums";
