@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  immich-book:
+    build:
+      context: .
+      args:
+        - VITE_IMMICH_PROXY_TARGET=https://photos.caronboulme.fr
+    container_name: immich-book-frontend
+    restart: unless-stopped
+    environment:
+      - IMMICH_API_KEY=${IMMICH_API_KEY:?Set IMMICH_API_KEY in .env}
+    networks:
+      - ansible
+
+networks:
+  ansible:
+    external: true

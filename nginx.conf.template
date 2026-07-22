@@ -1,0 +1,51 @@
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+    # SPA
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy to Immich, same-origin so no CORS needed.
+    # The API key is injected here server-side (IMMICH_API_KEY env var,
+    # substituted by the nginx entrypoint) and overrides whatever the
+    # client sent - the key never needs to reach the browser/JS bundle.
+    location /api/ {
+        proxy_pass http://immich_server:2283/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header x-api-key "${IMMICH_API_KEY}";
+        client_max_body_size 100M;
+    }
+
+    # Proxy to the local LLM (thebrain, OpenAI-compatible llama.cpp server)
+    # for page caption generation. Reached directly on the internal Docker
+    # network - no public exposure, no auth needed (same reasoning as the
+    # Immich proxy above: the edge is already gated by Voight-Kampff).
+    location /llm/ {
+        proxy_pass http://thebrain:8000/;
+        proxy_set_header Host $host;
+        proxy_read_timeout 120s;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|wasm)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    location /health {
+        access_log off;
+        return 200 "OK\n";
+        add_header Content-Type text/plain;
+    }
+}
