@@ -13,9 +13,6 @@ import {
   Text,
   StyleSheet,
   Font,
-  Svg,
-  Rect,
-  Circle,
 } from "@react-pdf/renderer";
 import {
   calculatePageLayout,
@@ -199,6 +196,15 @@ function pageBackgroundCss(bg: PageBackground): React.CSSProperties {
 // painted as an explicit Svg layer behind the page content instead. Dots
 // use a coarser spacing than the web CSS version to keep the per-page
 // element count reasonable across a whole book.
+// Deliberately built with plain <View> (backgroundColor + borderRadius
+// for circles) rather than <Svg>/<Rect>/<Circle>: react-pdf appears to
+// run vector (Svg) drawing through a different path than regular
+// View/Text content, and in testing that made a textured background
+// paint over everything else on the page - including captions -
+// regardless of where it sat in the JSX tree. A page-doubling bug
+// (content "overflowing" its Svg box) was also traced to the same Svg
+// usage. Plain Views share the exact same layout/paint pipeline as the
+// rest of the page, which sidesteps both issues.
 function PdfPageBackground({
   background,
   width,
@@ -214,91 +220,158 @@ function PdfPageBackground({
   const dotSpacing = 26;
   const lineSpacing = 30;
 
+  const circle = (
+    key: string | number,
+    cx: number,
+    cy: number,
+    r: number,
+    color: string,
+    opacity: number,
+  ) => (
+    <View
+      key={key}
+      style={{
+        position: "absolute",
+        left: cx - r,
+        top: cy - r,
+        width: r * 2,
+        height: r * 2,
+        borderRadius: r,
+        backgroundColor: color,
+        opacity,
+      }}
+    />
+  );
+
+  // Approximates the web version's soft radial-gradient blob (full color
+  // fading to transparent at the edge) with concentric rings of
+  // increasing opacity toward the center - a single flat circle (the
+  // PDF's only other option, since Svg gradients are avoided here) reads
+  // as a hard, flat disc instead of a soft paper-grain blob.
+  const softBlob = (
+    keyPrefix: string | number,
+    cx: number,
+    cy: number,
+    r: number,
+    color: string,
+    opacity: number,
+  ) => {
+    const rings = 5;
+    return Array.from({ length: rings }, (_, i) => {
+      const t = (i + 1) / rings;
+      return circle(
+        `${keyPrefix}-${i}`,
+        cx,
+        cy,
+        r * t,
+        color,
+        (opacity / rings) * (1.6 - t),
+      );
+    });
+  };
+
   return (
-    <Svg
-      style={{ position: "absolute", top: 0, left: 0, width, height }}
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
+    <View
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width,
+        height,
+        backgroundColor: preset.base,
+        overflow: "hidden",
+      }}
     >
-      <Rect x={0} y={0} width={width} height={height} fill={preset.base} />
       {preset.texture === "blob" &&
-        PAGE_BACKGROUND_BLOBS.map((b, i) => (
-          <Circle
-            key={i}
-            cx={b.cx * width}
-            cy={b.cy * height}
-            r={b.r * Math.max(width, height)}
-            fill={preset.accent}
-            fillOpacity={b.opacity}
-          />
-        ))}
+        PAGE_BACKGROUND_BLOBS.map((b, i) => {
+          const cx = b.cx * width;
+          const cy = b.cy * height;
+          const maxR = Math.min(cx, width - cx, cy, height - cy);
+          const r = Math.max(
+            0,
+            Math.min(b.r * Math.max(width, height), maxR),
+          );
+          return softBlob(i, cx, cy, r, preset.accent, b.opacity);
+        })}
       {preset.texture === "dots" &&
         Array.from({ length: Math.ceil(height / dotSpacing) }).flatMap(
           (_, row) =>
             Array.from({ length: Math.ceil(width / dotSpacing) }).map(
-              (_, col) => (
-                <Circle
-                  key={`${row}-${col}`}
-                  cx={dotSpacing / 2 + col * dotSpacing}
-                  cy={dotSpacing / 2 + row * dotSpacing}
-                  r={0.7}
-                  fill={preset.accent}
-                  fillOpacity={0.35}
-                />
-              ),
+              (_, col) =>
+                circle(
+                  `${row}-${col}`,
+                  dotSpacing / 2 + col * dotSpacing,
+                  dotSpacing / 2 + row * dotSpacing,
+                  0.7,
+                  preset.accent,
+                  0.35,
+                ),
             ),
         )}
       {preset.texture === "lines" &&
-        Array.from({ length: Math.ceil(height / lineSpacing) }).map((_, row) => (
-          <Rect
-            key={row}
-            x={0}
-            y={row * lineSpacing}
-            width={width}
-            height={0.75}
-            fill={preset.accent}
-            fillOpacity={0.5}
-          />
-        ))}
+        Array.from({ length: Math.ceil(height / lineSpacing) }).map(
+          (_, row) => (
+            <View
+              key={row}
+              style={{
+                position: "absolute",
+                left: 0,
+                top: row * lineSpacing,
+                width,
+                height: 0.75,
+                backgroundColor: preset.accent,
+                opacity: 0.5,
+              }}
+            />
+          ),
+        )}
       {preset.texture === "grid" && (
         <>
-          {Array.from({ length: Math.ceil(height / lineSpacing) }).map((_, row) => (
-            <Rect
-              key={`h${row}`}
-              x={0}
-              y={row * lineSpacing}
-              width={width}
-              height={0.6}
-              fill={preset.accent}
-              fillOpacity={0.5}
-            />
-          ))}
-          {Array.from({ length: Math.ceil(width / lineSpacing) }).map((_, col) => (
-            <Rect
-              key={`v${col}`}
-              x={col * lineSpacing}
-              y={0}
-              width={0.6}
-              height={height}
-              fill={preset.accent}
-              fillOpacity={0.5}
-            />
-          ))}
+          {Array.from({ length: Math.ceil(height / lineSpacing) }).map(
+            (_, row) => (
+              <View
+                key={`h${row}`}
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: row * lineSpacing,
+                  width,
+                  height: 0.6,
+                  backgroundColor: preset.accent,
+                  opacity: 0.5,
+                }}
+              />
+            ),
+          )}
+          {Array.from({ length: Math.ceil(width / lineSpacing) }).map(
+            (_, col) => (
+              <View
+                key={`v${col}`}
+                style={{
+                  position: "absolute",
+                  left: col * lineSpacing,
+                  top: 0,
+                  width: 0.6,
+                  height,
+                  backgroundColor: preset.accent,
+                  opacity: 0.5,
+                }}
+              />
+            ),
+          )}
         </>
       )}
       {preset.texture === "speckle" &&
-        PAGE_BACKGROUND_SPECKLES.map((sp, i) => (
-          <Circle
-            key={i}
-            cx={sp.x * width}
-            cy={sp.y * height}
-            r={sp.r}
-            fill={sp.color}
-            fillOpacity={0.55}
-          />
-        ))}
-    </Svg>
+        PAGE_BACKGROUND_SPECKLES.map((sp, i) => {
+          const cx = sp.x * width;
+          const cy = sp.y * height;
+          const r = Math.max(
+            0,
+            Math.min(sp.r, cx, width - cx, cy, height - cy),
+          );
+          return circle(i, cx, cy, r, sp.color, 0.55);
+        })}
+    </View>
   );
 }
 
@@ -313,6 +386,37 @@ function seededRandom(id: string, salt: number): number {
     hash |= 0;
   }
   return (((hash % 1000) + 1000) % 1000) / 1000;
+}
+
+// Plain Blob-backed photo image for the PDF, anchored at (top, left)
+// within its cell.
+function PdfPhotoImage({
+  src,
+  containerWidth,
+  containerHeight,
+  top,
+  left,
+}: {
+  src: Blob | undefined;
+  containerWidth: number;
+  containerHeight: number;
+  top: number;
+  left: number;
+}) {
+  if (!src) return null;
+  return (
+    <Image
+      src={src}
+      style={{
+        position: "absolute",
+        top,
+        left,
+        width: containerWidth,
+        height: containerHeight,
+        objectFit: "contain",
+      }}
+    />
+  );
 }
 
 function photoTiltDeg(assetId: string): number {
@@ -365,6 +469,37 @@ interface GlobalConfig {
   pageBackground: PageBackground;
 }
 
+type CoverLayout = "photo-title" | "full-bleed" | "text-only" | "patchwork";
+
+const COVER_LAYOUTS: { value: CoverLayout; label: string }[] = [
+  { value: "photo-title", label: "Photo & Title" },
+  { value: "full-bleed", label: "Full-bleed Photo" },
+  { value: "text-only", label: "Text Only" },
+  { value: "patchwork", label: "Patchwork" },
+];
+
+// "Patchwork" cover: a grid of small photos from across the whole album,
+// tiled edge to edge like a quilt, with the title on a card in the
+// middle. Column count is fixed; rows are derived from the page's own
+// aspect ratio so tiles come out roughly square regardless of page
+// format (A4 portrait vs square, say).
+const MOSAIC_COLS = 10;
+
+function mosaicRowsFor(pageWidth: number, pageHeight: number): number {
+  return Math.max(1, Math.round(MOSAIC_COLS * (pageHeight / pageWidth)));
+}
+
+// Evenly samples `count` items across the full list (wrapping/repeating
+// if there are fewer assets than grid cells) so the mosaic represents the
+// whole album's span rather than just its first N photos.
+function sampleEvenly<T>(items: T[], count: number): T[] {
+  if (items.length === 0) return [];
+  return Array.from(
+    { length: count },
+    (_, i) => items[Math.floor((i * items.length) / count) % items.length],
+  );
+}
+
 interface AlbumConfig extends GlobalConfig {
   // Customizations (album-specific only)
   customOrdering: string[] | null;
@@ -393,6 +528,17 @@ interface AlbumConfig extends GlobalConfig {
   // the two ids involved, unlike the old splice-based reorder it replaced
   // which could shift a neighboring card's index without moving it.
   manuallyMovedIds: string[];
+  // Front cover, rendered as an unnumbered page before page 1. Optional
+  // and off-by-default-when-unset isn't right here - some print services
+  // generate their own cover and don't want one in the submitted PDF, so
+  // this needs an explicit on/off rather than always including it.
+  showCover: boolean;
+  // Empty string falls back to the album's own name at render time.
+  coverTitle: string;
+  // Which photo to use on the cover - null falls back to the first photo
+  // in the book's current order.
+  coverAssetId: string | null;
+  coverLayout: CoverLayout;
 }
 
 const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
@@ -449,6 +595,10 @@ async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     textCardContents: {},
     slotOverrides: {},
     manuallyMovedIds: [],
+    showCover: true,
+    coverTitle: "",
+    coverAssetId: null,
+    coverLayout: "photo-title",
   };
 
   try {
@@ -498,6 +648,20 @@ async function saveAlbumConfig(albumId: string, config: AlbumConfig) {
 // Conversion: points = pixels * (72/300)
 const toPoints = (pixels: number) => pixels * (72 / 300);
 
+// How tall the page-caption band needs to be (in points) to comfortably
+// fit its text: react-pdf drops the text entirely if its box isn't
+// noticeably taller than the font size (confirmed by isolated testing -
+// a box only ~1.1x the font size renders nothing, ~1.6x is reliable).
+// Used both for the caption's own rendered height AND to compute the
+// content area's effective margin (see the `pages` useMemo) - without
+// the latter, photos are laid out right up to the nominal margin and
+// end up painted over a caption band that's actually taller than that.
+function pageCaptionBandHeightPt(fontSize: number, marginPx: number): number {
+  const captionFontSizePt = fontSize * 1.9;
+  const paddingPt = Math.max(4, toPoints(marginPx) * 0.15);
+  return Math.max(toPoints(marginPx), captionFontSizePt * 1.6 + paddingPt * 2);
+}
+
 // Static styles for the PDF
 const staticStyles = StyleSheet.create({
   page: {
@@ -509,6 +673,46 @@ const staticStyles = StyleSheet.create({
 // platforms, so the album name can be used directly.
 function sanitizeFileName(name: string): string {
   return name.replace(/[\\/:*?"<>|]+/g, " ").trim() || "photobook";
+}
+
+// Fetches each url with bounded concurrency (not Promise.all(urls.map))
+// - a large book can have several hundred photos, and firing that many
+// fetches at once overwhelms both the browser's per-origin connection
+// limit and Immich's on-demand image generation, causing scattered
+// failures. Individual failures are swallowed (logged, counted) rather
+// than aborting the whole batch, since a handful of missing photos is
+// far better than no PDF at all.
+async function fetchBlobsWithConcurrency(
+  items: { key: string; url: string }[],
+  concurrency: number,
+  onProgress: (done: number, total: number) => void,
+): Promise<{ blobs: Map<string, Blob>; failures: number }> {
+  const blobs = new Map<string, Blob>();
+  let done = 0;
+  let failures = 0;
+  let nextIndex = 0;
+  const worker = async () => {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      const { key, url } = items[i];
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        blobs.set(key, await res.blob());
+      } catch (e) {
+        console.error(`Failed to fetch ${key} (${url}):`, e);
+        failures++;
+      } finally {
+        done++;
+        onProgress(done, items.length);
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, worker),
+  );
+  return { blobs, failures };
 }
 
 // A small spinning flower (petals in the washi-tape palette) shown while
@@ -592,6 +796,10 @@ function PhotoGridEditor({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
@@ -703,6 +911,16 @@ function PhotoGridEditor({
   const [manuallyMovedIds, setManuallyMovedIds] = useState<Set<string>>(
     () => new Set(initialConfig.manuallyMovedIds),
   );
+  const [showCover, setShowCover] = useState(initialConfig.showCover);
+  const [coverTitle, setCoverTitle] = useState(
+    initialConfig.coverTitle || album.albumName,
+  );
+  const [coverAssetId, setCoverAssetId] = useState<string | null>(
+    initialConfig.coverAssetId,
+  );
+  const [coverLayout, setCoverLayout] = useState<CoverLayout>(
+    initialConfig.coverLayout,
+  );
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
   const [captionProgress, setCaptionProgress] = useState<{
     done: number;
@@ -773,6 +991,10 @@ function PhotoGridEditor({
       textCardContents: Object.fromEntries(textCardContents),
       slotOverrides: Object.fromEntries(slotOverrides),
       manuallyMovedIds: Array.from(manuallyMovedIds),
+      showCover,
+      coverTitle,
+      coverAssetId,
+      coverLayout,
     };
     saveAlbumConfig(album.id, config);
   }, [
@@ -792,6 +1014,10 @@ function PhotoGridEditor({
     pageCounts,
     pageCaptions,
     cardCaptions,
+    showCover,
+    coverTitle,
+    coverAssetId,
+    coverLayout,
     textCardCounts,
     textCardContents,
     slotOverrides,
@@ -951,12 +1177,44 @@ function PhotoGridEditor({
     return [...reordered, ...remaining];
   }, [defaultFilteredAssets, customOrdering]);
 
+  // Cover photo - explicit pick if the user made one, otherwise the
+  // book's first photo in its current order.
+  const coverAsset = useMemo(() => {
+    if (coverAssetId) {
+      const picked = filteredAssets.find((a) => a.id === coverAssetId);
+      if (picked) return picked;
+    }
+    return filteredAssets[0] ?? null;
+  }, [filteredAssets, coverAssetId]);
+
+  // Photos sampled for the "patchwork" cover layout - computed
+  // unconditionally (cheap) so it stays available for both the live
+  // preview and the PDF export's fetch list.
+  const mosaicRows = mosaicRowsFor(validPageWidth, validPageHeight);
+  const mosaicAssets = useMemo(
+    () => sampleEvenly(filteredAssets, MOSAIC_COLS * mosaicRows),
+    [filteredAssets, mosaicRows],
+  );
+
   // Calculate unified page layout - single source of truth!
+  // When page captions are on, the content area's margin needs to be at
+  // least as tall as the caption band itself (see
+  // pageCaptionBandHeightPt) - otherwise photos are positioned right up
+  // to the nominal margin and end up painted over a caption band that's
+  // actually taller than that (confirmed: this is exactly what made
+  // captions look "hidden behind photos").
+  const layoutMargin = showCaptions
+    ? Math.max(
+        validMargin,
+        pageCaptionBandHeightPt(fontSize, validMargin) * (300 / 72),
+      )
+    : validMargin;
+
   const pages = useMemo(() => {
     return calculatePageLayout(filteredAssets, {
       pageWidth: validPageWidth,
       pageHeight: validPageHeight,
-      margin: validMargin,
+      margin: layoutMargin,
       spacing: validSpacing,
       combinePages,
       layoutVariants,
@@ -966,7 +1224,7 @@ function PhotoGridEditor({
     });
   }, [
     filteredAssets,
-    validMargin,
+    layoutMargin,
     validSpacing,
     validPageWidth,
     validPageHeight,
@@ -1254,8 +1512,261 @@ function PhotoGridEditor({
     );
   }
 
-  const pdfDocument = (
+  // Builds the actual PDF document element from photo Blobs fetched
+  // ahead of time (see handleGeneratePdf) - react-pdf's own image
+  // fetching turned out to be unreliable on its own (photos randomly,
+  // but reproducibly, missing), so every photo is fetched ourselves with
+  // real error handling and handed to <Image> as a Blob instead of a URL.
+  const buildPdfDocument = (
+    imageBlobs: Map<string, Blob>,
+    mosaicBlobs: Map<string, Blob>,
+  ) => {
+    const coverPageWidth = toPoints(validPageWidth);
+    const coverPageHeight = toPoints(validPageHeight);
+    const coverImageBlob = coverAsset
+      ? imageBlobs.get(coverAsset.id)
+      : undefined;
+    const coverScrimHeight = coverPageHeight * 0.28;
+
+    return (
     <Document pageLayout={pageLayout}>
+      {showCover && (
+        <Page
+          size={{ width: coverPageWidth, height: coverPageHeight }}
+          style={{
+            ...staticStyles.page,
+            backgroundColor: PAGE_BACKGROUNDS[pageBackground].base,
+          }}
+        >
+          <PdfPageBackground
+            background={pageBackground}
+            width={coverPageWidth}
+            height={coverPageHeight}
+          />
+
+          {coverLayout === "text-only" && (
+            <View
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                paddingHorizontal: coverPageWidth * 0.1,
+              }}
+            >
+              <View
+                style={{
+                  width: coverPageWidth * 0.3,
+                  height: 1,
+                  backgroundColor: SCRAPBOOK.ink,
+                  opacity: 0.3,
+                  marginBottom: 16,
+                }}
+              />
+              <Text
+                style={{
+                  fontFamily: "Caveat",
+                  fontWeight: 600,
+                  fontSize: coverPageWidth * 0.09,
+                  color: SCRAPBOOK.ink,
+                  textAlign: "center",
+                }}
+              >
+                {coverTitle || album.albumName}
+              </Text>
+              <View
+                style={{
+                  width: coverPageWidth * 0.3,
+                  height: 1,
+                  backgroundColor: SCRAPBOOK.ink,
+                  opacity: 0.3,
+                  marginTop: 16,
+                }}
+              />
+            </View>
+          )}
+
+          {coverLayout === "photo-title" && coverImageBlob && (
+            <>
+              <View
+                style={{
+                  position: "absolute",
+                  top: coverPageHeight * 0.08,
+                  left: coverPageWidth * 0.08,
+                  width: coverPageWidth * 0.84,
+                  height: coverPageHeight * 0.68,
+                  backgroundColor: SCRAPBOOK.mat,
+                }}
+              >
+                <PdfPhotoImage
+                  src={coverImageBlob}
+                  top={coverPageWidth * 0.02}
+                  left={coverPageWidth * 0.02}
+                  containerWidth={coverPageWidth * 0.8}
+                  containerHeight={coverPageHeight * 0.64}
+                />
+              </View>
+              <View
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: coverPageHeight * 0.2,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: "Caveat",
+                    fontWeight: 600,
+                    fontSize: coverPageWidth * 0.055,
+                    color: SCRAPBOOK.ink,
+                    textAlign: "center",
+                  }}
+                >
+                  {coverTitle || album.albumName}
+                </Text>
+              </View>
+            </>
+          )}
+
+          {coverLayout === "full-bleed" && coverImageBlob && (
+            <>
+              <Image
+                src={coverImageBlob}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: coverPageWidth,
+                  height: coverPageHeight,
+                  objectFit: "cover",
+                }}
+              />
+              {/* Approximates a top-to-bottom fade with stacked bands
+                  rather than an Svg gradient - see PdfPageBackground's
+                  comment for why Svg is avoided here. */}
+              <View
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  bottom: 0,
+                  width: coverPageWidth,
+                  height: coverScrimHeight,
+                }}
+              >
+                {Array.from({ length: 10 }, (_, i) => (
+                  <View
+                    key={i}
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: (coverScrimHeight * i) / 10,
+                      width: coverPageWidth,
+                      height: coverScrimHeight / 10 + 0.5,
+                      backgroundColor: "#000000",
+                      opacity: (0.55 * (i + 1)) / 10,
+                    }}
+                  />
+                ))}
+              </View>
+              <View
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: coverScrimHeight,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: "Caveat",
+                    fontWeight: 600,
+                    fontSize: coverPageWidth * 0.06,
+                    color: "#FFFFFF",
+                    textAlign: "center",
+                  }}
+                >
+                  {coverTitle || album.albumName}
+                </Text>
+              </View>
+            </>
+          )}
+
+          {coverLayout === "patchwork" && (
+            <>
+              {mosaicAssets.map((a, i) => {
+                const tileBlob = mosaicBlobs.get(a.id);
+                if (!tileBlob) return null;
+                const tileW = coverPageWidth / MOSAIC_COLS;
+                const tileH = coverPageHeight / mosaicRows;
+                const col = i % MOSAIC_COLS;
+                const row = Math.floor(i / MOSAIC_COLS);
+                return (
+                  <Image
+                    key={i}
+                    src={tileBlob}
+                    style={{
+                      position: "absolute",
+                      left: col * tileW,
+                      top: row * tileH,
+                      // Slightly oversized to paper over hairline gaps
+                      // between tiles from rounding.
+                      width: tileW + 0.75,
+                      height: tileH + 0.75,
+                      objectFit: "cover",
+                    }}
+                  />
+                );
+              })}
+              <View
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <View
+                  style={{
+                    backgroundColor: "rgba(255,254,252,0.92)",
+                    paddingHorizontal: coverPageWidth * 0.06,
+                    paddingVertical: coverPageHeight * 0.03,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontFamily: "Caveat",
+                      fontWeight: 600,
+                      fontSize: coverPageWidth * 0.06,
+                      color: SCRAPBOOK.ink,
+                      textAlign: "center",
+                    }}
+                  >
+                    {coverTitle || album.albumName}
+                  </Text>
+                </View>
+              </View>
+            </>
+          )}
+        </Page>
+      )}
+
       {pages.map((pageData) => {
         // FIXME: pdfkit (internal of react-pdf) uses 72dpi internally and we downscale everything here;
         // instead we should produce a high-quality 300 dpi pdf
@@ -1315,21 +1826,20 @@ function PhotoGridEditor({
               ).map((band) => {
                 const caption = pageCaptions.get(band.key);
                 if (!caption) return null;
-                const bandHeight = toPoints(validMargin);
-                // Text size is the priority; padding just fills
-                // whatever room is left around it, so a small page
-                // margin shrinks the padding rather than crushing
-                // the caption down to an unreadable size.
-                const captionFontSize = Math.min(
-                  fontSize * 1.9,
-                  bandHeight * 0.7,
-                );
+                // Text size is the priority: the chosen font size is
+                // always honored, and the band grows to fit it if the
+                // page margin alone isn't tall enough - previously this
+                // was backwards (a Math.min capped the font size to the
+                // margin), which silently froze the caption at the same
+                // size for most of the font size range.
+                const captionFontSize = fontSize * 1.9;
                 const captionPaddingVertical = Math.max(
                   4,
-                  Math.min(
-                    (bandHeight - captionFontSize) * 0.4,
-                    bandHeight * 0.25,
-                  ),
+                  toPoints(validMargin) * 0.15,
+                );
+                const bandHeight = pageCaptionBandHeightPt(
+                  fontSize,
+                  validMargin,
                 );
                 return (
                   <View
@@ -1451,25 +1961,24 @@ function PhotoGridEditor({
               }
 
               const asset = photoBox.asset;
-              // Full original resolution for print quality (the
-              // web preview below uses the much lighter "preview"
-              // thumbnail instead - this only matters for the PDF).
-              // Requires the Immich API key to have the
-              // asset.download permission. No apiKey query param - the
-              // real key is injected server-side by nginx (see
-              // nginx.conf.template). Absolute URL (not just "/api/...")
-              // because react-pdf's own image fetcher, used during
-              // pdf().toBlob() generation, doesn't reliably resolve
-              // relative URLs the way a normal <img> tag does.
-              const imageUrl = `${window.location.origin}${immichConfig.baseUrl}/assets/${asset.id}/original`;
+              // Pre-fetched by handleGeneratePdf as a Blob ("preview"
+              // size - always a plain, pre-rotated JPEG, unlike the
+              // original upload which can be any format/orientation).
+              const imageBlob = imageBlobs.get(asset.id);
               const dateStripHeight = showDates
                 ? fontSize * 1.6
                 : 0;
               const cardCaption = cardCaptions.get(asset.id);
               // Only cards that actually have a caption reserve the
-              // extra strip - an empty card keeps its full image.
+              // extra strip - an empty card keeps its full image. The
+              // strip has to be noticeably taller than the caption
+              // text's own font size (not just a hair more) - confirmed
+              // by testing that a strip only ~1.1x the font size makes
+              // react-pdf drop the text entirely (presumably it doesn't
+              // fit the line box once line-height is accounted for),
+              // while ~1.6x renders reliably.
               const captionStripHeight = cardCaption
-                ? fontSize * 1.4
+                ? fontSize * 1.3 * 1.6
                 : 0;
               const bottomStripHeight =
                 dateStripHeight + captionStripHeight;
@@ -1517,26 +2026,31 @@ function PhotoGridEditor({
                         backgroundColor: SCRAPBOOK.mat,
                       }}
                     >
-                      <Image
-                        src={imageUrl}
-                        style={{
-                          position: "absolute",
-                          top: frameInset,
-                          left: frameInset,
-                          right: frameInset,
-                          bottom: frameInset + bottomStripHeight,
-                          objectFit: "contain",
-                        }}
+                      <PdfPhotoImage
+                        src={imageBlob}
+                        top={frameInset}
+                        left={frameInset}
+                        containerWidth={width - frameInset * 2}
+                        containerHeight={
+                          height - frameInset * 2 - bottomStripHeight
+                        }
                       />
                       {cardCaption && (
                         <View
                           style={{
                             position: "absolute",
                             left: frameInset,
-                            right: frameInset,
+                            width: width - frameInset * 2,
                             bottom: frameInset * 0.3 + dateStripHeight,
                             height: captionStripHeight,
                             display: "flex",
+                            // react-pdf defaults to flexDirection:"column"
+                            // (unlike CSS's "row" default) - without this,
+                            // alignItems/justifyContent end up swapped
+                            // from what they'd mean on the web, which was
+                            // pushing the caption to the right instead of
+                            // centering it.
+                            flexDirection: "row",
                             alignItems: "flex-end",
                             justifyContent: "center",
                           }}
@@ -1559,10 +2073,11 @@ function PhotoGridEditor({
                           style={{
                             position: "absolute",
                             left: frameInset,
-                            right: frameInset,
+                            width: width - frameInset * 2,
                             bottom: frameInset * 0.3,
                             height: dateStripHeight,
                             display: "flex",
+                            flexDirection: "row",
                             alignItems: "flex-end",
                             justifyContent: "center",
                           }}
@@ -1606,15 +2121,97 @@ function PhotoGridEditor({
           </Page>
         );
       })}
+
+      {showCover && (
+        <Page
+          size={{ width: coverPageWidth, height: coverPageHeight }}
+          style={{
+            ...staticStyles.page,
+            backgroundColor: PAGE_BACKGROUNDS[pageBackground].base,
+          }}
+        >
+          <PdfPageBackground
+            background={pageBackground}
+            width={coverPageWidth}
+            height={coverPageHeight}
+          />
+        </Page>
+      )}
     </Document>
-  );
+    );
+  };
 
   const handleGeneratePdf = async () => {
     setPdfError(null);
     setIsGeneratingPdf(true);
+    setPdfProgress(null);
     try {
-      const blob = await pdf(pdfDocument).toBlob();
+      const assetIds = new Set<string>();
+      pages.forEach((p) =>
+        p.photos.forEach((photo) => {
+          if (photo.asset) assetIds.add(photo.asset.id);
+        }),
+      );
+      const usesPatchworkCover = showCover && coverLayout === "patchwork";
+      if (
+        showCover &&
+        coverLayout !== "text-only" &&
+        coverLayout !== "patchwork" &&
+        coverAsset
+      ) {
+        assetIds.add(coverAsset.id);
+      }
+      const mosaicIds = usesPatchworkCover
+        ? Array.from(new Set(mosaicAssets.map((a) => a.id)))
+        : [];
+
+      const ids = Array.from(assetIds);
+      const totalFetches = ids.length + mosaicIds.length;
+      let overallDone = 0;
+      setPdfProgress({ done: 0, total: totalFetches });
+      const onProgress = () => {
+        overallDone++;
+        setPdfProgress({ done: overallDone, total: totalFetches });
+      };
+
+      // "preview" - not "original"/"fullsize": the original is whatever
+      // format the file was uploaded in (HEIC among them, which Chrome
+      // can't decode at all, client-side canvas tricks included - and
+      // that redirects to "original" on this server anyway). "preview"
+      // is always a plain, pre-rotated JPEG Immich already generated, so
+      // it's reliable even if the resolution is more modest.
+      const { blobs: imageBlobs, failures: imageFailures } =
+        await fetchBlobsWithConcurrency(
+          ids.map((id) => ({
+            key: id,
+            url: `${window.location.origin}${immichConfig.baseUrl}/assets/${id}/thumbnail?size=preview`,
+          })),
+          6,
+          onProgress,
+        );
+      // Mosaic tiles are small and pre-cached by Immich (unlike
+      // "fullsize", generated on demand), so a higher concurrency is
+      // fine and keeps a large patchwork grid from taking forever.
+      const { blobs: mosaicBlobs, failures: mosaicFailures } =
+        await fetchBlobsWithConcurrency(
+          mosaicIds.map((id) => ({
+            key: id,
+            url: `${window.location.origin}${immichConfig.baseUrl}/assets/${id}/thumbnail?size=thumbnail`,
+          })),
+          12,
+          onProgress,
+        );
+
+      const blob = await pdf(
+        buildPdfDocument(imageBlobs, mosaicBlobs),
+      ).toBlob();
       setPdfUrl(URL.createObjectURL(blob));
+      const failures = imageFailures + mosaicFailures;
+      if (failures > 0) {
+        setPdfError(
+          `${failures} of ${totalFetches} photos couldn't be fetched and are missing from the PDF - try generating again.`,
+        );
+      }
     } catch (e) {
       console.error("Failed to generate PDF:", e);
       setPdfError(
@@ -1624,6 +2221,7 @@ function PhotoGridEditor({
       );
     } finally {
       setIsGeneratingPdf(false);
+      setPdfProgress(null);
     }
   };
 
@@ -1653,7 +2251,11 @@ function PhotoGridEditor({
               className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed font-medium transition-colors shadow-sm flex items-center gap-2"
             >
               {isGeneratingPdf && <PdfSpinner />}
-              {isGeneratingPdf ? "Génération..." : "Générer le PDF"}
+              {isGeneratingPdf
+                ? pdfProgress
+                  ? `Génération... ${pdfProgress.done}/${pdfProgress.total}`
+                  : "Génération..."
+                : "Générer le PDF"}
             </button>
             {pdfUrl && !isGeneratingPdf && (
               <a
@@ -1945,7 +2547,67 @@ function PhotoGridEditor({
             </div>
           </div>
 
-          {/* 4. Customizations (only shown when there are any) */}
+          {/* 4. Cover */}
+          <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 sm:w-24">
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                Cover
+              </h3>
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                <label
+                  htmlFor="showCover"
+                  className="flex items-center gap-1.5 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    id="showCover"
+                    checked={showCover}
+                    onChange={(e) => setShowCover(e.target.checked)}
+                    className="h-4 w-4 accent-amber-600 rounded"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Include cover page
+                  </span>
+                </label>
+                {showCover && (
+                  <>
+                    <input
+                      type="text"
+                      value={coverTitle}
+                      onChange={(e) => setCoverTitle(e.target.value)}
+                      placeholder={album.albumName}
+                      className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent w-48"
+                    />
+                    <div className="flex gap-1">
+                      {COVER_LAYOUTS.map((layout) => (
+                        <button
+                          key={layout.value}
+                          onClick={() => setCoverLayout(layout.value)}
+                          className={`px-2 py-1 text-xs border rounded transition-colors ${
+                            coverLayout === layout.value
+                              ? "bg-amber-500 text-white border-amber-500"
+                              : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                          }`}
+                        >
+                          {layout.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+            <p className="mt-1.5 text-xs text-gray-400 sm:ml-28">
+              Some print services generate their own cover and don't want
+              one in the submitted PDF - turn this off if so. The cover
+              uses the same page background as the rest of the book. Hover
+              a photo below and click "Set as cover" to choose the cover
+              image.
+            </p>
+          </div>
+
+          {/* 5. Customizations (only shown when there are any) */}
           {customOrdering !== null && (
             <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
@@ -1979,6 +2641,162 @@ function PhotoGridEditor({
           ref={previewContainerRef}
           className="space-y-8 pb-8 px-4 sm:px-0"
         >
+          {showCover &&
+            (() => {
+              const displayWidth = toPoints(validPageWidth);
+              const displayHeight = toPoints(validPageHeight);
+              const scale =
+                previewWidth > 0
+                  ? Math.min(1, previewWidth / displayWidth)
+                  : 1;
+              const imageUrl = coverAsset
+                ? `${immichConfig.baseUrl}/assets/${coverAsset.id}/thumbnail?size=preview`
+                : null;
+              const titleInput = (
+                titleFontSize: number,
+                color: string,
+                extraClassName = "",
+              ) => (
+                <input
+                  value={coverTitle}
+                  onChange={(e) => setCoverTitle(e.target.value)}
+                  placeholder={album.albumName}
+                  className={`text-center bg-transparent focus:outline-none rounded w-[90%] ${extraClassName}`}
+                  style={{
+                    fontFamily: "Caveat",
+                    fontWeight: 600,
+                    fontSize: `${titleFontSize}px`,
+                    color,
+                  }}
+                />
+              );
+
+              return (
+                <div className="relative">
+                  <div className="text-center mb-2">
+                    <span className="inline-block px-3 py-1 bg-amber-50 text-amber-700 text-sm rounded">
+                      Cover
+                    </span>
+                  </div>
+                  <div
+                    className="mx-auto relative shadow-lg border border-gray-200"
+                    style={{
+                      width: `${displayWidth}px`,
+                      height: `${displayHeight}px`,
+                      zoom: scale,
+                      ...pageBackgroundCss(pageBackground),
+                    }}
+                  >
+                    {coverLayout === "text-only" && (
+                      <div
+                        className="absolute inset-0 flex flex-col items-center justify-center gap-4"
+                        style={{ paddingLeft: "10%", paddingRight: "10%" }}
+                      >
+                        <div
+                          style={{
+                            width: "30%",
+                            height: 2,
+                            backgroundColor: SCRAPBOOK.ink,
+                            opacity: 0.3,
+                          }}
+                        />
+                        {titleInput(displayWidth * 0.09, SCRAPBOOK.ink)}
+                        <div
+                          style={{
+                            width: "30%",
+                            height: 2,
+                            backgroundColor: SCRAPBOOK.ink,
+                            opacity: 0.3,
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {coverLayout === "photo-title" && imageUrl && (
+                      <>
+                        <div
+                          className="absolute shadow-lg overflow-hidden"
+                          style={{
+                            top: "8%",
+                            left: "8%",
+                            right: "8%",
+                            bottom: "24%",
+                            backgroundColor: SCRAPBOOK.mat,
+                            padding: "3%",
+                          }}
+                        >
+                          <img
+                            src={imageUrl}
+                            alt=""
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                        <div
+                          className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                          style={{ height: "20%" }}
+                        >
+                          {titleInput(
+                            displayWidth * 0.055,
+                            SCRAPBOOK.ink,
+                            "focus:bg-white/60",
+                          )}
+                        </div>
+                      </>
+                    )}
+
+                    {coverLayout === "full-bleed" && imageUrl && (
+                      <>
+                        <img
+                          src={imageUrl}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                        <div
+                          className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                          style={{
+                            height: "28%",
+                            background:
+                              "linear-gradient(to top, rgba(0,0,0,0.55), transparent)",
+                          }}
+                        >
+                          {titleInput(displayWidth * 0.06, "#FFFFFF")}
+                        </div>
+                      </>
+                    )}
+
+                    {coverLayout === "patchwork" && (
+                      <>
+                        <div
+                          className="absolute inset-0 grid overflow-hidden"
+                          style={{
+                            gridTemplateColumns: `repeat(${MOSAIC_COLS}, 1fr)`,
+                            gridTemplateRows: `repeat(${mosaicRows}, 1fr)`,
+                          }}
+                        >
+                          {mosaicAssets.map((a, i) => (
+                            <img
+                              key={i}
+                              src={`${immichConfig.baseUrl}/assets/${a.id}/thumbnail?size=thumbnail`}
+                              alt=""
+                              className="w-full h-full object-cover"
+                            />
+                          ))}
+                        </div>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div
+                            className="px-6 py-3 shadow-lg"
+                            style={{ backgroundColor: "rgba(255,254,252,0.92)" }}
+                          >
+                            {titleInput(displayWidth * 0.06, SCRAPBOOK.ink)}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
           {pages.map((page) => {
             // Scale down to match PDF dimensions (72 DPI from 300 DPI)
             const displayWidth = toPoints(page.width);
@@ -2080,21 +2898,20 @@ function PhotoGridEditor({
                       : [{ key: page.pageNumber, left: 0, width: displayWidth }]
                     ).map((band) => {
                       if (!pageCaptions.has(band.key)) return null;
-                      const bandHeight = toPoints(validMargin);
-                      // Text size is the priority; padding just fills
-                      // whatever room is left around it, so a small page
-                      // margin shrinks the padding rather than crushing the
-                      // caption down to an unreadable size.
-                      const captionFontSize = Math.min(
-                        fontSize * 1.9,
-                        bandHeight * 0.7,
-                      );
+                      // Text size is the priority: the chosen font size is
+                      // always honored, and the band grows to fit it if
+                      // the page margin alone isn't tall enough. Uses the
+                      // same sizing as the PDF version (see
+                      // pageCaptionBandHeightPt) so the editor matches
+                      // what the export actually looks like.
+                      const captionFontSize = fontSize * 1.9;
                       const captionPaddingVertical = Math.max(
                         4,
-                        Math.min(
-                          (bandHeight - captionFontSize) * 0.4,
-                          bandHeight * 0.25,
-                        ),
+                        toPoints(validMargin) * 0.15,
+                      );
+                      const bandHeight = pageCaptionBandHeightPt(
+                        fontSize,
+                        validMargin,
                       );
                       return (
                         <input
@@ -2382,6 +3199,28 @@ function PhotoGridEditor({
                           />
                         </div>
 
+                        {/* Cover picker */}
+                        {coverAsset?.id === asset.id ? (
+                          <div
+                            className="absolute top-2 right-2 bg-amber-500 text-white px-2 py-0.5 rounded shadow text-xs font-medium z-10"
+                            title="This is the cover photo"
+                          >
+                            ★ Cover
+                          </div>
+                        ) : (
+                          <div
+                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-amber-500 hover:bg-amber-600 text-white px-2 py-0.5 rounded shadow text-xs font-medium z-10"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setCoverAssetId(asset.id);
+                            }}
+                            title="Set as cover photo"
+                          >
+                            Set as cover
+                          </div>
+                        )}
+
                         {/* Customization indicator */}
                         {isReordered && (
                           <div
@@ -2411,6 +3250,34 @@ function PhotoGridEditor({
               </div>
             );
           })}
+
+          {showCover &&
+            (() => {
+              const displayWidth = toPoints(validPageWidth);
+              const displayHeight = toPoints(validPageHeight);
+              const scale =
+                previewWidth > 0
+                  ? Math.min(1, previewWidth / displayWidth)
+                  : 1;
+              return (
+                <div className="relative">
+                  <div className="text-center mb-2">
+                    <span className="inline-block px-3 py-1 bg-amber-50 text-amber-700 text-sm rounded">
+                      Back Cover
+                    </span>
+                  </div>
+                  <div
+                    className="mx-auto relative shadow-lg border border-gray-200"
+                    style={{
+                      width: `${displayWidth}px`,
+                      height: `${displayHeight}px`,
+                      zoom: scale,
+                      ...pageBackgroundCss(pageBackground),
+                    }}
+                  />
+                </div>
+              );
+            })()}
         </div>
 
       {pdfError && (

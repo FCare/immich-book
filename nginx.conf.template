@@ -25,6 +25,11 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header x-api-key "${IMMICH_API_KEY}";
         client_max_body_size 100M;
+        # PDF export fetches many "fullsize" images (generated on demand
+        # by Immich, not pre-cached like thumbnails); under concurrent
+        # load the default 60s can be too short and silently drop some,
+        # which shows up as blank photos in the exported PDF.
+        proxy_read_timeout 180s;
     }
 
     # Proxy to the local LLM (thebrain, OpenAI-compatible llama.cpp server)

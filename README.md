@@ -41,8 +41,8 @@ You will need:
 - An Immich API key with the following permissions:
   - `album.read` - To browse and list albums
   - `asset.read` - To read asset metadata (descriptions, dates, etc.)
-  - `asset.view` - To access photo thumbnails for the web preview
-  - `asset.download` - To fetch full-resolution originals for the PDF export
+  - `asset.view` - To access photo thumbnails, used for both the web
+    preview and PDF export
 
 ### Creating an API Key
 
@@ -54,7 +54,6 @@ You will need:
    - `album.read`
    - `asset.read`
    - `asset.view`
-   - `asset.download`
 6. Click **Create**
 7. Copy the API key (you won't be able to see it again!)
 

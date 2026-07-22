@@ -89,7 +89,13 @@ function seededRandom(seed: string): number {
 function naturalAspectRatio(asset: AssetResponseDto): number {
   const width = asset.exifInfo?.exifImageWidth || 1;
   const height = asset.exifInfo?.exifImageHeight || 1;
-  if (asset.exifInfo?.orientation == "6") {
+  // Orientations 6 and 8 are the two 90-degree rotations - either way the
+  // displayed shape is width/height swapped from the stored pixels. 3
+  // (180 degrees) doesn't change the shape, only 6/8 do. Normalized to a
+  // string first since Immich doesn't consistently type this field
+  // (string in some responses, number in others).
+  const orientation = String(asset.exifInfo?.orientation ?? "");
+  if (orientation === "6" || orientation === "8") {
     return height / width;
   }
   return width / height;
