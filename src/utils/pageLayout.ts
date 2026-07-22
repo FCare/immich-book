@@ -1,9 +1,5 @@
 import type { AssetResponseDto } from "@immich/sdk";
 
-export type PageStyle = "bento" | "masonry" | "collage";
-
-export const PAGE_STYLES: PageStyle[] = ["bento", "masonry", "collage"];
-
 export interface PhotoBox {
   // Stable id: the asset's own id for a photo, or a synthetic
   // "text-{pageNumber}-{index}" id for a text card (see LayoutOptions.
@@ -14,14 +10,13 @@ export interface PhotoBox {
   y: number;
   width: number;
   height: number;
-  style: PageStyle;
 }
 
 // A text card has no natural photo shape to match, so it gets a fixed,
 // readable-for-text default (slightly wide, like an index card).
 const TEXT_CARD_ASPECT_RATIO = 1.2;
 
-// What the layout/split algorithms actually place - either a real photo
+// What the layout/split algorithm actually places - either a real photo
 // or a text card placeholder, so both can be tiled by the same code.
 interface LayoutItem {
   id: string;
@@ -56,29 +51,26 @@ export interface LayoutOptions {
   margin: number; // in pixels
   spacing: number; // in pixels
   combinePages?: boolean; // combine two pages into one PDF page
-  pageStyles?: Map<number, PageStyle>; // manual style override per page number
-  // Bumping a page's variant reshuffles its bento/collage/masonry
-  // arrangement (same photos, different split/column pattern) without
-  // changing anything else - lets a user "try another layout" per page.
+  // Bumping a page's variant reshuffles its bento arrangement (same
+  // photos, different split pattern) without changing anything else -
+  // lets a user "try another layout" per page.
   layoutVariants?: Map<number, number>;
   // Force how many photos land on a given page number, instead of the
-  // automatically picked count. Always honored exactly for bento/collage
-  // (a gap-free tiling has no "doesn't fit" case); capped by available
-  // height for masonry, to avoid pushing content off the page.
+  // automatically picked count. Always honored exactly - a gap-free
+  // tiling has no "doesn't fit" case.
   pageCounts?: Map<number, number>;
   // Number of text cards (0-3) to swap in for photo slots in a page's
   // tiling, keyed by page number - carved out of the page's photo count,
   // not added on top of it.
   textCardCounts?: Map<number, number>;
   // Manual override of which card id occupies which slot on a page,
-  // keyed by page number. The auto layout (bento/collage especially)
-  // groups cards by aspect ratio for a tidy tiling, which doesn't
-  // preserve a specific drag-and-drop position - this lets a user's
-  // explicit swap win outright: the slot's rect/shape stays exactly what
-  // the auto layout computed, but the requested card renders there
-  // instead, cropped-to-fit via object-fit:contain in the UI layer. Must
-  // be a permutation of the page's natural card ids, in natural slot
-  // order, or it's ignored.
+  // keyed by page number. The auto layout groups cards by aspect ratio
+  // for a tidy tiling, which doesn't preserve a specific drag-and-drop
+  // position - this lets a user's explicit swap win outright: the slot's
+  // rect/shape stays exactly what the auto layout computed, but the
+  // requested card renders there instead, cropped-to-fit via
+  // object-fit:contain in the UI layer. Must be a permutation of the
+  // page's natural card ids, in natural slot order, or it's ignored.
   slotOverrides?: Map<number, string[]>;
 }
 
@@ -92,12 +84,6 @@ function seededRandom(seed: string): number {
     hash |= 0;
   }
   return (((hash % 10000) + 10000) % 10000) / 10000;
-}
-
-// Bento is the default look for every page; masonry/collage are only used
-// when explicitly picked per page via the style switcher.
-export function defaultPageStyle(_pageNumber: number): PageStyle {
-  return "bento";
 }
 
 function naturalAspectRatio(asset: AssetResponseDto): number {
@@ -129,15 +115,6 @@ const BENTO_CONFIG: SplitConfig = {
   maxCount: 6,
   ratioMin: 0.25,
   ratioMax: 0.75,
-};
-
-// Collage: more, smaller tiles and a wider size spread for a busier,
-// scrapbook-like page.
-const COLLAGE_CONFIG: SplitConfig = {
-  minCount: 5,
-  maxCount: 9,
-  ratioMin: 0.22,
-  ratioMax: 0.78,
 };
 
 function averageAspectRatio(items: LayoutItem[]): number {
@@ -192,11 +169,10 @@ function splitRect(
   items: LayoutItem[],
   spacing: number,
   config: SplitConfig,
-  style: PageStyle,
   path: string,
 ): PhotoBox[] {
   if (items.length === 1) {
-    return [{ id: items[0].id, asset: items[0].asset, ...rect, style }];
+    return [{ id: items[0].id, asset: items[0].asset, ...rect }];
   }
 
   // Group photos by aspect ratio so each side of the split is shape-
@@ -263,32 +239,30 @@ function splitRect(
   }
 
   return [
-    ...splitRect(firstRect, firstItems, spacing, config, style, path + "A"),
-    ...splitRect(secondRect, secondItems, spacing, config, style, path + "B"),
+    ...splitRect(firstRect, firstItems, spacing, config, path + "A"),
+    ...splitRect(secondRect, secondItems, spacing, config, path + "B"),
   ];
 }
 
-function layoutSplitPage(
+function layoutBentoPage(
   assets: AssetResponseDto[],
   startIndex: number,
   pageNumber: number,
   contentRect: Rect,
   spacing: number,
-  style: "bento" | "collage",
   variant: number,
   forcedCount: number | undefined,
   textCardCount: number,
 ): { photos: PhotoBox[]; consumed: number } {
-  const config = style === "bento" ? BENTO_CONFIG : COLLAGE_CONFIG;
-  const seedBase = `${style}-${pageNumber}-v${variant}`;
+  const seedBase = `bento-${pageNumber}-v${variant}`;
   let totalSlots: number;
   if (forcedCount !== undefined) {
     totalSlots = Math.max(1, forcedCount);
   } else {
     const seed = seededRandom(`count-${seedBase}`);
     totalSlots =
-      config.minCount +
-      Math.floor(seed * (config.maxCount - config.minCount + 1));
+      BENTO_CONFIG.minCount +
+      Math.floor(seed * (BENTO_CONFIG.maxCount - BENTO_CONFIG.minCount + 1));
   }
   // Text cards replace photo slots rather than adding to them - the total
   // card count on the page stays whatever "auto"/forced would have
@@ -310,91 +284,7 @@ function layoutSplitPage(
     })),
   ];
 
-  const photos = splitRect(contentRect, items, spacing, config, style, seedBase);
-  return { photos, consumed };
-}
-
-// Masonry: fixed-width columns, each photo goes in the shortest column at
-// its natural height - a Pinterest-style layout with no forced row grid.
-function layoutMasonryPage(
-  assets: AssetResponseDto[],
-  startIndex: number,
-  pageNumber: number,
-  contentRect: Rect,
-  spacing: number,
-  variant: number,
-  forcedCount: number | undefined,
-  textCardCount: number,
-): { photos: PhotoBox[]; consumed: number } {
-  const numColumns =
-    2 + Math.floor(seededRandom(`cols-${pageNumber}-v${variant}`) * 3); // 2..4
-  const columnWidth =
-    (contentRect.width - spacing * (numColumns - 1)) / numColumns;
-  const columnHeights = new Array(numColumns).fill(0);
-  const photos: PhotoBox[] = [];
-  let i = startIndex;
-
-  const shortestColumn = () => {
-    let col = 0;
-    for (let c = 1; c < numColumns; c++) {
-      if (columnHeights[c] < columnHeights[col]) col = c;
-    }
-    return col;
-  };
-
-  const place = (
-    id: string,
-    asset: AssetResponseDto | null,
-    aspectRatio: number,
-  ): boolean => {
-    const height = columnWidth / aspectRatio;
-    const col = shortestColumn();
-    const y = columnHeights[col];
-    const newHeight = y === 0 ? height : y + spacing + height;
-
-    if (photos.length > 0 && newHeight > contentRect.height) {
-      return false; // doesn't fit
-    }
-
-    const top = y === 0 ? 0 : y + spacing;
-    photos.push({
-      id,
-      asset,
-      x: contentRect.x + col * (columnWidth + spacing),
-      y: contentRect.y + top,
-      width: columnWidth,
-      height,
-      style: "masonry",
-    });
-    columnHeights[col] = top + height;
-    return true;
-  };
-
-  // Text cards replace photo slots rather than adding to them, so a forced
-  // count is split between the two: forcedCount - textCardCount photos,
-  // then the text cards. Auto mode has no fixed target count to carve
-  // out of (it fills by height), so text cards there just claim column
-  // space alongside the naturally-filled photos.
-  const photoCap =
-    forcedCount !== undefined
-      ? Math.max(0, forcedCount - textCardCount)
-      : Infinity;
-
-  while (i < assets.length) {
-    if (i - startIndex >= photoCap) break;
-    const asset = assets[i];
-    // A forced count is a cap, not a guarantee: never push content off
-    // the page to satisfy it, so this can legitimately stop early.
-    if (!place(asset.id, asset, naturalAspectRatio(asset))) break;
-    i++;
-  }
-
-  const consumed = i - startIndex;
-
-  for (let t = 0; t < textCardCount; t++) {
-    if (!place(`text-${pageNumber}-${t}`, null, TEXT_CARD_ASPECT_RATIO)) break;
-  }
-
+  const photos = splitRect(contentRect, items, spacing, BENTO_CONFIG, seedBase);
   return { photos, consumed };
 }
 
@@ -413,7 +303,6 @@ export function calculatePageLayout(
     pageHeight,
     margin,
     spacing,
-    pageStyles,
     layoutVariants,
     pageCounts,
     textCardCounts,
@@ -434,40 +323,26 @@ export function calculatePageLayout(
   let pageNumber = 1;
 
   while (index < assets.length) {
-    const style = pageStyles?.get(pageNumber) || defaultPageStyle(pageNumber);
     const variant = layoutVariants?.get(pageNumber) || 0;
     const forcedCount = pageCounts?.get(pageNumber);
     const textCardCount = textCardCounts?.get(pageNumber) || 0;
-    const result =
-      style === "masonry"
-        ? layoutMasonryPage(
-            assets,
-            index,
-            pageNumber,
-            contentRect,
-            spacing,
-            variant,
-            forcedCount,
-            textCardCount,
-          )
-        : layoutSplitPage(
-            assets,
-            index,
-            pageNumber,
-            contentRect,
-            spacing,
-            style,
-            variant,
-            forcedCount,
-            textCardCount,
-          );
+    const result = layoutBentoPage(
+      assets,
+      index,
+      pageNumber,
+      contentRect,
+      spacing,
+      variant,
+      forcedCount,
+      textCardCount,
+    );
 
     // A manual slot override wins outright over the auto-computed
     // assignment: same rects/shapes (so the tiling stays a gap-free tile),
     // but whichever card ids the user swapped into place render there
     // instead. Ignored (falls back to natural order) unless it's an exact
     // permutation of this page's natural card ids - a stale override left
-    // over from before a page-count/style/text-card change, for example.
+    // over from before a page-count/text-card change, for example.
     let photos = result.photos;
     const override = slotOverrides?.get(pageNumber);
     if (override && override.length === photos.length) {

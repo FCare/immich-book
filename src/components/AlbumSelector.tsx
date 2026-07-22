@@ -139,7 +139,7 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
             {album.albumThumbnailAssetId ? (
               <div className="h-48 bg-gray-200 relative overflow-hidden">
                 <img
-                  src={`${immichConfig.baseUrl}/assets/${album.albumThumbnailAssetId}/thumbnail?size=preview&apiKey=${immichConfig.apiKey}`}
+                  src={`${immichConfig.baseUrl}/assets/${album.albumThumbnailAssetId}/thumbnail?size=preview`}
                   alt={album.albumName}
                   className="w-full h-full object-cover"
                 />

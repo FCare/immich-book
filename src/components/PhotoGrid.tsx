@@ -5,7 +5,7 @@ import {
   type AssetResponseDto,
 } from "@immich/sdk";
 import {
-  PDFViewer,
+  pdf,
   Document,
   Page,
   Image,
@@ -13,14 +13,14 @@ import {
   Text,
   StyleSheet,
   Font,
+  Svg,
+  Rect,
+  Circle,
 } from "@react-pdf/renderer";
 import {
   calculatePageLayout,
-  PAGE_STYLES,
-  defaultPageStyle,
   mmToPixels,
   pixelsToMm,
-  type PageStyle,
 } from "../utils/pageLayout";
 import type { ImmichConfig } from "../types";
 import roboto400 from "@fontsource/roboto/files/roboto-latin-400-normal.woff?url";
@@ -54,6 +54,254 @@ const SCRAPBOOK = {
   tape: ["#C7D3BE", "#DCC9B6", "#C2CFDE"],
 };
 
+// Page background presets - decorated "paper" instead of flat white, kept
+// in the same warm/muted family as the polaroid mat and tape. "blob" is an
+// organic mottled-paper texture (soft off-color patches); "dots" is a fine
+// grid, both applied over the base color. "white" renders no texture at
+// all, so it's free to pick as a no-op default.
+type BackgroundTexture = "none" | "blob" | "dots" | "lines" | "grid" | "speckle";
+
+type PageBackground =
+  | "white"
+  | "kraft"
+  | "cream"
+  | "sage"
+  | "dusk-blue"
+  | "blush"
+  | "charcoal"
+  | "dots"
+  | "sage-dots"
+  | "blue-dots"
+  | "blush-dots"
+  | "notebook"
+  | "kraft-lines"
+  | "graph"
+  | "confetti";
+
+const PAGE_BACKGROUNDS: Record<
+  PageBackground,
+  { label: string; base: string; texture: BackgroundTexture; accent: string }
+> = {
+  white: { label: "White", base: "#FFFFFF", texture: "none", accent: "" },
+
+  // Mottled paper grain - same organic blob positions (PAGE_BACKGROUND_BLOBS)
+  // at different colors, so they read as one paper family, not unrelated
+  // patterns.
+  kraft: { label: "Kraft paper", base: "#C9A97E", texture: "blob", accent: "#8A6B41" },
+  cream: { label: "Cream cardstock", base: "#F8F1E4", texture: "blob", accent: "#D6C4A1" },
+  sage: { label: "Sage paper", base: "#E7ECDF", texture: "blob", accent: "#7F9468" },
+  "dusk-blue": { label: "Dusk blue paper", base: "#E5EBF3", texture: "blob", accent: "#6E85A8" },
+  blush: { label: "Blush paper", base: "#F6E9E5", texture: "blob", accent: "#C4897A" },
+  charcoal: { label: "Charcoal paper", base: "#E9E6E1", texture: "blob", accent: "#6B6156" },
+
+  // Fine dot grid, planner/bullet-journal style.
+  dots: { label: "Dot grid", base: "#FBF7EF", texture: "dots", accent: SCRAPBOOK.ink },
+  "sage-dots": { label: "Sage dot grid", base: "#EFF3EA", texture: "dots", accent: "#6F8259" },
+  "blue-dots": { label: "Blue dot grid", base: "#EAF0F8", texture: "dots", accent: "#52709A" },
+  "blush-dots": { label: "Blush dot grid", base: "#FBEFEC", texture: "dots", accent: "#B8776A" },
+
+  // Ruled notebook paper.
+  notebook: { label: "Ruled notebook", base: "#FDFBF6", texture: "lines", accent: "#B9C6DA" },
+  "kraft-lines": { label: "Ruled kraft", base: "#C9A97E", texture: "lines", accent: "#7A5C36" },
+
+  // Graph paper.
+  graph: { label: "Graph paper", base: "#FCFBF8", texture: "grid", accent: "#C9CFC2" },
+
+  // Scattered flecks in the washi-tape palette - the odd one out, playful.
+  confetti: { label: "Confetti", base: "#FBF7EF", texture: "speckle", accent: "" },
+};
+
+// Named groups purely for the <optgroup> picker - doesn't affect layout.
+const PAGE_BACKGROUND_GROUPS: { label: string; keys: PageBackground[] }[] = [
+  { label: "Plain", keys: ["white"] },
+  {
+    label: "Paper grain",
+    keys: ["kraft", "cream", "sage", "dusk-blue", "blush", "charcoal"],
+  },
+  { label: "Dot grid", keys: ["dots", "sage-dots", "blue-dots", "blush-dots"] },
+  { label: "Ruled", keys: ["notebook", "kraft-lines"] },
+  { label: "Graph", keys: ["graph"] },
+  { label: "Confetti", keys: ["confetti"] },
+];
+
+// Organic blob positions (fraction of page width/height) shared by every
+// "blob"-textured background, so they all read as the same paper grain at
+// a different color rather than unrelated patterns.
+const PAGE_BACKGROUND_BLOBS = [
+  { cx: 0.18, cy: 0.22, r: 0.32, opacity: 0.12 },
+  { cx: 0.82, cy: 0.7, r: 0.36, opacity: 0.14 },
+  { cx: 0.55, cy: 0.12, r: 0.24, opacity: 0.08 },
+  { cx: 0.3, cy: 0.85, r: 0.28, opacity: 0.1 },
+];
+
+const PAGE_BACKGROUND_DOT_SPACING = 18; // px, web CSS dot/line/grid pattern
+const PAGE_BACKGROUND_LINE_SPACING = 28;
+const CONFETTI_COLORS = [...SCRAPBOOK.tape, SCRAPBOOK.ink];
+
+// Precomputed scatter for the "confetti" texture - deterministic (not
+// Math.random()) so it's stable across re-renders and identical between
+// the web CSS version and the PDF Svg version.
+const PAGE_BACKGROUND_SPECKLES = Array.from({ length: 50 }, (_, i) => ({
+  x: seededRandom("speckle-x", i),
+  y: seededRandom("speckle-y", i),
+  r: 2 + seededRandom("speckle-r", i) * 3,
+  color: CONFETTI_COLORS[Math.floor(seededRandom("speckle-c", i) * CONFETTI_COLORS.length)],
+}));
+
+function pageBackgroundCss(bg: PageBackground): React.CSSProperties {
+  const preset = PAGE_BACKGROUNDS[bg];
+  const s = PAGE_BACKGROUND_DOT_SPACING;
+  const l = PAGE_BACKGROUND_LINE_SPACING;
+
+  switch (preset.texture) {
+    case "none":
+      return { backgroundColor: preset.base };
+    case "dots":
+      return {
+        backgroundColor: preset.base,
+        backgroundImage: `radial-gradient(${preset.accent}29 1px, transparent 1.5px)`,
+        backgroundSize: `${s}px ${s}px`,
+      };
+    case "lines":
+      return {
+        backgroundColor: preset.base,
+        backgroundImage: `repeating-linear-gradient(to bottom, ${preset.accent}55 0px, ${preset.accent}55 1px, transparent 1px, transparent ${l}px)`,
+      };
+    case "grid":
+      return {
+        backgroundColor: preset.base,
+        backgroundImage: [
+          `repeating-linear-gradient(to bottom, ${preset.accent}55 0px, ${preset.accent}55 1px, transparent 1px, transparent ${l}px)`,
+          `repeating-linear-gradient(to right, ${preset.accent}55 0px, ${preset.accent}55 1px, transparent 1px, transparent ${l}px)`,
+        ].join(", "),
+      };
+    case "speckle":
+      return {
+        backgroundColor: preset.base,
+        backgroundImage: PAGE_BACKGROUND_SPECKLES.map(
+          (sp) =>
+            `radial-gradient(circle ${sp.r}px at ${sp.x * 100}% ${sp.y * 100}%, ${sp.color}, transparent 70%)`,
+        ).join(", "),
+      };
+    case "blob":
+      return {
+        backgroundColor: preset.base,
+        backgroundImage: PAGE_BACKGROUND_BLOBS.map(
+          (b) =>
+            `radial-gradient(circle at ${b.cx * 100}% ${b.cy * 100}%, ${preset.accent}${Math.round(b.opacity * 255).toString(16).padStart(2, "0")} 0%, transparent ${b.r * 100}%)`,
+        ).join(", "),
+      };
+  }
+}
+
+// PDF equivalent of pageBackgroundCss - react-pdf has no CSS
+// background-image or repeating-pattern primitive, so the same preset is
+// painted as an explicit Svg layer behind the page content instead. Dots
+// use a coarser spacing than the web CSS version to keep the per-page
+// element count reasonable across a whole book.
+function PdfPageBackground({
+  background,
+  width,
+  height,
+}: {
+  background: PageBackground;
+  width: number;
+  height: number;
+}) {
+  const preset = PAGE_BACKGROUNDS[background];
+  if (preset.texture === "none") return null;
+
+  const dotSpacing = 26;
+  const lineSpacing = 30;
+
+  return (
+    <Svg
+      style={{ position: "absolute", top: 0, left: 0, width, height }}
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+    >
+      <Rect x={0} y={0} width={width} height={height} fill={preset.base} />
+      {preset.texture === "blob" &&
+        PAGE_BACKGROUND_BLOBS.map((b, i) => (
+          <Circle
+            key={i}
+            cx={b.cx * width}
+            cy={b.cy * height}
+            r={b.r * Math.max(width, height)}
+            fill={preset.accent}
+            fillOpacity={b.opacity}
+          />
+        ))}
+      {preset.texture === "dots" &&
+        Array.from({ length: Math.ceil(height / dotSpacing) }).flatMap(
+          (_, row) =>
+            Array.from({ length: Math.ceil(width / dotSpacing) }).map(
+              (_, col) => (
+                <Circle
+                  key={`${row}-${col}`}
+                  cx={dotSpacing / 2 + col * dotSpacing}
+                  cy={dotSpacing / 2 + row * dotSpacing}
+                  r={0.7}
+                  fill={preset.accent}
+                  fillOpacity={0.35}
+                />
+              ),
+            ),
+        )}
+      {preset.texture === "lines" &&
+        Array.from({ length: Math.ceil(height / lineSpacing) }).map((_, row) => (
+          <Rect
+            key={row}
+            x={0}
+            y={row * lineSpacing}
+            width={width}
+            height={0.75}
+            fill={preset.accent}
+            fillOpacity={0.5}
+          />
+        ))}
+      {preset.texture === "grid" && (
+        <>
+          {Array.from({ length: Math.ceil(height / lineSpacing) }).map((_, row) => (
+            <Rect
+              key={`h${row}`}
+              x={0}
+              y={row * lineSpacing}
+              width={width}
+              height={0.6}
+              fill={preset.accent}
+              fillOpacity={0.5}
+            />
+          ))}
+          {Array.from({ length: Math.ceil(width / lineSpacing) }).map((_, col) => (
+            <Rect
+              key={`v${col}`}
+              x={col * lineSpacing}
+              y={0}
+              width={0.6}
+              height={height}
+              fill={preset.accent}
+              fillOpacity={0.5}
+            />
+          ))}
+        </>
+      )}
+      {preset.texture === "speckle" &&
+        PAGE_BACKGROUND_SPECKLES.map((sp, i) => (
+          <Circle
+            key={i}
+            cx={sp.x * width}
+            cy={sp.y * height}
+            r={sp.r}
+            fill={sp.color}
+            fillOpacity={0.55}
+          />
+        ))}
+    </Svg>
+  );
+}
+
 // Deterministic pseudo-random number in [0, 1) from a string id - stable
 // across re-renders (unlike Math.random()), so a photo's tilt doesn't jitter
 // every time unrelated state changes.
@@ -83,12 +331,6 @@ function tapeStyle(assetId: string) {
 function captionAtBottom(logicalPageNumber: number): boolean {
   return logicalPageNumber % 2 === 0;
 }
-
-const PAGE_STYLE_LABELS: Record<PageStyle, string> = {
-  bento: "Bento",
-  masonry: "Columns",
-  collage: "Collage",
-};
 
 // Quick page-format presets - the width/height mm fields stay fully
 // editable regardless, this is just a shortcut to common sizes.
@@ -120,17 +362,14 @@ interface GlobalConfig {
   showDates: boolean;
   showCaptions: boolean;
   fontSize: number;
+  pageBackground: PageBackground;
 }
 
 interface AlbumConfig extends GlobalConfig {
   // Customizations (album-specific only)
   customOrdering: string[] | null;
-  // Manual page-style overrides, keyed by logical page number (same
-  // numbering as pageCaptions - see the logicalPages memo below). Pages
-  // without an entry use the automatically assigned style.
-  pageStyles: Record<number, PageStyle>;
   // Bumped each time a page's "shuffle" control is used, to reroll its
-  // bento/collage/masonry arrangement without changing anything else.
+  // bento arrangement without changing anything else.
   layoutVariants: Record<number, number>;
   // Forces how many photos land on a given page number, overriding the
   // automatically picked count. Keyed by logical page number.
@@ -166,6 +405,7 @@ const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   showDates: true,
   showCaptions: true,
   fontSize: 12,
+  pageBackground: "white",
 };
 
 // Helper functions for config persistence - stored server-side (see
@@ -201,7 +441,6 @@ async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
   const defaults: AlbumConfig = {
     ...globalConfig,
     customOrdering: null,
-    pageStyles: {},
     layoutVariants: {},
     pageCounts: {},
     pageCaptions: {},
@@ -245,6 +484,7 @@ async function saveAlbumConfig(albumId: string, config: AlbumConfig) {
       showDates: config.showDates,
       showCaptions: config.showCaptions,
       fontSize: config.fontSize,
+      pageBackground: config.pageBackground,
     };
     await saveGlobalConfig(globalConfig);
   } catch (e) {
@@ -264,6 +504,41 @@ const staticStyles = StyleSheet.create({
     backgroundColor: "white",
   },
 });
+
+// Strips characters that aren't safe in a downloaded filename across
+// platforms, so the album name can be used directly.
+function sanitizeFileName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]+/g, " ").trim() || "photobook";
+}
+
+// A small spinning flower (petals in the washi-tape palette) shown while
+// the PDF is being generated - in keeping with the scrapbook look rather
+// than a generic spinner.
+function PdfSpinner() {
+  return (
+    <svg
+      className="animate-spin"
+      width="18"
+      height="18"
+      viewBox="0 0 40 40"
+      aria-hidden="true"
+    >
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <ellipse
+          key={i}
+          cx="20"
+          cy="10"
+          rx="5"
+          ry="9"
+          fill={SCRAPBOOK.tape[i % SCRAPBOOK.tape.length]}
+          opacity={0.85}
+          transform={`rotate(${i * 60} 20 20)`}
+        />
+      ))}
+      <circle cx="20" cy="20" r="3.5" fill={SCRAPBOOK.ink} />
+    </svg>
+  );
+}
 
 // Fetches this album's photobook config from the backend before mounting
 // the actual editor - PhotoGridEditor's many useState(initialConfig.x)
@@ -316,7 +591,17 @@ function PhotoGridEditor({
   const [assets, setAssets] = useState<AssetResponseDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"preview" | "pdf">("preview");
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  // The blob URL is only good for this browser tab's lifetime - release it
+  // whenever a new PDF is generated (or the editor unmounts) instead of
+  // leaking one per generation.
+  useEffect(() => {
+    if (!pdfUrl) return;
+    return () => URL.revokeObjectURL(pdfUrl);
+  }, [pdfUrl]);
 
   // Page settings
   const [pageWidth, setPageWidth] = useState(initialConfig.pageWidth);
@@ -352,19 +637,13 @@ function PhotoGridEditor({
   const [showDates, setShowDates] = useState(initialConfig.showDates);
   const [showCaptions, setShowCaptions] = useState(initialConfig.showCaptions);
   const [fontSize, setFontSize] = useState(initialConfig.fontSize);
+  const [pageBackground, setPageBackground] = useState<PageBackground>(
+    initialConfig.pageBackground,
+  );
 
   // Customizations
   const [customOrdering, setCustomOrdering] = useState<string[] | null>(
     initialConfig.customOrdering,
-  );
-  const [pageStyles, setPageStyles] = useState<Map<number, PageStyle>>(
-    () =>
-      new Map(
-        Object.entries(initialConfig.pageStyles).map(([k, v]) => [
-          Number(k),
-          v as PageStyle,
-        ]),
-      ),
   );
   const [layoutVariants, setLayoutVariants] = useState<Map<number, number>>(
     () =>
@@ -484,8 +763,8 @@ function PhotoGridEditor({
       showDates,
       showCaptions,
       fontSize,
+      pageBackground,
       customOrdering,
-      pageStyles: Object.fromEntries(pageStyles),
       layoutVariants: Object.fromEntries(layoutVariants),
       pageCounts: Object.fromEntries(pageCounts),
       pageCaptions: Object.fromEntries(pageCaptions),
@@ -507,8 +786,8 @@ function PhotoGridEditor({
     showDates,
     showCaptions,
     fontSize,
+    pageBackground,
     customOrdering,
-    pageStyles,
     layoutVariants,
     pageCounts,
     pageCaptions,
@@ -543,19 +822,9 @@ function PhotoGridEditor({
     }
   };
 
-  // Set the style for a given logical page number, overriding the
-  // automatically assigned one
-  const handleSetPageStyle = (logicalPageNumber: number, style: PageStyle) => {
-    setPageStyles((prev) => {
-      const next = new Map(prev);
-      next.set(logicalPageNumber, style);
-      return next;
-    });
-  };
-
-  // Reroll a page's bento/collage/masonry arrangement - same photos and
-  // style, different split/column pattern (e.g. a 3-photo page can be
-  // tiled several different ways depending on their formats).
+  // Reroll a page's bento arrangement - same photos, different split
+  // pattern (e.g. a 3-photo page can be tiled several different ways
+  // depending on their formats).
   const handleShuffleLayout = (logicalPageNumber: number) => {
     setLayoutVariants((prev) => {
       const next = new Map(prev);
@@ -690,7 +959,6 @@ function PhotoGridEditor({
       margin: validMargin,
       spacing: validSpacing,
       combinePages,
-      pageStyles,
       layoutVariants,
       pageCounts,
       textCardCounts,
@@ -703,7 +971,6 @@ function PhotoGridEditor({
     validPageWidth,
     validPageHeight,
     combinePages,
-    pageStyles,
     layoutVariants,
     pageCounts,
     textCardCounts,
@@ -796,9 +1063,9 @@ function PhotoGridEditor({
   }, [reorderDragState, pages, filteredAssets]);
 
   // Group page photos by logical page number - matches the numbering
-  // already used for pageStyles/pageCaptions/the "Page X of Y" UI: in
-  // combined mode each physical (spread) page holds two logical pages side
-  // by side, split at the horizontal midpoint.
+  // already used for pageCaptions/the "Page X of Y" UI: in combined mode
+  // each physical (spread) page holds two logical pages side by side,
+  // split at the horizontal midpoint.
   const logicalPages = useMemo(() => {
     const result: { number: number; photos: (typeof pages)[0]["photos"] }[] =
       [];
@@ -826,28 +1093,11 @@ function PhotoGridEditor({
   // Calculate total logical pages for display purposes
   const totalLogicalPages = combinePages ? pages.length * 2 : pages.length;
 
-  // Small button group to view/change which layout style a logical page
-  // uses - falls back to the automatically assigned style when untouched.
+  // Small button group for per-page layout controls - shuffle the bento
+  // arrangement, force a photo count, or swap some slots for text cards.
   const renderStyleSwitcher = (logicalPageNumber: number) => {
-    const currentStyle =
-      logicalPages.find((lp) => lp.number === logicalPageNumber)?.photos[0]
-        ?.style || defaultPageStyle(logicalPageNumber);
     return (
       <div className="flex gap-1">
-        {PAGE_STYLES.map((style) => (
-          <button
-            key={style}
-            onClick={() => handleSetPageStyle(logicalPageNumber, style)}
-            className={`px-2 py-1 text-xs border rounded transition-colors ${
-              currentStyle === style
-                ? "bg-blue-500 text-white border-blue-500"
-                : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
-            }`}
-            title={`${PAGE_STYLE_LABELS[style]} layout`}
-          >
-            {PAGE_STYLE_LABELS[style]}
-          </button>
-        ))}
         <button
           onClick={() => handleShuffleLayout(logicalPageNumber)}
           className="px-2 py-1 text-xs border rounded transition-colors bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
@@ -1004,6 +1254,379 @@ function PhotoGridEditor({
     );
   }
 
+  const pdfDocument = (
+    <Document pageLayout={pageLayout}>
+      {pages.map((pageData) => {
+        // FIXME: pdfkit (internal of react-pdf) uses 72dpi internally and we downscale everything here;
+        // instead we should produce a high-quality 300 dpi pdf
+
+        // Convert page dimensions from 300 DPI to 72 DPI
+        const pageWidth = toPoints(pageData.width);
+        const pageHeight = toPoints(pageData.height);
+        return (
+          <Page
+            key={pageData.pageNumber}
+            size={{
+              width: pageWidth,
+              height: pageHeight,
+            }}
+            style={{
+              ...staticStyles.page,
+              backgroundColor: PAGE_BACKGROUNDS[pageBackground].base,
+            }}
+          >
+            <PdfPageBackground
+              background={pageBackground}
+              width={pageWidth}
+              height={pageHeight}
+            />
+
+            {/* Page break indicator for combined pages */}
+            {combinePages && (
+              <View
+                style={{
+                  position: "absolute",
+                  left: pageWidth / 2,
+                  top: 0,
+                  bottom: 0,
+                  width: 1,
+                  borderLeft: "1 dashed #D1D5DB",
+                }}
+              />
+            )}
+
+            {/* Page caption(s) - alternating margin band, one per
+                logical page (two side by side when combined) */}
+            {showCaptions &&
+              (combinePages
+                ? [
+                    {
+                      key: pageData.pageNumber * 2 - 1,
+                      left: 0,
+                      width: pageWidth / 2,
+                    },
+                    {
+                      key: pageData.pageNumber * 2,
+                      left: pageWidth / 2,
+                      width: pageWidth / 2,
+                    },
+                  ]
+                : [{ key: pageData.pageNumber, left: 0, width: pageWidth }]
+              ).map((band) => {
+                const caption = pageCaptions.get(band.key);
+                if (!caption) return null;
+                const bandHeight = toPoints(validMargin);
+                // Text size is the priority; padding just fills
+                // whatever room is left around it, so a small page
+                // margin shrinks the padding rather than crushing
+                // the caption down to an unreadable size.
+                const captionFontSize = Math.min(
+                  fontSize * 1.9,
+                  bandHeight * 0.7,
+                );
+                const captionPaddingVertical = Math.max(
+                  4,
+                  Math.min(
+                    (bandHeight - captionFontSize) * 0.4,
+                    bandHeight * 0.25,
+                  ),
+                );
+                return (
+                  <View
+                    key={band.key}
+                    style={{
+                      position: "absolute",
+                      left: band.left,
+                      ...(captionAtBottom(band.key)
+                        ? { bottom: 0 }
+                        : { top: 0 }),
+                      width: band.width,
+                      height: bandHeight,
+                      paddingHorizontal: Math.max(16, band.width * 0.12),
+                      paddingVertical: captionPaddingVertical,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Caveat",
+                        fontWeight: 600,
+                        fontSize: captionFontSize,
+                        color: SCRAPBOOK.ink,
+                        textAlign: "center",
+                      }}
+                    >
+                      {caption}
+                    </Text>
+                  </View>
+                );
+              })}
+
+            {pageData.photos.map((photoBox) => {
+              const width = toPoints(photoBox.width);
+              const height = toPoints(photoBox.height);
+              const frameInset = Math.max(4, width * 0.035);
+              const tilt = photoTiltDeg(photoBox.id);
+              const tape = tapeStyle(photoBox.id);
+              const tapeWidth = width * 0.22;
+
+              // Text card - no backing photo, an editable note
+              // mounted the same way as a photo card.
+              if (!photoBox.asset) {
+                return (
+                  <View
+                    key={photoBox.id}
+                    style={{
+                      position: "absolute",
+                      left: toPoints(photoBox.x),
+                      top: toPoints(photoBox.y),
+                      width,
+                      height,
+                    }}
+                  >
+                    <View
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width,
+                        height,
+                        transform: `rotate(${tilt}deg) scale(0.93)`,
+                      }}
+                    >
+                      <View
+                        style={{
+                          position: "absolute",
+                          top: 4,
+                          left: 3,
+                          width,
+                          height,
+                          backgroundColor: SCRAPBOOK.shadow,
+                        }}
+                      />
+                      <View
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width,
+                          height,
+                          backgroundColor: SCRAPBOOK.mat,
+                          padding: frameInset * 2,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontFamily: "Caveat",
+                            fontWeight: 500,
+                            fontSize: fontSize * 1.5,
+                            color: SCRAPBOOK.ink,
+                            textAlign: "center",
+                          }}
+                        >
+                          {textCardContents.get(photoBox.id) || ""}
+                        </Text>
+                      </View>
+                      <View
+                        style={{
+                          position: "absolute",
+                          top: -frameInset * 0.5,
+                          left: (width - tapeWidth) / 2,
+                          width: tapeWidth,
+                          height: frameInset * 1.6,
+                          backgroundColor: tape.color,
+                          opacity: 0.8,
+                          transform: `rotate(${tape.tiltDeg}deg)`,
+                        }}
+                      />
+                    </View>
+                  </View>
+                );
+              }
+
+              const asset = photoBox.asset;
+              // Full original resolution for print quality (the
+              // web preview below uses the much lighter "preview"
+              // thumbnail instead - this only matters for the PDF).
+              // Requires the Immich API key to have the
+              // asset.download permission. No apiKey query param - the
+              // real key is injected server-side by nginx (see
+              // nginx.conf.template). Absolute URL (not just "/api/...")
+              // because react-pdf's own image fetcher, used during
+              // pdf().toBlob() generation, doesn't reliably resolve
+              // relative URLs the way a normal <img> tag does.
+              const imageUrl = `${window.location.origin}${immichConfig.baseUrl}/assets/${asset.id}/original`;
+              const dateStripHeight = showDates
+                ? fontSize * 1.6
+                : 0;
+              const cardCaption = cardCaptions.get(asset.id);
+              // Only cards that actually have a caption reserve the
+              // extra strip - an empty card keeps its full image.
+              const captionStripHeight = cardCaption
+                ? fontSize * 1.4
+                : 0;
+              const bottomStripHeight =
+                dateStripHeight + captionStripHeight;
+
+              return (
+                <View
+                  key={photoBox.id}
+                  style={{
+                    position: "absolute",
+                    left: toPoints(photoBox.x),
+                    top: toPoints(photoBox.y),
+                    width,
+                    height,
+                  }}
+                >
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width,
+                      height,
+                      transform: `rotate(${tilt}deg) scale(0.93)`,
+                    }}
+                  >
+                    {/* Soft cast shadow behind the mat */}
+                    <View
+                      style={{
+                        position: "absolute",
+                        top: 4,
+                        left: 3,
+                        width,
+                        height,
+                        backgroundColor: SCRAPBOOK.shadow,
+                      }}
+                    />
+                    {/* Polaroid mat */}
+                    <View
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width,
+                        height,
+                        backgroundColor: SCRAPBOOK.mat,
+                      }}
+                    >
+                      <Image
+                        src={imageUrl}
+                        style={{
+                          position: "absolute",
+                          top: frameInset,
+                          left: frameInset,
+                          right: frameInset,
+                          bottom: frameInset + bottomStripHeight,
+                          objectFit: "contain",
+                        }}
+                      />
+                      {cardCaption && (
+                        <View
+                          style={{
+                            position: "absolute",
+                            left: frameInset,
+                            right: frameInset,
+                            bottom: frameInset * 0.3 + dateStripHeight,
+                            height: captionStripHeight,
+                            display: "flex",
+                            alignItems: "flex-end",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontFamily: "Caveat",
+                              fontWeight: 500,
+                              fontSize: fontSize * 1.3,
+                              color: SCRAPBOOK.ink,
+                              textAlign: "center",
+                            }}
+                          >
+                            {cardCaption}
+                          </Text>
+                        </View>
+                      )}
+                      {showDates && asset.fileCreatedAt && (
+                        <View
+                          style={{
+                            position: "absolute",
+                            left: frameInset,
+                            right: frameInset,
+                            bottom: frameInset * 0.3,
+                            height: dateStripHeight,
+                            display: "flex",
+                            alignItems: "flex-end",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontFamily: "Caveat",
+                              fontWeight: 500,
+                              fontSize: fontSize * 1.3,
+                              color: SCRAPBOOK.ink,
+                            }}
+                          >
+                            {new Date(
+                              asset.fileCreatedAt,
+                            ).toLocaleDateString(undefined, {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    {/* Washi tape */}
+                    <View
+                      style={{
+                        position: "absolute",
+                        top: -frameInset * 0.5,
+                        left: (width - tapeWidth) / 2,
+                        width: tapeWidth,
+                        height: frameInset * 1.6,
+                        backgroundColor: tape.color,
+                        opacity: 0.8,
+                        transform: `rotate(${tape.tiltDeg}deg)`,
+                      }}
+                    />
+                  </View>
+                </View>
+              );
+            })}
+          </Page>
+        );
+      })}
+    </Document>
+  );
+
+  const handleGeneratePdf = async () => {
+    setPdfError(null);
+    setIsGeneratingPdf(true);
+    try {
+      const blob = await pdf(pdfDocument).toBlob();
+      setPdfUrl(URL.createObjectURL(blob));
+    } catch (e) {
+      console.error("Failed to generate PDF:", e);
+      setPdfError(
+        e instanceof Error
+          ? `PDF generation failed: ${e.message}`
+          : "PDF generation failed.",
+      );
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
   return (
     <div>
       {/* Controls */}
@@ -1022,35 +1645,35 @@ function PhotoGridEditor({
             assets
           </p>
 
-          {/* Generate PDF / Back to Edit button */}
+          {/* Generate PDF button */}
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            {mode === "preview" ? (
-              <button
-                onClick={() => setMode("pdf")}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm"
+            <button
+              onClick={handleGeneratePdf}
+              disabled={isGeneratingPdf}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed font-medium transition-colors shadow-sm flex items-center gap-2"
+            >
+              {isGeneratingPdf && <PdfSpinner />}
+              {isGeneratingPdf ? "Génération..." : "Générer le PDF"}
+            </button>
+            {pdfUrl && !isGeneratingPdf && (
+              <a
+                href={pdfUrl}
+                download={`${sanitizeFileName(album.albumName)}.pdf`}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors shadow-sm"
               >
-                Generate PDF
-              </button>
-            ) : (
-              <button
-                onClick={() => setMode("preview")}
-                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium transition-colors shadow-sm"
-              >
-                Back to Edit
-              </button>
+                Télécharger le PDF
+              </a>
             )}
-            {mode === "preview" && (
-              <button
-                onClick={handleGenerateCaptions}
-                disabled={isGeneratingCaptions}
-                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors shadow-sm"
-                title="Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)"
-              >
-                {isGeneratingCaptions
-                  ? `Génération... ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
-                  : "Générer les légendes"}
-              </button>
-            )}
+            <button
+              onClick={handleGenerateCaptions}
+              disabled={isGeneratingCaptions}
+              className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors shadow-sm"
+              title="Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)"
+            >
+              {isGeneratingCaptions
+                ? `Génération... ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
+                : "Générer les légendes"}
+            </button>
           </div>
           {captionError && (
             <p className="mt-2 text-xs text-red-600 max-w-xs">
@@ -1294,6 +1917,30 @@ function PhotoGridEditor({
                     <option value="24">24 pt</option>
                   </select>
                 </div>
+                <div className="flex items-center gap-1.5">
+                  <label
+                    htmlFor="pageBackground"
+                    className="text-gray-600 text-sm"
+                  >
+                    Background:
+                  </label>
+                  <select
+                    id="pageBackground"
+                    value={pageBackground}
+                    onChange={(e) =>
+                      setPageBackground(e.target.value as PageBackground)
+                    }
+                    className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    {(Object.keys(PAGE_BACKGROUNDS) as PageBackground[]).map(
+                      (key) => (
+                        <option key={key} value={key}>
+                          {PAGE_BACKGROUNDS[key].label}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
               </div>
             </div>
           </div>
@@ -1326,355 +1973,8 @@ function PhotoGridEditor({
         </div>
       </div>
 
-      {mode === "pdf" ? (
-        /* PDF Viewer */
-        <div
-          className="w-full"
-          style={{ height: "calc(100vh - 200px)", minHeight: "400px" }}
-        >
-          <PDFViewer width="100%" height="100%" showToolbar={true}>
-            <Document pageLayout={pageLayout}>
-              {pages.map((pageData) => {
-                // FIXME: pdfkit (internal of react-pdf) uses 72dpi internally and we downscale everything here;
-                // instead we should produce a high-quality 300 dpi pdf
-
-                // Convert page dimensions from 300 DPI to 72 DPI
-                const pageWidth = toPoints(pageData.width);
-                const pageHeight = toPoints(pageData.height);
-                return (
-                  <Page
-                    key={pageData.pageNumber}
-                    size={{
-                      width: pageWidth,
-                      height: pageHeight,
-                    }}
-                    style={staticStyles.page}
-                  >
-                    {/* Page break indicator for combined pages */}
-                    {combinePages && (
-                      <View
-                        style={{
-                          position: "absolute",
-                          left: pageWidth / 2,
-                          top: 0,
-                          bottom: 0,
-                          width: 1,
-                          borderLeft: "1 dashed #D1D5DB",
-                        }}
-                      />
-                    )}
-
-                    {/* Page caption(s) - alternating margin band, one per
-                        logical page (two side by side when combined) */}
-                    {showCaptions &&
-                      (combinePages
-                        ? [
-                            {
-                              key: pageData.pageNumber * 2 - 1,
-                              left: 0,
-                              width: pageWidth / 2,
-                            },
-                            {
-                              key: pageData.pageNumber * 2,
-                              left: pageWidth / 2,
-                              width: pageWidth / 2,
-                            },
-                          ]
-                        : [{ key: pageData.pageNumber, left: 0, width: pageWidth }]
-                      ).map((band) => {
-                        const caption = pageCaptions.get(band.key);
-                        if (!caption) return null;
-                        const bandHeight = toPoints(validMargin);
-                        // Text size is the priority; padding just fills
-                        // whatever room is left around it, so a small page
-                        // margin shrinks the padding rather than crushing
-                        // the caption down to an unreadable size.
-                        const captionFontSize = Math.min(
-                          fontSize * 1.9,
-                          bandHeight * 0.7,
-                        );
-                        const captionPaddingVertical = Math.max(
-                          4,
-                          Math.min(
-                            (bandHeight - captionFontSize) * 0.4,
-                            bandHeight * 0.25,
-                          ),
-                        );
-                        return (
-                          <View
-                            key={band.key}
-                            style={{
-                              position: "absolute",
-                              left: band.left,
-                              ...(captionAtBottom(band.key)
-                                ? { bottom: 0 }
-                                : { top: 0 }),
-                              width: band.width,
-                              height: bandHeight,
-                              paddingHorizontal: Math.max(16, band.width * 0.12),
-                              paddingVertical: captionPaddingVertical,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              overflow: "hidden",
-                            }}
-                          >
-                            <Text
-                              style={{
-                                fontFamily: "Caveat",
-                                fontWeight: 600,
-                                fontSize: captionFontSize,
-                                color: SCRAPBOOK.ink,
-                                textAlign: "center",
-                              }}
-                            >
-                              {caption}
-                            </Text>
-                          </View>
-                        );
-                      })}
-
-                    {pageData.photos.map((photoBox) => {
-                      const width = toPoints(photoBox.width);
-                      const height = toPoints(photoBox.height);
-                      const frameInset = Math.max(4, width * 0.035);
-                      const tilt = photoTiltDeg(photoBox.id);
-                      const tape = tapeStyle(photoBox.id);
-                      const tapeWidth = width * 0.22;
-
-                      // Text card - no backing photo, an editable note
-                      // mounted the same way as a photo card.
-                      if (!photoBox.asset) {
-                        return (
-                          <View
-                            key={photoBox.id}
-                            style={{
-                              position: "absolute",
-                              left: toPoints(photoBox.x),
-                              top: toPoints(photoBox.y),
-                              width,
-                              height,
-                            }}
-                          >
-                            <View
-                              style={{
-                                position: "absolute",
-                                top: 0,
-                                left: 0,
-                                width,
-                                height,
-                                transform: `rotate(${tilt}deg) scale(0.93)`,
-                              }}
-                            >
-                              <View
-                                style={{
-                                  position: "absolute",
-                                  top: 4,
-                                  left: 3,
-                                  width,
-                                  height,
-                                  backgroundColor: SCRAPBOOK.shadow,
-                                }}
-                              />
-                              <View
-                                style={{
-                                  position: "absolute",
-                                  top: 0,
-                                  left: 0,
-                                  width,
-                                  height,
-                                  backgroundColor: SCRAPBOOK.mat,
-                                  padding: frameInset * 2,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    fontFamily: "Caveat",
-                                    fontWeight: 500,
-                                    fontSize: fontSize * 1.5,
-                                    color: SCRAPBOOK.ink,
-                                    textAlign: "center",
-                                  }}
-                                >
-                                  {textCardContents.get(photoBox.id) || ""}
-                                </Text>
-                              </View>
-                              <View
-                                style={{
-                                  position: "absolute",
-                                  top: -frameInset * 0.5,
-                                  left: (width - tapeWidth) / 2,
-                                  width: tapeWidth,
-                                  height: frameInset * 1.6,
-                                  backgroundColor: tape.color,
-                                  opacity: 0.8,
-                                  transform: `rotate(${tape.tiltDeg}deg)`,
-                                }}
-                              />
-                            </View>
-                          </View>
-                        );
-                      }
-
-                      const asset = photoBox.asset;
-                      // Full original resolution for print quality (the
-                      // web preview below uses the much lighter "preview"
-                      // thumbnail instead - this only matters for the PDF).
-                      // Requires the Immich API key to have the
-                      // asset.download permission.
-                      const imageUrl = `${immichConfig.baseUrl}/assets/${asset.id}/original?apiKey=${immichConfig.apiKey}`;
-                      const dateStripHeight = showDates
-                        ? fontSize * 1.6
-                        : 0;
-                      const cardCaption = cardCaptions.get(asset.id);
-                      // Only cards that actually have a caption reserve the
-                      // extra strip - an empty card keeps its full image.
-                      const captionStripHeight = cardCaption
-                        ? fontSize * 1.4
-                        : 0;
-                      const bottomStripHeight =
-                        dateStripHeight + captionStripHeight;
-
-                      return (
-                        <View
-                          key={photoBox.id}
-                          style={{
-                            position: "absolute",
-                            left: toPoints(photoBox.x),
-                            top: toPoints(photoBox.y),
-                            width,
-                            height,
-                          }}
-                        >
-                          <View
-                            style={{
-                              position: "absolute",
-                              top: 0,
-                              left: 0,
-                              width,
-                              height,
-                              transform: `rotate(${tilt}deg) scale(0.93)`,
-                            }}
-                          >
-                            {/* Soft cast shadow behind the mat */}
-                            <View
-                              style={{
-                                position: "absolute",
-                                top: 4,
-                                left: 3,
-                                width,
-                                height,
-                                backgroundColor: SCRAPBOOK.shadow,
-                              }}
-                            />
-                            {/* Polaroid mat */}
-                            <View
-                              style={{
-                                position: "absolute",
-                                top: 0,
-                                left: 0,
-                                width,
-                                height,
-                                backgroundColor: SCRAPBOOK.mat,
-                              }}
-                            >
-                              <Image
-                                src={imageUrl}
-                                style={{
-                                  position: "absolute",
-                                  top: frameInset,
-                                  left: frameInset,
-                                  right: frameInset,
-                                  bottom: frameInset + bottomStripHeight,
-                                  objectFit: "contain",
-                                }}
-                              />
-                              {cardCaption && (
-                                <View
-                                  style={{
-                                    position: "absolute",
-                                    left: frameInset,
-                                    right: frameInset,
-                                    bottom: frameInset * 0.3 + dateStripHeight,
-                                    height: captionStripHeight,
-                                    display: "flex",
-                                    alignItems: "flex-end",
-                                    justifyContent: "center",
-                                  }}
-                                >
-                                  <Text
-                                    style={{
-                                      fontFamily: "Caveat",
-                                      fontWeight: 500,
-                                      fontSize: fontSize * 1.3,
-                                      color: SCRAPBOOK.ink,
-                                      textAlign: "center",
-                                    }}
-                                  >
-                                    {cardCaption}
-                                  </Text>
-                                </View>
-                              )}
-                              {showDates && asset.fileCreatedAt && (
-                                <View
-                                  style={{
-                                    position: "absolute",
-                                    left: frameInset,
-                                    right: frameInset,
-                                    bottom: frameInset * 0.3,
-                                    height: dateStripHeight,
-                                    display: "flex",
-                                    alignItems: "flex-end",
-                                    justifyContent: "center",
-                                  }}
-                                >
-                                  <Text
-                                    style={{
-                                      fontFamily: "Caveat",
-                                      fontWeight: 500,
-                                      fontSize: fontSize * 1.3,
-                                      color: SCRAPBOOK.ink,
-                                    }}
-                                  >
-                                    {new Date(
-                                      asset.fileCreatedAt,
-                                    ).toLocaleDateString(undefined, {
-                                      year: "numeric",
-                                      month: "short",
-                                      day: "numeric",
-                                    })}
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                            {/* Washi tape */}
-                            <View
-                              style={{
-                                position: "absolute",
-                                top: -frameInset * 0.5,
-                                left: (width - tapeWidth) / 2,
-                                width: tapeWidth,
-                                height: frameInset * 1.6,
-                                backgroundColor: tape.color,
-                                opacity: 0.8,
-                                transform: `rotate(${tape.tiltDeg}deg)`,
-                              }}
-                            />
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </Page>
-                );
-              })}
-            </Document>
-          </PDFViewer>
-        </div>
-      ) : (
-        /* Live Preview */
+      {/* Live Preview - always shown; the generated PDF (if any)
+          appears below once ready, rather than replacing this editor. */}
         <div
           ref={previewContainerRef}
           className="space-y-8 pb-8 px-4 sm:px-0"
@@ -1746,11 +2046,12 @@ function PhotoGridEditor({
                     ancestor breaks native HTML5 drag-and-drop for photo
                     reordering in Chromium. */}
                 <div
-                  className="mx-auto relative bg-white shadow-lg border border-gray-200"
+                  className="mx-auto relative shadow-lg border border-gray-200"
                   style={{
                     width: `${displayWidth}px`,
                     height: `${displayHeight}px`,
                     zoom: scale,
+                    ...pageBackgroundCss(pageBackground),
                   }}
                 >
                   {/* Page break indicator for combined pages */}
@@ -1925,7 +2226,7 @@ function PhotoGridEditor({
                     }
 
                     const asset = photoBox.asset;
-                    const imageUrl = `${immichConfig.baseUrl}/assets/${asset.id}/thumbnail?size=preview&apiKey=${immichConfig.apiKey}`;
+                    const imageUrl = `${immichConfig.baseUrl}/assets/${asset.id}/thumbnail?size=preview`;
 
                     const isBeingDragged =
                       reorderDragState?.draggedAssetId === asset.id;
@@ -2110,6 +2411,22 @@ function PhotoGridEditor({
               </div>
             );
           })}
+        </div>
+
+      {pdfError && (
+        <p className="px-4 sm:px-0 text-sm text-red-600">{pdfError}</p>
+      )}
+
+      {pdfUrl && (
+        <div
+          className="w-full mt-4 px-4 sm:px-0"
+          style={{ height: "calc(100vh - 200px)", minHeight: "400px" }}
+        >
+          <iframe
+            src={pdfUrl}
+            title="Generated PDF"
+            className="w-full h-full border border-gray-200 rounded-lg shadow-sm"
+          />
         </div>
       )}
     </div>
