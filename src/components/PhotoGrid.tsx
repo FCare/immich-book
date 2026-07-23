@@ -537,6 +537,10 @@ interface AlbumConfig extends GlobalConfig {
   // white card (matching the rest of the scrapbook) or sits directly
   // on the page background with no card at all.
   backCoverPlainText: boolean;
+  // Whether the front/back cover photos are also left out of the
+  // interior pages - on by default, since printing the same photo twice
+  // (once on its cover, again inside the book) is rarely wanted.
+  excludeCoverPhotosFromPages: boolean;
 }
 
 const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
@@ -604,6 +608,7 @@ async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     backCoverNoPhoto: false,
     backCoverText: "",
     backCoverPlainText: false,
+    excludeCoverPhotosFromPages: true,
   };
 
   try {
@@ -1002,6 +1007,8 @@ function PhotoGridEditor({
   const [backCoverPlainText, setBackCoverPlainText] = useState(
     initialConfig.backCoverPlainText,
   );
+  const [excludeCoverPhotosFromPages, setExcludeCoverPhotosFromPages] =
+    useState(initialConfig.excludeCoverPhotosFromPages);
   // Which settings tab is showing - purely local UI state, not worth
   // persisting per album.
   const [settingsTab, setSettingsTab] = useState<
@@ -1102,6 +1109,7 @@ function PhotoGridEditor({
       backCoverNoPhoto,
       backCoverText,
       backCoverPlainText,
+      excludeCoverPhotosFromPages,
     };
     saveAlbumConfig(album.id, config);
   }, [
@@ -1132,6 +1140,7 @@ function PhotoGridEditor({
     backCoverNoPhoto,
     backCoverText,
     backCoverPlainText,
+    excludeCoverPhotosFromPages,
     textCardCounts,
     textCardContents,
     slotOverrides,
@@ -1314,6 +1323,34 @@ function PhotoGridEditor({
     return filteredAssets[filteredAssets.length - 1] ?? null;
   }, [filteredAssets, backCoverAssetId, backCoverNoPhoto]);
 
+  // Interior pages leave out the cover/back-cover photos when the user
+  // opts in - otherwise each one prints twice (once on its cover, again
+  // inside the book). Derived from filteredAssets (not the other way
+  // around) so removing a photo from the interior never shifts which
+  // photo the cover/back-cover fall back to. Only excludes a photo that's
+  // actually shown as a photo on its cover - "text-only" doesn't display
+  // one, so nothing should disappear from the interior on its account.
+  const interiorAssets = useMemo(() => {
+    if (!excludeCoverPhotosFromPages || !showCover) return filteredAssets;
+    const excludedIds = new Set<string>();
+    if (coverLayout !== "text-only" && coverAsset) {
+      excludedIds.add(coverAsset.id);
+    }
+    if (backCoverLayout !== "text-only" && backCoverAsset) {
+      excludedIds.add(backCoverAsset.id);
+    }
+    if (excludedIds.size === 0) return filteredAssets;
+    return filteredAssets.filter((a) => !excludedIds.has(a.id));
+  }, [
+    filteredAssets,
+    excludeCoverPhotosFromPages,
+    showCover,
+    coverLayout,
+    coverAsset,
+    backCoverLayout,
+    backCoverAsset,
+  ]);
+
   // Calculate unified page layout - single source of truth!
   // When page captions are on, the content area's margin needs to be at
   // least as tall as the caption band itself (see
@@ -1329,7 +1366,7 @@ function PhotoGridEditor({
     : validMargin;
 
   const pages = useMemo(() => {
-    return calculatePageLayout(filteredAssets, {
+    return calculatePageLayout(interiorAssets, {
       pageWidth: validPageWidth,
       pageHeight: validPageHeight,
       margin: layoutMargin,
@@ -1341,7 +1378,7 @@ function PhotoGridEditor({
       slotOverrides,
     });
   }, [
-    filteredAssets,
+    interiorAssets,
     layoutMargin,
     validSpacing,
     validPageWidth,
@@ -3216,6 +3253,12 @@ function PhotoGridEditor({
               />
               {showCover && (
                 <>
+                  <ToggleSwitch
+                    checked={excludeCoverPhotosFromPages}
+                    onChange={setExcludeCoverPhotosFromPages}
+                    label="Leave cover photos out of the interior pages"
+                    sublabel="Otherwise the front/back cover photos also print again inside the book"
+                  />
                   <div>
                     <label
                       htmlFor="coverTitle"
