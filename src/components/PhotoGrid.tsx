@@ -461,6 +461,10 @@ interface GlobalConfig {
   // Layout settings
   spacing: number;
   filterVideos: boolean;
+  // Bleed ("fond perdu") - optional border around the trim size, filled
+  // with the page background, for print production.
+  bleedEnabled: boolean;
+  bleed: number;
 
   // Display settings
   showDates: boolean;
@@ -539,6 +543,20 @@ interface AlbumConfig extends GlobalConfig {
   // in the book's current order.
   coverAssetId: string | null;
   coverLayout: CoverLayout;
+  // Which photo to use on the back cover - independent of the front
+  // cover photo. Null falls back to the last photo in the book's
+  // current order (unless backCoverNoPhoto is set).
+  backCoverAssetId: string | null;
+  // Explicit "no photo" - overrides the fallback-to-last-photo default
+  // so a text-only (or empty) back cover is reachable, not just
+  // "haven't picked one yet".
+  backCoverNoPhoto: boolean;
+  // Optional short text shown on the back cover card, below its photo.
+  backCoverText: string;
+  // When there's no back cover photo, whether the text mounts on a
+  // white card (matching the rest of the scrapbook) or sits directly
+  // on the page background with no card at all.
+  backCoverPlainText: boolean;
 }
 
 const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
@@ -548,6 +566,8 @@ const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   combinePages: false,
   spacing: 20,
   filterVideos: true,
+  bleedEnabled: false,
+  bleed: mmToPixels(3),
   showDates: true,
   showCaptions: true,
   fontSize: 12,
@@ -599,6 +619,10 @@ async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     coverTitle: "",
     coverAssetId: null,
     coverLayout: "photo-title",
+    backCoverAssetId: null,
+    backCoverNoPhoto: false,
+    backCoverText: "",
+    backCoverPlainText: false,
   };
 
   try {
@@ -631,6 +655,8 @@ async function saveAlbumConfig(albumId: string, config: AlbumConfig) {
       combinePages: config.combinePages,
       spacing: config.spacing,
       filterVideos: config.filterVideos,
+      bleedEnabled: config.bleedEnabled,
+      bleed: config.bleed,
       showDates: config.showDates,
       showCaptions: config.showCaptions,
       fontSize: config.fontSize,
@@ -866,12 +892,22 @@ function PhotoGridEditor({
   // Layout settings
   const [spacing, setSpacing] = useState(initialConfig.spacing);
   const [filterVideos, setFilterVideos] = useState(initialConfig.filterVideos);
+  // Bleed ("fond perdu") - an optional border around the trim size,
+  // filled with the page background, so a print shop trimming the book
+  // doesn't reveal a white edge. Off by default since most digital/home
+  // printing doesn't need it.
+  const [bleedEnabled, setBleedEnabled] = useState(
+    initialConfig.bleedEnabled,
+  );
+  const [bleed, setBleed] = useState(initialConfig.bleed);
 
   // Validation helpers
   const isPageWidthValid = pageWidth >= 1000 && pageWidth <= 10000;
   const isPageHeightValid = pageHeight >= 1000 && pageHeight <= 10000;
   const isMarginValid = margin >= 0 && margin <= pageWidth / 2;
   const isSpacingValid = spacing >= 0 && spacing <= 100;
+  const isBleedValid =
+    bleed >= 0 && bleed <= Math.min(pageWidth, pageHeight) / 4;
 
   // Clamped values for use in layout calculations (prevent crashes from invalid values)
   const validPageWidth = isPageWidthValid
@@ -886,6 +922,9 @@ function PhotoGridEditor({
   const validSpacing = isSpacingValid
     ? spacing
     : Math.max(0, Math.min(100, spacing));
+  const validBleed = isBleedValid
+    ? bleed
+    : Math.max(0, Math.min(Math.min(validPageWidth, validPageHeight) / 4, bleed));
 
   // Display settings
   const [showDates, setShowDates] = useState(initialConfig.showDates);
@@ -967,6 +1006,18 @@ function PhotoGridEditor({
   const [coverLayout, setCoverLayout] = useState<CoverLayout>(
     initialConfig.coverLayout,
   );
+  const [backCoverAssetId, setBackCoverAssetId] = useState<string | null>(
+    initialConfig.backCoverAssetId,
+  );
+  const [backCoverNoPhoto, setBackCoverNoPhoto] = useState(
+    initialConfig.backCoverNoPhoto,
+  );
+  const [backCoverText, setBackCoverText] = useState(
+    initialConfig.backCoverText,
+  );
+  const [backCoverPlainText, setBackCoverPlainText] = useState(
+    initialConfig.backCoverPlainText,
+  );
   // Which settings tab is showing - purely local UI state, not worth
   // persisting per album.
   const [settingsTab, setSettingsTab] = useState<
@@ -1018,7 +1069,13 @@ function PhotoGridEditor({
   // Save config to localStorage whenever it changes (with clamped values)
   useEffect(() => {
     // Only save if all values are valid
-    if (!isPageWidthValid || !isPageHeightValid || !isMarginValid || !isSpacingValid) {
+    if (
+      !isPageWidthValid ||
+      !isPageHeightValid ||
+      !isMarginValid ||
+      !isSpacingValid ||
+      !isBleedValid
+    ) {
       return;
     }
 
@@ -1029,6 +1086,8 @@ function PhotoGridEditor({
       combinePages,
       spacing,
       filterVideos,
+      bleedEnabled,
+      bleed,
       showDates,
       showCaptions,
       fontSize,
@@ -1046,6 +1105,10 @@ function PhotoGridEditor({
       coverTitle,
       coverAssetId,
       coverLayout,
+      backCoverAssetId,
+      backCoverNoPhoto,
+      backCoverText,
+      backCoverPlainText,
     };
     saveAlbumConfig(album.id, config);
   }, [
@@ -1056,6 +1119,8 @@ function PhotoGridEditor({
     combinePages,
     spacing,
     filterVideos,
+    bleedEnabled,
+    bleed,
     showDates,
     showCaptions,
     fontSize,
@@ -1069,6 +1134,10 @@ function PhotoGridEditor({
     coverTitle,
     coverAssetId,
     coverLayout,
+    backCoverAssetId,
+    backCoverNoPhoto,
+    backCoverText,
+    backCoverPlainText,
     textCardCounts,
     textCardContents,
     slotOverrides,
@@ -1237,6 +1306,19 @@ function PhotoGridEditor({
     }
     return filteredAssets[0] ?? null;
   }, [filteredAssets, coverAssetId]);
+
+  // Back cover photo - explicit pick if the user made one, otherwise the
+  // book's last photo in its current order, unless backCoverNoPhoto was
+  // explicitly set (a text-only or empty back cover). Independent of the
+  // front cover photo.
+  const backCoverAsset = useMemo(() => {
+    if (backCoverNoPhoto) return null;
+    if (backCoverAssetId) {
+      const picked = filteredAssets.find((a) => a.id === backCoverAssetId);
+      if (picked) return picked;
+    }
+    return filteredAssets[filteredAssets.length - 1] ?? null;
+  }, [filteredAssets, backCoverAssetId, backCoverNoPhoto]);
 
   // Photos sampled for the "patchwork" cover layout - computed
   // unconditionally (cheap) so it stays available for both the live
@@ -1657,13 +1739,24 @@ function PhotoGridEditor({
     const coverImageBlob = coverAsset
       ? imageBlobs.get(coverAsset.id)
       : undefined;
+    const backCoverImageBlob = backCoverAsset
+      ? imageBlobs.get(backCoverAsset.id)
+      : undefined;
     const coverScrimHeight = coverPageHeight * 0.28;
+    // Bleed ("fond perdu") - extra border filled with the page
+    // background, outside the trim size, so a print shop's trim line
+    // doesn't reveal a white edge. All existing page content keeps
+    // using the trim-size coordinates unchanged; it's just mounted
+    // inside a View offset by bleedPt on an enlarged page/background.
+    const bleedPt = bleedEnabled ? toPoints(validBleed) : 0;
+    const coverBleedWidth = coverPageWidth + bleedPt * 2;
+    const coverBleedHeight = coverPageHeight + bleedPt * 2;
 
     return (
     <Document pageLayout={pageLayout}>
       {showCover && (
         <Page
-          size={{ width: coverPageWidth, height: coverPageHeight }}
+          size={{ width: coverBleedWidth, height: coverBleedHeight }}
           style={{
             ...staticStyles.page,
             backgroundColor: PAGE_BACKGROUNDS[pageBackground].base,
@@ -1671,9 +1764,18 @@ function PhotoGridEditor({
         >
           <PdfPageBackground
             background={pageBackground}
-            width={coverPageWidth}
-            height={coverPageHeight}
+            width={coverBleedWidth}
+            height={coverBleedHeight}
           />
+          <View
+            style={{
+              position: "absolute",
+              top: bleedPt,
+              left: bleedPt,
+              width: coverPageWidth,
+              height: coverPageHeight,
+            }}
+          >
 
           {coverLayout === "text-only" && (
             <View
@@ -1895,6 +1997,7 @@ function PhotoGridEditor({
               </View>
             </>
           )}
+          </View>
         </Page>
       )}
 
@@ -1905,12 +2008,14 @@ function PhotoGridEditor({
         // Convert page dimensions from 300 DPI to 72 DPI
         const pageWidth = toPoints(pageData.width);
         const pageHeight = toPoints(pageData.height);
+        const pageBleedWidth = pageWidth + bleedPt * 2;
+        const pageBleedHeight = pageHeight + bleedPt * 2;
         return (
           <Page
             key={pageData.pageNumber}
             size={{
-              width: pageWidth,
-              height: pageHeight,
+              width: pageBleedWidth,
+              height: pageBleedHeight,
             }}
             style={{
               ...staticStyles.page,
@@ -1919,9 +2024,18 @@ function PhotoGridEditor({
           >
             <PdfPageBackground
               background={pageBackground}
-              width={pageWidth}
-              height={pageHeight}
+              width={pageBleedWidth}
+              height={pageBleedHeight}
             />
+            <View
+              style={{
+                position: "absolute",
+                top: bleedPt,
+                left: bleedPt,
+                width: pageWidth,
+                height: pageHeight,
+              }}
+            >
 
             {/* Page break indicator for combined pages */}
             {combinePages && (
@@ -2249,13 +2363,14 @@ function PhotoGridEditor({
                 </View>
               );
             })}
+            </View>
           </Page>
         );
       })}
 
       {showCover && (
         <Page
-          size={{ width: coverPageWidth, height: coverPageHeight }}
+          size={{ width: coverBleedWidth, height: coverBleedHeight }}
           style={{
             ...staticStyles.page,
             backgroundColor: PAGE_BACKGROUNDS[pageBackground].base,
@@ -2263,9 +2378,145 @@ function PhotoGridEditor({
         >
           <PdfPageBackground
             background={pageBackground}
-            width={coverPageWidth}
-            height={coverPageHeight}
+            width={coverBleedWidth}
+            height={coverBleedHeight}
           />
+          <View
+            style={{
+              position: "absolute",
+              top: bleedPt,
+              left: bleedPt,
+              width: coverPageWidth,
+              height: coverPageHeight,
+            }}
+          >
+          {(backCoverImageBlob || backCoverText) &&
+            (() => {
+              const hasImage = !!backCoverImageBlob;
+              // Plain text has no photo to mount, so no card/mat either -
+              // it just sits on the page background, centered on the
+              // whole page (not the whole scrapbook card treatment).
+              if (!hasImage && backCoverPlainText && backCoverText) {
+                const plainWidth = coverPageWidth * 0.7;
+                return (
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: (coverPageWidth - plainWidth) / 2,
+                      width: plainWidth,
+                      height: coverPageHeight,
+                      display: "flex",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Caveat",
+                        fontWeight: 500,
+                        fontSize: fontSize * 1.9,
+                        color: SCRAPBOOK.ink,
+                        textAlign: "center",
+                      }}
+                    >
+                      {backCoverText}
+                    </Text>
+                  </View>
+                );
+              }
+
+              // Card mounted flat (no tilt/tape), centered on the whole
+              // page, so it reads as a closing note rather than another
+              // scrapbook page.
+              const cardWidth = coverPageWidth * 0.42;
+              const cardHeight = coverPageHeight * 0.3;
+              const cardTop = (coverPageHeight - cardHeight) / 2;
+              const cardLeft = (coverPageWidth - cardWidth) / 2;
+              const frameInset = Math.max(4, cardWidth * 0.045);
+              const captionStripHeight = backCoverText
+                ? fontSize * 1.3 * 1.6
+                : 0;
+              return (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: cardTop,
+                    left: cardLeft,
+                    width: cardWidth,
+                    height: cardHeight,
+                  }}
+                >
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 4,
+                      left: 3,
+                      width: cardWidth,
+                      height: cardHeight,
+                      backgroundColor: SCRAPBOOK.shadow,
+                    }}
+                  />
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: cardWidth,
+                      height: cardHeight,
+                      backgroundColor: SCRAPBOOK.mat,
+                    }}
+                  >
+                    {backCoverImageBlob && (
+                      <PdfPhotoImage
+                        src={backCoverImageBlob}
+                        top={frameInset}
+                        left={frameInset}
+                        containerWidth={cardWidth - frameInset * 2}
+                        containerHeight={
+                          cardHeight - frameInset * 2 - captionStripHeight
+                        }
+                      />
+                    )}
+                    {backCoverText && (
+                      <View
+                        style={{
+                          position: "absolute",
+                          left: frameInset,
+                          width: cardWidth - frameInset * 2,
+                          bottom: backCoverImageBlob ? frameInset * 0.3 : 0,
+                          height: backCoverImageBlob
+                            ? captionStripHeight
+                            : cardHeight,
+                          display: "flex",
+                          flexDirection: "row",
+                          alignItems: backCoverImageBlob
+                            ? "flex-end"
+                            : "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontFamily: "Caveat",
+                            fontWeight: 500,
+                            fontSize: backCoverImageBlob
+                              ? fontSize * 1.3
+                              : fontSize * 1.5,
+                            color: SCRAPBOOK.ink,
+                            textAlign: "center",
+                          }}
+                        >
+                          {backCoverText}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              );
+            })()}
+          </View>
         </Page>
       )}
     </Document>
@@ -2291,6 +2542,9 @@ function PhotoGridEditor({
         coverAsset
       ) {
         assetIds.add(coverAsset.id);
+      }
+      if (showCover && backCoverAsset) {
+        assetIds.add(backCoverAsset.id);
       }
       const mosaicIds = usesPatchworkCover
         ? Array.from(new Set(mosaicAssets.map((a) => a.id)))
@@ -2618,7 +2872,8 @@ function PhotoGridEditor({
           )}
 
           {settingsTab === "layout" && (
-            <div className="flex flex-wrap items-end gap-5">
+            <div className="flex flex-col gap-5">
+              <div className="flex flex-wrap items-end gap-5">
               <div>
                 <label
                   htmlFor="margin"
@@ -2682,6 +2937,43 @@ function PhotoGridEditor({
                     mm
                   </span>
                 </div>
+              </div>
+              </div>
+              <div>
+                <ToggleSwitch
+                  checked={bleedEnabled}
+                  onChange={setBleedEnabled}
+                  label="Bleed"
+                  sublabel="Extra border filled with the page background, for print production - trimmed off after printing"
+                />
+                {bleedEnabled && (
+                  <div className="mt-3 flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      id="bleed"
+                      value={Math.round(pixelsToMm(bleed))}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        if (!isNaN(value)) {
+                          setBleed(mmToPixels(value));
+                        }
+                      }}
+                      min="0"
+                      max={Math.round(
+                        pixelsToMm(Math.min(pageWidth, pageHeight)) / 4,
+                      )}
+                      step="1"
+                      className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                        isBleedValid
+                          ? "border-gray-200 dark:border-gray-700"
+                          : "border-red-500 bg-red-50 dark:bg-red-950/40"
+                      }`}
+                    />
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                      mm
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2818,10 +3110,52 @@ function PhotoGridEditor({
                       ))}
                     </div>
                   </div>
+                  <div>
+                    <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+                      Back cover photo
+                    </span>
+                    {backCoverAsset ? (
+                      <button
+                        onClick={() => setBackCoverNoPhoto(true)}
+                        className="px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-red-300 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                      >
+                        Remove photo
+                      </button>
+                    ) : (
+                      <p className="text-xs text-gray-400 dark:text-gray-500">
+                        No photo - hover a photo below and click "Set as
+                        back cover" to add one.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="backCoverText"
+                      className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                    >
+                      Back cover text
+                    </label>
+                    <input
+                      type="text"
+                      id="backCoverText"
+                      value={backCoverText}
+                      onChange={(e) => setBackCoverText(e.target.value)}
+                      placeholder="Optional closing note"
+                      className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
+                    />
+                  </div>
+                  <ToggleSwitch
+                    checked={backCoverPlainText}
+                    onChange={setBackCoverPlainText}
+                    label="Plain back cover text"
+                    sublabel="No card behind the text - only applies when the back cover has no photo"
+                  />
                   <p className="text-xs text-gray-400 dark:text-gray-500">
                     The cover uses the same page background as the rest of
                     the book. Hover a photo below and click "Set as cover"
-                    to choose the cover image.
+                    or "Set as back cover" to choose the front and back
+                    cover images - they default to the book's first and
+                    last photo.
                   </p>
                 </>
               )}
@@ -2840,9 +3174,13 @@ function PhotoGridEditor({
             (() => {
               const displayWidth = toPoints(validPageWidth);
               const displayHeight = toPoints(validPageHeight);
+              const bleedPreviewPt = bleedEnabled ? toPoints(validBleed) : 0;
               const scale =
                 previewWidth > 0
-                  ? Math.min(1, previewWidth / displayWidth)
+                  ? Math.min(
+                      1,
+                      previewWidth / (displayWidth + bleedPreviewPt * 2),
+                    )
                   : 1;
               const imageUrl = coverAsset
                 ? `${immichConfig.baseUrl}/assets/${coverAsset.id}/thumbnail?size=preview`
@@ -2876,12 +3214,32 @@ function PhotoGridEditor({
                   <div
                     className="mx-auto relative shadow-lg dark:shadow-black/40 border border-gray-200 dark:border-gray-800"
                     style={{
-                      width: `${displayWidth}px`,
-                      height: `${displayHeight}px`,
+                      width: `${displayWidth + bleedPreviewPt * 2}px`,
+                      height: `${displayHeight + bleedPreviewPt * 2}px`,
                       zoom: scale,
                       ...pageBackgroundCss(pageBackground),
                     }}
                   >
+                    {bleedPreviewPt > 0 && (
+                      <div
+                        className="absolute pointer-events-none border border-dashed border-black/30 dark:border-white/30"
+                        style={{
+                          top: bleedPreviewPt,
+                          left: bleedPreviewPt,
+                          width: displayWidth,
+                          height: displayHeight,
+                        }}
+                      />
+                    )}
+                    <div
+                      className="absolute"
+                      style={{
+                        top: bleedPreviewPt,
+                        left: bleedPreviewPt,
+                        width: displayWidth,
+                        height: displayHeight,
+                      }}
+                    >
                     {coverLayout === "text-only" && (
                       <div
                         className="absolute inset-0 flex flex-col items-center justify-center gap-4"
@@ -2987,6 +3345,7 @@ function PhotoGridEditor({
                         </div>
                       </>
                     )}
+                    </div>
                   </div>
                 </div>
               );
@@ -2996,12 +3355,16 @@ function PhotoGridEditor({
             // Scale down to match PDF dimensions (72 DPI from 300 DPI)
             const displayWidth = toPoints(page.width);
             const displayHeight = toPoints(page.height);
+            const bleedPreviewPt = bleedEnabled ? toPoints(validBleed) : 0;
             // Shrink to fit the available column width (combined spreads
             // are often wider than the viewport) - never scale up past 1.
+            // The scale is computed against the bleed-inclusive width so
+            // a bled page never overflows the preview column.
             const scale =
-              previewWidth > 0 ? Math.min(1, previewWidth / displayWidth) : 1;
+              previewWidth > 0
+                ? Math.min(1, previewWidth / (displayWidth + bleedPreviewPt * 2))
+                : 1;
             const scaledWidth = displayWidth * scale;
-            const scaledHeight = displayHeight * scale;
 
             return (
               <div key={page.pageNumber} className="relative">
@@ -3061,12 +3424,35 @@ function PhotoGridEditor({
                 <div
                   className="mx-auto relative shadow-lg dark:shadow-black/40 border border-gray-200 dark:border-gray-800"
                   style={{
-                    width: `${displayWidth}px`,
-                    height: `${displayHeight}px`,
+                    width: `${displayWidth + bleedPreviewPt * 2}px`,
+                    height: `${displayHeight + bleedPreviewPt * 2}px`,
                     zoom: scale,
                     ...pageBackgroundCss(pageBackground),
                   }}
                 >
+                  {/* Trim line - only meaningful when bleed is on; marks
+                      where the printer will cut. */}
+                  {bleedPreviewPt > 0 && (
+                    <div
+                      className="absolute pointer-events-none border border-dashed border-black/30 dark:border-white/30"
+                      style={{
+                        top: bleedPreviewPt,
+                        left: bleedPreviewPt,
+                        width: displayWidth,
+                        height: displayHeight,
+                      }}
+                    />
+                  )}
+
+                  <div
+                    className="absolute"
+                    style={{
+                      top: bleedPreviewPt,
+                      left: bleedPreviewPt,
+                      width: displayWidth,
+                      height: displayHeight,
+                    }}
+                  >
                   {/* Page break indicator for combined pages */}
                   {combinePages && (
                     <div
@@ -3416,6 +3802,34 @@ function PhotoGridEditor({
                           </div>
                         )}
 
+                        {/* Back cover picker */}
+                        {backCoverAsset?.id === asset.id ? (
+                          <div
+                            className="absolute top-9 right-2 cursor-pointer bg-indigo-500 hover:bg-red-600 text-white px-2 py-0.5 rounded shadow text-xs font-medium z-10 transition-colors"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setBackCoverNoPhoto(true);
+                            }}
+                            title="Remove as back cover photo"
+                          >
+                            ★ Back cover ✕
+                          </div>
+                        ) : (
+                          <div
+                            className="absolute top-9 right-2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-indigo-500 hover:bg-indigo-600 text-white px-2 py-0.5 rounded shadow text-xs font-medium z-10"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setBackCoverAssetId(asset.id);
+                              setBackCoverNoPhoto(false);
+                            }}
+                            title="Set as back cover photo"
+                          >
+                            Set as back cover
+                          </div>
+                        )}
+
                         {/* Customization indicator */}
                         {isReordered && (
                           <div
@@ -3442,6 +3856,7 @@ function PhotoGridEditor({
                     );
                   })}
                 </div>
+                  </div>
               </div>
             );
           })}
@@ -3450,9 +3865,13 @@ function PhotoGridEditor({
             (() => {
               const displayWidth = toPoints(validPageWidth);
               const displayHeight = toPoints(validPageHeight);
+              const bleedPreviewPt = bleedEnabled ? toPoints(validBleed) : 0;
               const scale =
                 previewWidth > 0
-                  ? Math.min(1, previewWidth / displayWidth)
+                  ? Math.min(
+                      1,
+                      previewWidth / (displayWidth + bleedPreviewPt * 2),
+                    )
                   : 1;
               return (
                 <div className="relative">
@@ -3464,12 +3883,137 @@ function PhotoGridEditor({
                   <div
                     className="mx-auto relative shadow-lg dark:shadow-black/40 border border-gray-200 dark:border-gray-800"
                     style={{
-                      width: `${displayWidth}px`,
-                      height: `${displayHeight}px`,
+                      width: `${displayWidth + bleedPreviewPt * 2}px`,
+                      height: `${displayHeight + bleedPreviewPt * 2}px`,
                       zoom: scale,
                       ...pageBackgroundCss(pageBackground),
                     }}
-                  />
+                  >
+                    {bleedPreviewPt > 0 && (
+                      <div
+                        className="absolute pointer-events-none border border-dashed border-black/30 dark:border-white/30"
+                        style={{
+                          top: bleedPreviewPt,
+                          left: bleedPreviewPt,
+                          width: displayWidth,
+                          height: displayHeight,
+                        }}
+                      />
+                    )}
+                    <div
+                      className="absolute"
+                      style={{
+                        top: bleedPreviewPt,
+                        left: bleedPreviewPt,
+                        width: displayWidth,
+                        height: displayHeight,
+                      }}
+                    >
+                    {(backCoverAsset || backCoverText !== "") &&
+                      (() => {
+                        const imageUrl = backCoverAsset
+                          ? `${immichConfig.baseUrl}/assets/${backCoverAsset.id}/thumbnail?size=preview`
+                          : null;
+
+                        // Plain text has no photo to mount, so no
+                        // card/mat either - it just sits on the page
+                        // background, centered on the whole page.
+                        if (!imageUrl && backCoverPlainText) {
+                          const plainWidth = displayWidth * 0.7;
+                          return (
+                            <input
+                              type="text"
+                              value={backCoverText}
+                              onChange={(e) =>
+                                setBackCoverText(e.target.value)
+                              }
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              placeholder="Optional closing note"
+                              className="absolute text-center bg-transparent focus:outline-none focus:bg-white/40 rounded"
+                              style={{
+                                top: 0,
+                                left: (displayWidth - plainWidth) / 2,
+                                width: plainWidth,
+                                height: displayHeight,
+                                fontFamily: "Caveat",
+                                fontWeight: 500,
+                                fontSize: `${fontSize * 1.9}px`,
+                                color: SCRAPBOOK.ink,
+                              }}
+                            />
+                          );
+                        }
+
+                        // Card mounted flat (no tilt), centered on the
+                        // whole page, so it reads as a closing note.
+                        const cardWidth = displayWidth * 0.42;
+                        const cardHeight = displayHeight * 0.3;
+                        const cardTop = (displayHeight - cardHeight) / 2;
+                        const cardLeft = (displayWidth - cardWidth) / 2;
+                        const frameInset = Math.max(4, cardWidth * 0.045);
+                        const captionStripHeight = fontSize * 1.4;
+                        return (
+                          <div
+                            className="absolute"
+                            style={{
+                              top: cardTop,
+                              left: cardLeft,
+                              width: cardWidth,
+                              height: cardHeight,
+                              boxShadow: `2px 5px 10px ${SCRAPBOOK.shadow}`,
+                              backgroundColor: SCRAPBOOK.mat,
+                            }}
+                          >
+                            {imageUrl && (
+                              <div
+                                className="absolute overflow-hidden"
+                                style={{
+                                  top: frameInset,
+                                  left: frameInset,
+                                  right: frameInset,
+                                  bottom: frameInset + captionStripHeight,
+                                }}
+                              >
+                                <img
+                                  src={imageUrl}
+                                  alt={backCoverAsset?.originalFileName}
+                                  className="object-contain w-full h-full"
+                                  loading="lazy"
+                                />
+                              </div>
+                            )}
+                            <input
+                              type="text"
+                              value={backCoverText}
+                              onChange={(e) =>
+                                setBackCoverText(e.target.value)
+                              }
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              placeholder={
+                                imageUrl ? "+ text" : "Optional closing note"
+                              }
+                              className="absolute text-center bg-transparent focus:outline-none focus:bg-white/70 rounded"
+                              style={{
+                                left: frameInset,
+                                right: frameInset,
+                                bottom: imageUrl ? frameInset * 0.3 : 0,
+                                top: imageUrl ? undefined : 0,
+                                height: imageUrl
+                                  ? captionStripHeight
+                                  : cardHeight,
+                                fontFamily: "Caveat",
+                                fontWeight: 500,
+                                fontSize: `${imageUrl ? fontSize * 1.3 : fontSize * 1.5}px`,
+                                color: SCRAPBOOK.ink,
+                              }}
+                            />
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
                 </div>
               );
             })()}
