@@ -16,6 +16,21 @@ function App() {
   );
   const [isLoadingAlbum, setIsLoadingAlbum] = useState(false);
 
+  // Theme is a pure display preference with nothing to sync server-side
+  // (Immich itself doesn't expose one via its API - it's a local-only
+  // browser setting there too), so plain localStorage is the right home
+  // for it, same as Immich's own web client.
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    const stored = localStorage.getItem("immich-book-dark-mode");
+    if (stored !== null) return stored === "true";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", darkMode);
+    localStorage.setItem("immich-book-dark-mode", String(darkMode));
+  }, [darkMode]);
+
   // Check for reset parameter in URL to clear localStorage
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -115,29 +130,66 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-white dark:bg-gray-950 transition-colors">
       {/* Header */}
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+      <header className="bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Immich Book</h1>
-            <p className="text-sm text-gray-500">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-50">
+              Immich Book
+            </h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Create photo books from your Immich albums
             </p>
           </div>
+          <button
+            onClick={() => setDarkMode((prev) => !prev)}
+            className="flex items-center gap-2 pl-2 pr-3.5 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 text-xs font-semibold transition-colors"
+            title="Toggle dark mode"
+          >
+            <span className="w-6 h-6 rounded-full bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 flex items-center justify-center">
+              {darkMode ? (
+                <svg
+                  viewBox="0 0 24 24"
+                  width="13"
+                  height="13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                >
+                  <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" />
+                </svg>
+              ) : (
+                <svg
+                  viewBox="0 0 24 24"
+                  width="13"
+                  height="13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                >
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+                </svg>
+              )}
+            </span>
+            {darkMode ? "Dark" : "Light"}
+          </button>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {configError ? (
-          <div className="max-w-md mx-auto p-4 bg-red-50 border border-red-200 rounded-md">
-            <p className="text-sm text-red-800">{configError}</p>
+          <div className="max-w-md mx-auto p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-md">
+            <p className="text-sm text-red-800 dark:text-red-300">
+              {configError}
+            </p>
           </div>
         ) : !immichConfig || isLoadingAlbum ? (
           <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-            <p className="mt-4 text-gray-600">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">
               {immichConfig ? "Loading album..." : "Connecting..."}
             </p>
           </div>

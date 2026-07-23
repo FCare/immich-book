@@ -744,6 +744,50 @@ function PdfSpinner() {
   );
 }
 
+function ToggleSwitch({
+  checked,
+  onChange,
+  label,
+  sublabel,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  sublabel?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0 border-b border-gray-100 dark:border-gray-800 last:border-none">
+      <span>
+        <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">
+          {label}
+        </span>
+        {sublabel && (
+          <span className="block text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+            {sublabel}
+          </span>
+        )}
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-[22px] w-9 flex-none items-center rounded-full transition-colors ${
+          checked
+            ? "bg-indigo-600"
+            : "bg-gray-200 dark:bg-gray-700"
+        }`}
+      >
+        <span
+          className={`inline-block h-[18px] w-[18px] transform rounded-full bg-white shadow transition-transform ${
+            checked ? "translate-x-[18px]" : "translate-x-0.5"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 // Fetches this album's photobook config from the backend before mounting
 // the actual editor - PhotoGridEditor's many useState(initialConfig.x)
 // calls need a resolved config up front, so this wrapper turns the async
@@ -768,8 +812,10 @@ function PhotoGrid(props: PhotoGridProps) {
   if (!initialConfig) {
     return (
       <div className="text-center py-12">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-        <p className="mt-4 text-gray-600">Loading photobook...</p>
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
+        <p className="mt-4 text-gray-600 dark:text-gray-400">
+          Loading photobook...
+        </p>
       </div>
     );
   }
@@ -921,6 +967,11 @@ function PhotoGridEditor({
   const [coverLayout, setCoverLayout] = useState<CoverLayout>(
     initialConfig.coverLayout,
   );
+  // Which settings tab is showing - purely local UI state, not worth
+  // persisting per album.
+  const [settingsTab, setSettingsTab] = useState<
+    "page" | "layout" | "presentation" | "cover"
+  >("page");
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
   const [captionProgress, setCaptionProgress] = useState<{
     done: number;
@@ -1351,49 +1402,127 @@ function PhotoGridEditor({
   // Calculate total logical pages for display purposes
   const totalLogicalPages = combinePages ? pages.length * 2 : pages.length;
 
-  // Small button group for per-page layout controls - shuffle the bento
-  // arrangement, force a photo count, or swap some slots for text cards.
+  // Floating pill toolbar for per-page layout controls - shuffle the
+  // bento arrangement, force a photo count, or swap some slots for text
+  // cards. Icon + stepper rather than a row of bordered buttons/selects,
+  // since this sits above every single page and gets used constantly.
   const renderStyleSwitcher = (logicalPageNumber: number) => {
+    const currentCount = pageCounts.get(logicalPageNumber) ?? null;
+    const currentText = textCardCounts.get(logicalPageNumber) ?? 0;
+
+    const decrementPhotos = () => {
+      if (currentCount === null) return;
+      if (currentCount <= 1) handleSetPageCount(logicalPageNumber, null);
+      else handleSetPageCount(logicalPageNumber, currentCount - 1);
+    };
+    const incrementPhotos = () => {
+      if (currentCount === null) handleSetPageCount(logicalPageNumber, 1);
+      else if (currentCount < 12)
+        handleSetPageCount(logicalPageNumber, currentCount + 1);
+    };
+    const decrementText = () =>
+      handleSetTextCardCount(logicalPageNumber, Math.max(0, currentText - 1));
+    const incrementText = () =>
+      handleSetTextCardCount(logicalPageNumber, Math.min(3, currentText + 1));
+
+    const stepBtn =
+      "w-5 h-5 rounded-full text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:hover:bg-transparent flex items-center justify-center text-xs leading-none transition-colors";
+    const divider = (
+      <span className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-0.5" />
+    );
+
     return (
-      <div className="flex gap-1">
+      <div className="inline-flex items-center gap-0.5 px-1.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-sm">
         <button
           onClick={() => handleShuffleLayout(logicalPageNumber)}
-          className="px-2 py-1 text-xs border rounded transition-colors bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
           title="Try another arrangement for this page"
+          className="w-7 h-7 rounded-full flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/20 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors"
         >
-          Shuffle
+          <svg
+            viewBox="0 0 24 24"
+            width="15"
+            height="15"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+          </svg>
         </button>
-        <select
-          value={pageCounts.get(logicalPageNumber) ?? ""}
-          onChange={(e) =>
-            handleSetPageCount(
-              logicalPageNumber,
-              e.target.value === "" ? null : Number(e.target.value),
-            )
-          }
-          className="px-1 py-1 text-xs border border-gray-300 rounded bg-white text-gray-600"
-          title="Force how many photos are on this page"
+
+        {divider}
+
+        <span
+          className="flex items-center gap-1 pl-1"
+          title="Photos on this page"
         >
-          <option value="">Auto photos</option>
-          {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-            <option key={n} value={n}>
-              {n} photo{n > 1 ? "s" : ""}
-            </option>
-          ))}
-        </select>
-        <select
-          value={textCardCounts.get(logicalPageNumber) ?? 0}
-          onChange={(e) =>
-            handleSetTextCardCount(logicalPageNumber, Number(e.target.value))
-          }
-          className="px-1 py-1 text-xs border border-gray-300 rounded bg-white text-gray-600"
-          title="Turn some of this page's slots into text cards"
+          <svg
+            viewBox="0 0 24 24"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="text-gray-400 dark:text-gray-500 flex-none"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <circle cx="9" cy="9" r="2" />
+            <path d="M21 15l-5-5L5 21" />
+          </svg>
+          <button
+            onClick={decrementPhotos}
+            disabled={currentCount === null}
+            className={stepBtn}
+          >
+            –
+          </button>
+          <span className="text-xs font-semibold text-gray-600 dark:text-gray-300 tabular-nums w-9 text-center">
+            {currentCount === null ? "Auto" : currentCount}
+          </span>
+          <button
+            onClick={incrementPhotos}
+            disabled={currentCount === 12}
+            className={stepBtn}
+          >
+            +
+          </button>
+        </span>
+
+        {divider}
+
+        <span
+          className="flex items-center gap-1 pr-1"
+          title="Text cards on this page"
         >
-          <option value="0">No text cards</option>
-          <option value="1">1 text card</option>
-          <option value="2">2 text cards</option>
-          <option value="3">3 text cards</option>
-        </select>
+          <svg
+            viewBox="0 0 24 24"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="text-gray-400 dark:text-gray-500 flex-none"
+          >
+            <path d="M4 7V4h16v3M9 20h6M12 4v16" />
+          </svg>
+          <button
+            onClick={decrementText}
+            disabled={currentText === 0}
+            className={stepBtn}
+          >
+            –
+          </button>
+          <span className="text-xs font-semibold text-gray-600 dark:text-gray-300 tabular-nums w-3 text-center">
+            {currentText}
+          </span>
+          <button
+            onClick={incrementText}
+            disabled={currentText === 3}
+            className={stepBtn}
+          >
+            +
+          </button>
+        </span>
       </div>
     );
   };
@@ -1484,8 +1613,10 @@ function PhotoGridEditor({
   if (isLoading) {
     return (
       <div className="text-center py-12">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-        <p className="mt-4 text-gray-600">Loading photos...</p>
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
+        <p className="mt-4 text-gray-600 dark:text-gray-400">
+          Loading photos...
+        </p>
       </div>
     );
   }
@@ -1495,12 +1626,12 @@ function PhotoGridEditor({
       <div className="max-w-md mx-auto">
         <button
           onClick={onBack}
-          className="mb-4 text-blue-600 hover:text-blue-800"
+          className="mb-4 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
         >
           ← Back to albums
         </button>
-        <div className="p-4 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-sm text-red-800">{error}</p>
+        <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-md">
+          <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
           <button
             onClick={loadAlbumAssets}
             className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm transition-colors shadow-sm font-medium"
@@ -2227,28 +2358,51 @@ function PhotoGridEditor({
 
   return (
     <div>
-      {/* Controls */}
-      <div className="mb-6 flex flex-col lg:flex-row flex-1 items-start lg:justify-between gap-4 lg:gap-8">
+      {/* App bar */}
+      <div className="mb-6 flex flex-col lg:flex-row flex-1 items-start lg:items-center lg:justify-between gap-4 lg:gap-8">
         <div className="w-full lg:w-auto">
           <button
             onClick={onBack}
-            className="text-blue-600 hover:text-blue-800 mb-2"
+            className="inline-flex items-center gap-1 text-sm font-semibold text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 mb-2 transition-colors"
           >
-            ← Back to albums
+            <svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+            >
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+            Albums
           </button>
-          <h2 className="text-2xl font-semibold">{album.albumName}</h2>
-          <p className="text-gray-600 mt-1">
+          <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
+            {album.albumName}
+          </h2>
+          <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm tabular-nums">
             {filteredAssets.length}{" "}
             {filteredAssets.length !== assets.length && `of ${assets.length}`}{" "}
             assets
           </p>
+        </div>
 
-          {/* Generate PDF button */}
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="flex flex-col items-start lg:items-end gap-2 w-full lg:w-auto">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleGenerateCaptions}
+              disabled={isGeneratingCaptions}
+              className="px-4 py-2 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold transition-colors"
+              title="Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)"
+            >
+              {isGeneratingCaptions
+                ? `Génération... ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
+                : "Générer les légendes"}
+            </button>
             <button
               onClick={handleGeneratePdf}
               disabled={isGeneratingPdf}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed font-medium transition-colors shadow-sm flex items-center gap-2"
+              className="px-5 py-2 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-indigo-400 dark:disabled:bg-indigo-800 disabled:cursor-not-allowed text-sm font-semibold shadow-sm transition-colors flex items-center gap-2"
             >
               {isGeneratingPdf && <PdfSpinner />}
               {isGeneratingPdf
@@ -2261,144 +2415,218 @@ function PhotoGridEditor({
               <a
                 href={pdfUrl}
                 download={`${sanitizeFileName(album.albumName)}.pdf`}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors shadow-sm"
+                className="px-5 py-2 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-semibold shadow-sm transition-colors"
               >
                 Télécharger le PDF
               </a>
             )}
-            <button
-              onClick={handleGenerateCaptions}
-              disabled={isGeneratingCaptions}
-              className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors shadow-sm"
-              title="Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)"
-            >
-              {isGeneratingCaptions
-                ? `Génération... ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
-                : "Générer les légendes"}
-            </button>
           </div>
           {captionError && (
-            <p className="mt-2 text-xs text-red-600 max-w-xs">
+            <p className="text-xs text-red-600 dark:text-red-400 max-w-xs lg:text-right">
               {captionError}
             </p>
           )}
         </div>
+      </div>
 
-        <div className="space-y-3 w-full lg:w-auto">
-          {/* 1. Page Setup */}
-          <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 sm:w-24">
-                <span className="w-2 h-2 rounded-full bg-blue-500" />
-                Page
-              </h3>
-              <div className="flex flex-wrap items-center gap-2">
-                <select
-                  value={
-                    PAGE_FORMAT_PRESETS.find(
-                      (p) =>
-                        p.widthMm === Math.round(pixelsToMm(pageWidth)) &&
-                        p.heightMm === Math.round(pixelsToMm(pageHeight)),
-                    )?.label || "custom"
-                  }
-                  onChange={(e) => {
-                    const preset = PAGE_FORMAT_PRESETS.find(
-                      (p) => p.label === e.target.value,
-                    );
-                    if (preset) {
-                      setPageWidth(mmToPixels(preset.widthMm));
-                      setPageHeight(mmToPixels(preset.heightMm));
-                    }
-                  }}
-                  className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  title="Quick format - width/height stay editable below"
+      {/* Settings */}
+      <div className="mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div className="inline-flex p-1 bg-gray-100 dark:bg-gray-900 rounded-full gap-0.5">
+            {(
+              [
+                {
+                  key: "page" as const,
+                  label: "Page",
+                  icon: (
+                    <rect x="4" y="3" width="16" height="18" rx="2" />
+                  ),
+                },
+                {
+                  key: "layout" as const,
+                  label: "Layout",
+                  icon: (
+                    <>
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <path d="M3 9h18M9 21V9" />
+                    </>
+                  ),
+                },
+                {
+                  key: "presentation" as const,
+                  label: "Presentation",
+                  icon: (
+                    <>
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 7v5l3 3" />
+                    </>
+                  ),
+                },
+                {
+                  key: "cover" as const,
+                  label: "Cover",
+                  icon: (
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z" />
+                  ),
+                },
+              ]
+            ).map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setSettingsTab(tab.key)}
+                className={`px-3.5 py-1.5 rounded-full text-sm font-semibold flex items-center gap-1.5 transition-colors ${
+                  settingsTab === tab.key
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                }`}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
                 >
-                  <option value="custom">Custom</option>
-                  {PAGE_FORMAT_PRESETS.map((p) => (
-                    <option key={p.label} value={p.label}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-                <div className="flex items-center gap-1.5">
-                  <label htmlFor="pageWidth" className="text-gray-600 text-sm">
-                    Width:
-                  </label>
-                  <input
-                    type="number"
-                    id="pageWidth"
-                    value={Math.round(pixelsToMm(pageWidth))}
-                    onChange={(e) => {
-                      const value = Number(e.target.value);
-                      if (!isNaN(value)) {
-                        setPageWidth(mmToPixels(value));
-                      }
-                    }}
-                    min={Math.round(pixelsToMm(1000))}
-                    max={Math.round(pixelsToMm(10000))}
-                    step="1"
-                    className={`px-2 py-1.5 w-[4.5rem] text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                      isPageWidthValid
-                        ? "border-gray-300"
-                        : "border-red-500 bg-red-50"
-                    }`}
-                  />
-                  <span className="text-xs text-gray-400">mm</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <label htmlFor="pageHeight" className="text-gray-600 text-sm">
-                    Height:
-                  </label>
-                  <input
-                    type="number"
-                    id="pageHeight"
-                    value={Math.round(pixelsToMm(pageHeight))}
-                    onChange={(e) => {
-                      const value = Number(e.target.value);
-                      if (!isNaN(value)) {
-                        setPageHeight(mmToPixels(value));
-                      }
-                    }}
-                    min={Math.round(pixelsToMm(1000))}
-                    max={Math.round(pixelsToMm(10000))}
-                    step="1"
-                    className={`px-2 py-1.5 w-[4.5rem] text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                      isPageHeightValid
-                        ? "border-gray-300"
-                        : "border-red-500 bg-red-50"
-                    }`}
-                  />
-                  <span className="text-xs text-gray-400">mm</span>
-                </div>
-                <label
-                  htmlFor="combinePages"
-                  className="flex items-center gap-1.5 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    id="combinePages"
-                    checked={combinePages}
-                    onChange={(e) => setCombinePages(e.target.checked)}
-                    className="h-4 w-4 accent-blue-600 rounded"
-                  />
-                  <span className="text-sm text-gray-700">Combine Pages</span>
-                </label>
-              </div>
-            </div>
+                  {tab.icon}
+                </svg>
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          {/* 2. Layout */}
-          <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 sm:w-24">
-                <span className="w-2 h-2 rounded-full bg-purple-500" />
-                Layout
-              </h3>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <label htmlFor="margin" className="text-gray-600 text-sm">
-                    Margin:
+          {customOrdering !== null && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 font-medium">
+                <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
+                Custom order
+              </span>
+              <button
+                onClick={handleResetOrdering}
+                className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full transition-colors font-medium"
+              >
+                Reset
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm p-5">
+          {settingsTab === "page" && (
+            <div className="flex flex-col gap-5">
+              <div>
+                <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+                  Format
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {PAGE_FORMAT_PRESETS.map((p) => {
+                    const active =
+                      p.widthMm === Math.round(pixelsToMm(pageWidth)) &&
+                      p.heightMm === Math.round(pixelsToMm(pageHeight));
+                    return (
+                      <button
+                        key={p.label}
+                        onClick={() => {
+                          setPageWidth(mmToPixels(p.widthMm));
+                          setPageHeight(mmToPixels(p.heightMm));
+                        }}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                          active
+                            ? "bg-indigo-50 dark:bg-indigo-500/20 border-indigo-400 dark:border-indigo-500 text-indigo-700 dark:text-indigo-300"
+                            : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600"
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-end gap-5">
+                <div>
+                  <label
+                    htmlFor="pageWidth"
+                    className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                  >
+                    Width
                   </label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      id="pageWidth"
+                      value={Math.round(pixelsToMm(pageWidth))}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        if (!isNaN(value)) {
+                          setPageWidth(mmToPixels(value));
+                        }
+                      }}
+                      min={Math.round(pixelsToMm(1000))}
+                      max={Math.round(pixelsToMm(10000))}
+                      step="1"
+                      className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                        isPageWidthValid
+                          ? "border-gray-200 dark:border-gray-700"
+                          : "border-red-500 bg-red-50 dark:bg-red-950/40"
+                      }`}
+                    />
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                      mm
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label
+                    htmlFor="pageHeight"
+                    className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                  >
+                    Height
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      id="pageHeight"
+                      value={Math.round(pixelsToMm(pageHeight))}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        if (!isNaN(value)) {
+                          setPageHeight(mmToPixels(value));
+                        }
+                      }}
+                      min={Math.round(pixelsToMm(1000))}
+                      max={Math.round(pixelsToMm(10000))}
+                      step="1"
+                      className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                        isPageHeightValid
+                          ? "border-gray-200 dark:border-gray-700"
+                          : "border-red-500 bg-red-50 dark:bg-red-950/40"
+                      }`}
+                    />
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                      mm
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={combinePages}
+                onChange={setCombinePages}
+                label="Combine Pages"
+                sublabel="Show spreads side by side, in the editor and the PDF"
+              />
+            </div>
+          )}
+
+          {settingsTab === "layout" && (
+            <div className="flex flex-wrap items-end gap-5">
+              <div>
+                <label
+                  htmlFor="margin"
+                  className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                >
+                  Margin
+                </label>
+                <div className="flex items-center gap-1.5">
                   <input
                     type="number"
                     id="margin"
@@ -2412,18 +2640,25 @@ function PhotoGridEditor({
                     min="0"
                     max={Math.round(pixelsToMm(pageWidth) / 2)}
                     step="1"
-                    className={`px-2 py-1.5 w-16 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                    className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
                       isMarginValid
-                        ? "border-gray-300"
-                        : "border-red-500 bg-red-50"
+                        ? "border-gray-200 dark:border-gray-700"
+                        : "border-red-500 bg-red-50 dark:bg-red-950/40"
                     }`}
                   />
-                  <span className="text-xs text-gray-400">mm</span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                    mm
+                  </span>
                 </div>
+              </div>
+              <div>
+                <label
+                  htmlFor="spacing"
+                  className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                >
+                  Spacing
+                </label>
                 <div className="flex items-center gap-1.5">
-                  <label htmlFor="spacing" className="text-gray-600 text-sm">
-                    Spacing:
-                  </label>
                   <input
                     type="number"
                     id="spacing"
@@ -2437,74 +2672,52 @@ function PhotoGridEditor({
                     min="0"
                     max={Math.round(pixelsToMm(100))}
                     step="1"
-                    className={`px-2 py-1.5 w-16 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                    className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
                       isSpacingValid
-                        ? "border-gray-300"
-                        : "border-red-500 bg-red-50"
+                        ? "border-gray-200 dark:border-gray-700"
+                        : "border-red-500 bg-red-50 dark:bg-red-950/40"
                     }`}
                   />
-                  <span className="text-xs text-gray-400">mm</span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                    mm
+                  </span>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* 3. Presentation */}
-          <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 sm:w-24">
-                <span className="w-2 h-2 rounded-full bg-gray-400" />
-                Presentation
-              </h3>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <label
-                  htmlFor="filterVideos"
-                  className="flex items-center gap-1.5 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    id="filterVideos"
-                    checked={filterVideos}
-                    onChange={(e) => setFilterVideos(e.target.checked)}
-                    className="h-4 w-4 accent-blue-600 rounded"
-                  />
-                  <span className="text-sm text-gray-700">Exclude Videos</span>
-                </label>
-                <label
-                  htmlFor="showDates"
-                  className="flex items-center gap-1.5 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    id="showDates"
-                    checked={showDates}
-                    onChange={(e) => setShowDates(e.target.checked)}
-                    className="h-4 w-4 accent-blue-600 rounded"
-                  />
-                  <span className="text-sm text-gray-700">Show Dates</span>
-                </label>
-                <label
-                  htmlFor="showCaptions"
-                  className="flex items-center gap-1.5 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    id="showCaptions"
-                    checked={showCaptions}
-                    onChange={(e) => setShowCaptions(e.target.checked)}
-                    className="h-4 w-4 accent-purple-600 rounded"
-                  />
-                  <span className="text-sm text-gray-700">Page Captions</span>
-                </label>
-                <div className="flex items-center gap-1.5">
-                  <label htmlFor="fontSize" className="text-gray-600 text-sm">
-                    Font Size:
+          {settingsTab === "presentation" && (
+            <div className="flex flex-col gap-5">
+              <div>
+                <ToggleSwitch
+                  checked={filterVideos}
+                  onChange={setFilterVideos}
+                  label="Exclude Videos"
+                />
+                <ToggleSwitch
+                  checked={showDates}
+                  onChange={setShowDates}
+                  label="Show Dates"
+                />
+                <ToggleSwitch
+                  checked={showCaptions}
+                  onChange={setShowCaptions}
+                  label="Page Captions"
+                />
+              </div>
+              <div className="flex flex-wrap items-end gap-5">
+                <div>
+                  <label
+                    htmlFor="fontSize"
+                    className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                  >
+                    Font Size
                   </label>
                   <select
                     id="fontSize"
                     value={fontSize}
                     onChange={(e) => setFontSize(Number(e.target.value))}
-                    className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   >
                     <option value="8">8 pt</option>
                     <option value="9">9 pt</option>
@@ -2519,117 +2732,99 @@ function PhotoGridEditor({
                     <option value="24">24 pt</option>
                   </select>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <label
-                    htmlFor="pageBackground"
-                    className="text-gray-600 text-sm"
-                  >
-                    Background:
-                  </label>
-                  <select
-                    id="pageBackground"
-                    value={pageBackground}
-                    onChange={(e) =>
-                      setPageBackground(e.target.value as PageBackground)
-                    }
-                    className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    {(Object.keys(PAGE_BACKGROUNDS) as PageBackground[]).map(
-                      (key) => (
-                        <option key={key} value={key}>
-                          {PAGE_BACKGROUNDS[key].label}
-                        </option>
-                      ),
-                    )}
-                  </select>
+              </div>
+              <div>
+                <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+                  Background
+                </span>
+                <div className="flex flex-col gap-2.5">
+                  {PAGE_BACKGROUND_GROUPS.map((group) => (
+                    <div
+                      key={group.label}
+                      className="flex items-center gap-2.5 flex-wrap"
+                    >
+                      <span className="text-[11px] text-gray-400 dark:text-gray-500 w-16 flex-none">
+                        {group.label}
+                      </span>
+                      <div className="flex gap-1.5">
+                        {group.keys.map((key) => {
+                          const preset = PAGE_BACKGROUNDS[key];
+                          const active = pageBackground === key;
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => setPageBackground(key)}
+                              title={preset.label}
+                              className={`w-7 h-7 rounded-full transition-transform ${
+                                active
+                                  ? "ring-2 ring-indigo-500 ring-offset-2 dark:ring-offset-gray-900 scale-105"
+                                  : "ring-1 ring-inset ring-black/10 dark:ring-white/10 hover:scale-105"
+                              }`}
+                              style={{ backgroundColor: preset.base }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* 4. Cover */}
-          <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 sm:w-24">
-                <span className="w-2 h-2 rounded-full bg-amber-500" />
-                Cover
-              </h3>
-              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                <label
-                  htmlFor="showCover"
-                  className="flex items-center gap-1.5 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    id="showCover"
-                    checked={showCover}
-                    onChange={(e) => setShowCover(e.target.checked)}
-                    className="h-4 w-4 accent-amber-600 rounded"
-                  />
-                  <span className="text-sm text-gray-700">
-                    Include cover page
-                  </span>
-                </label>
-                {showCover && (
-                  <>
+          {settingsTab === "cover" && (
+            <div className="flex flex-col gap-5">
+              <ToggleSwitch
+                checked={showCover}
+                onChange={setShowCover}
+                label="Include cover page"
+                sublabel="Some print services generate their own cover and don't want one in the submitted PDF"
+              />
+              {showCover && (
+                <>
+                  <div>
+                    <label
+                      htmlFor="coverTitle"
+                      className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                    >
+                      Title
+                    </label>
                     <input
                       type="text"
+                      id="coverTitle"
                       value={coverTitle}
                       onChange={(e) => setCoverTitle(e.target.value)}
                       placeholder={album.albumName}
-                      className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent w-48"
+                      className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
                     />
-                    <div className="flex gap-1">
+                  </div>
+                  <div>
+                    <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+                      Layout
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
                       {COVER_LAYOUTS.map((layout) => (
                         <button
                           key={layout.value}
                           onClick={() => setCoverLayout(layout.value)}
-                          className={`px-2 py-1 text-xs border rounded transition-colors ${
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                             coverLayout === layout.value
-                              ? "bg-amber-500 text-white border-amber-500"
-                              : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                              ? "bg-indigo-50 dark:bg-indigo-500/20 border-indigo-400 dark:border-indigo-500 text-indigo-700 dark:text-indigo-300"
+                              : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600"
                           }`}
                         >
                           {layout.label}
                         </button>
                       ))}
                     </div>
-                  </>
-                )}
-              </div>
-            </div>
-            <p className="mt-1.5 text-xs text-gray-400 sm:ml-28">
-              Some print services generate their own cover and don't want
-              one in the submitted PDF - turn this off if so. The cover
-              uses the same page background as the rest of the book. Hover
-              a photo below and click "Set as cover" to choose the cover
-              image.
-            </p>
-          </div>
-
-          {/* 5. Customizations (only shown when there are any) */}
-          {customOrdering !== null && (
-            <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 sm:w-24">
-                  <span className="w-2 h-2 rounded-full bg-green-500" />
-                  Customizations
-                </h3>
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="flex items-center gap-1 text-sm text-gray-600">
-                      <span className="w-2 h-2 bg-green-500 rounded-full" />
-                      Custom order
-                    </span>
-                    <button
-                      onClick={handleResetOrdering}
-                      className="text-xs px-2 py-0.5 bg-red-500 hover:bg-red-600 text-white rounded-md transition-colors font-medium"
-                    >
-                      Reset
-                    </button>
                   </div>
-                </div>
-              </div>
+                  <p className="text-xs text-gray-400 dark:text-gray-500">
+                    The cover uses the same page background as the rest of
+                    the book. Hover a photo below and click "Set as cover"
+                    to choose the cover image.
+                  </p>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -2674,12 +2869,12 @@ function PhotoGridEditor({
               return (
                 <div className="relative">
                   <div className="text-center mb-2">
-                    <span className="inline-block px-3 py-1 bg-amber-50 text-amber-700 text-sm rounded">
+                    <span className="inline-block px-3 py-1 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400 text-sm rounded-full font-medium">
                       Cover
                     </span>
                   </div>
                   <div
-                    className="mx-auto relative shadow-lg border border-gray-200"
+                    className="mx-auto relative shadow-lg dark:shadow-black/40 border border-gray-200 dark:border-gray-800"
                     style={{
                       width: `${displayWidth}px`,
                       height: `${displayHeight}px`,
@@ -2826,7 +3021,7 @@ function PhotoGridEditor({
                       className="flex flex-wrap items-center justify-center gap-2"
                       style={{ width: `${scaledWidth / 2}px` }}
                     >
-                      <span className="inline-block px-3 py-1 bg-gray-100 text-gray-600 text-sm rounded">
+                      <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm rounded-full font-medium">
                         Page {page.pageNumber * 2 - 1} of {totalLogicalPages}
                       </span>
                       {renderStyleSwitcher(page.pageNumber * 2 - 1)}
@@ -2838,7 +3033,7 @@ function PhotoGridEditor({
                         className="flex flex-wrap items-center justify-center gap-2"
                         style={{ width: `${scaledWidth / 2}px` }}
                       >
-                        <span className="inline-block px-3 py-1 bg-gray-100 text-gray-600 text-sm rounded">
+                        <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm rounded-full font-medium">
                           Page {page.pageNumber * 2} of {totalLogicalPages}
                         </span>
                         {renderStyleSwitcher(page.pageNumber * 2)}
@@ -2848,7 +3043,7 @@ function PhotoGridEditor({
                 ) : (
                   /* Single page mode - center everything */
                   <div className="text-center mb-2 flex flex-wrap items-center justify-center gap-2">
-                    <span className="inline-block px-3 py-1 bg-gray-100 text-gray-600 text-sm rounded">
+                    <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm rounded-full font-medium">
                       Page {page.pageNumber} of {totalLogicalPages}
                     </span>
                     {renderStyleSwitcher(page.pageNumber)}
@@ -2864,7 +3059,7 @@ function PhotoGridEditor({
                     ancestor breaks native HTML5 drag-and-drop for photo
                     reordering in Chromium. */}
                 <div
-                  className="mx-auto relative shadow-lg border border-gray-200"
+                  className="mx-auto relative shadow-lg dark:shadow-black/40 border border-gray-200 dark:border-gray-800"
                   style={{
                     width: `${displayWidth}px`,
                     height: `${displayHeight}px`,
@@ -3262,12 +3457,12 @@ function PhotoGridEditor({
               return (
                 <div className="relative">
                   <div className="text-center mb-2">
-                    <span className="inline-block px-3 py-1 bg-amber-50 text-amber-700 text-sm rounded">
+                    <span className="inline-block px-3 py-1 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400 text-sm rounded-full font-medium">
                       Back Cover
                     </span>
                   </div>
                   <div
-                    className="mx-auto relative shadow-lg border border-gray-200"
+                    className="mx-auto relative shadow-lg dark:shadow-black/40 border border-gray-200 dark:border-gray-800"
                     style={{
                       width: `${displayWidth}px`,
                       height: `${displayHeight}px`,
@@ -3281,7 +3476,9 @@ function PhotoGridEditor({
         </div>
 
       {pdfError && (
-        <p className="px-4 sm:px-0 text-sm text-red-600">{pdfError}</p>
+        <p className="px-4 sm:px-0 text-sm text-red-600 dark:text-red-400">
+          {pdfError}
+        </p>
       )}
 
       {pdfUrl && (
@@ -3292,7 +3489,7 @@ function PhotoGridEditor({
           <iframe
             src={pdfUrl}
             title="Generated PDF"
-            className="w-full h-full border border-gray-200 rounded-lg shadow-sm"
+            className="w-full h-full border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm dark:shadow-black/40"
           />
         </div>
       )}

@@ -90,8 +90,10 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
   if (isLoading) {
     return (
       <div className="text-center py-12">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-        <p className="mt-4 text-gray-600">Loading albums...</p>
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
+        <p className="mt-4 text-gray-600 dark:text-gray-400">
+          Loading albums...
+        </p>
       </div>
     );
   }
@@ -99,8 +101,10 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
   if (error) {
     return (
       <div className="max-w-md mx-auto">
-        <div className="p-4 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-sm text-red-800 whitespace-pre-line">{error}</p>
+        <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-md">
+          <p className="text-sm text-red-800 dark:text-red-300 whitespace-pre-line">
+            {error}
+          </p>
           <button
             onClick={loadAlbums}
             className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm transition-colors shadow-sm font-medium"
@@ -115,7 +119,9 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
   if (albums.length === 0) {
     return (
       <div className="max-w-md mx-auto text-center py-12">
-        <p className="text-gray-600">No albums found in your Immich library.</p>
+        <p className="text-gray-600 dark:text-gray-400">
+          No albums found in your Immich library.
+        </p>
       </div>
     );
   }
@@ -123,8 +129,10 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-semibold">Select an Album</h2>
-        <p className="text-gray-600 mt-1">
+        <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
+          Select an Album
+        </h2>
+        <p className="text-gray-600 dark:text-gray-400 mt-1">
           Choose an album to create a photo book ({albums.length} albums found)
         </p>
       </div>
@@ -134,10 +142,10 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
           <button
             key={album.id}
             onClick={() => onSelectAlbum(album)}
-            className="flex flex-col text-left bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow overflow-hidden"
+            className="flex flex-col text-left bg-white dark:bg-gray-900 border border-transparent dark:border-gray-800 rounded-lg shadow-md hover:shadow-lg dark:hover:border-gray-700 transition-shadow overflow-hidden"
           >
             {album.albumThumbnailAssetId ? (
-              <div className="h-48 bg-gray-200 relative overflow-hidden">
+              <div className="h-48 bg-gray-200 dark:bg-gray-800 relative overflow-hidden">
                 <img
                   src={`${immichConfig.baseUrl}/assets/${album.albumThumbnailAssetId}/thumbnail?size=preview`}
                   alt={album.albumName}
@@ -145,9 +153,9 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
                 />
               </div>
             ) : (
-              <div className="h-48 bg-gray-200 flex items-center justify-center">
+              <div className="h-48 bg-gray-200 dark:bg-gray-800 flex items-center justify-center">
                 <svg
-                  className="w-12 h-12 text-gray-400"
+                  className="w-12 h-12 text-gray-400 dark:text-gray-600"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -162,14 +170,14 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
               </div>
             )}
             <div className="p-4">
-              <h3 className="font-semibold text-gray-900 truncate">
+              <h3 className="font-semibold text-gray-900 dark:text-gray-50 truncate">
                 {album.albumName}
               </h3>
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                 {album.assetCount} {album.assetCount === 1 ? "photo" : "photos"}
               </p>
               {album.description && (
-                <p className="text-sm text-gray-600 mt-2 line-clamp-2">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-2">
                   {album.description}
                 </p>
               )}
