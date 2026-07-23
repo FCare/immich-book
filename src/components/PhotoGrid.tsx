@@ -473,36 +473,13 @@ interface GlobalConfig {
   pageBackground: PageBackground;
 }
 
-type CoverLayout = "photo-title" | "full-bleed" | "text-only" | "patchwork";
+type CoverLayout = "photo-title" | "full-bleed" | "text-only";
 
 const COVER_LAYOUTS: { value: CoverLayout; label: string }[] = [
   { value: "photo-title", label: "Photo & Title" },
   { value: "full-bleed", label: "Full-bleed Photo" },
   { value: "text-only", label: "Text Only" },
-  { value: "patchwork", label: "Patchwork" },
 ];
-
-// "Patchwork" cover: a grid of small photos from across the whole album,
-// tiled edge to edge like a quilt, with the title on a card in the
-// middle. Column count is fixed; rows are derived from the page's own
-// aspect ratio so tiles come out roughly square regardless of page
-// format (A4 portrait vs square, say).
-const MOSAIC_COLS = 10;
-
-function mosaicRowsFor(pageWidth: number, pageHeight: number): number {
-  return Math.max(1, Math.round(MOSAIC_COLS * (pageHeight / pageWidth)));
-}
-
-// Evenly samples `count` items across the full list (wrapping/repeating
-// if there are fewer assets than grid cells) so the mosaic represents the
-// whole album's span rather than just its first N photos.
-function sampleEvenly<T>(items: T[], count: number): T[] {
-  if (items.length === 0) return [];
-  return Array.from(
-    { length: count },
-    (_, i) => items[Math.floor((i * items.length) / count) % items.length],
-  );
-}
 
 interface AlbumConfig extends GlobalConfig {
   // Customizations (album-specific only)
@@ -547,6 +524,9 @@ interface AlbumConfig extends GlobalConfig {
   // cover photo. Null falls back to the last photo in the book's
   // current order (unless backCoverNoPhoto is set).
   backCoverAssetId: string | null;
+  // Same layout choices as the front cover. Defaults to "photo-title" to
+  // match the back cover's original (pre-layout-picker) fixed look.
+  backCoverLayout: CoverLayout;
   // Explicit "no photo" - overrides the fallback-to-last-photo default
   // so a text-only (or empty) back cover is reachable, not just
   // "haven't picked one yet".
@@ -620,6 +600,7 @@ async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     coverAssetId: null,
     coverLayout: "photo-title",
     backCoverAssetId: null,
+    backCoverLayout: "photo-title",
     backCoverNoPhoto: false,
     backCoverText: "",
     backCoverPlainText: false,
@@ -1009,6 +990,9 @@ function PhotoGridEditor({
   const [backCoverAssetId, setBackCoverAssetId] = useState<string | null>(
     initialConfig.backCoverAssetId,
   );
+  const [backCoverLayout, setBackCoverLayout] = useState<CoverLayout>(
+    initialConfig.backCoverLayout,
+  );
   const [backCoverNoPhoto, setBackCoverNoPhoto] = useState(
     initialConfig.backCoverNoPhoto,
   );
@@ -1114,6 +1098,7 @@ function PhotoGridEditor({
       coverAssetId,
       coverLayout,
       backCoverAssetId,
+      backCoverLayout,
       backCoverNoPhoto,
       backCoverText,
       backCoverPlainText,
@@ -1143,6 +1128,7 @@ function PhotoGridEditor({
     coverAssetId,
     coverLayout,
     backCoverAssetId,
+    backCoverLayout,
     backCoverNoPhoto,
     backCoverText,
     backCoverPlainText,
@@ -1327,15 +1313,6 @@ function PhotoGridEditor({
     }
     return filteredAssets[filteredAssets.length - 1] ?? null;
   }, [filteredAssets, backCoverAssetId, backCoverNoPhoto]);
-
-  // Photos sampled for the "patchwork" cover layout - computed
-  // unconditionally (cheap) so it stays available for both the live
-  // preview and the PDF export's fetch list.
-  const mosaicRows = mosaicRowsFor(validPageWidth, validPageHeight);
-  const mosaicAssets = useMemo(
-    () => sampleEvenly(filteredAssets, MOSAIC_COLS * mosaicRows),
-    [filteredAssets, mosaicRows],
-  );
 
   // Calculate unified page layout - single source of truth!
   // When page captions are on, the content area's margin needs to be at
@@ -1797,10 +1774,7 @@ function PhotoGridEditor({
   // fetching turned out to be unreliable on its own (photos randomly,
   // but reproducibly, missing), so every photo is fetched ourselves with
   // real error handling and handed to <Image> as a Blob instead of a URL.
-  const buildPdfDocument = (
-    imageBlobs: Map<string, Blob>,
-    mosaicBlobs: Map<string, Blob>,
-  ) => {
+  const buildPdfDocument = (imageBlobs: Map<string, Blob>) => {
     const coverPageWidth = toPoints(validPageWidth);
     const coverPageHeight = toPoints(validPageHeight);
     const coverImageBlob = coverAsset
@@ -2004,66 +1978,6 @@ function PhotoGridEditor({
             </>
           )}
 
-          {coverLayout === "patchwork" && (
-            <>
-              {mosaicAssets.map((a, i) => {
-                const tileBlob = mosaicBlobs.get(a.id);
-                if (!tileBlob) return null;
-                const tileW = coverPageWidth / MOSAIC_COLS;
-                const tileH = coverPageHeight / mosaicRows;
-                const col = i % MOSAIC_COLS;
-                const row = Math.floor(i / MOSAIC_COLS);
-                return (
-                  <Image
-                    key={i}
-                    src={tileBlob}
-                    style={{
-                      position: "absolute",
-                      left: col * tileW,
-                      top: row * tileH,
-                      // Slightly oversized to paper over hairline gaps
-                      // between tiles from rounding.
-                      width: tileW + 0.75,
-                      height: tileH + 0.75,
-                      objectFit: "cover",
-                    }}
-                  />
-                );
-              })}
-              <View
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <View
-                  style={{
-                    backgroundColor: "rgba(255,254,252,0.92)",
-                    paddingHorizontal: coverPageWidth * 0.06,
-                    paddingVertical: coverPageHeight * 0.03,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontFamily: "Caveat",
-                      fontWeight: 600,
-                      fontSize: coverPageWidth * 0.06,
-                      color: SCRAPBOOK.ink,
-                      textAlign: "center",
-                    }}
-                  >
-                    {coverTitle || album.albumName}
-                  </Text>
-                </View>
-              </View>
-            </>
-          )}
           </View>
         </Page>
       )}
@@ -2457,7 +2371,54 @@ function PhotoGridEditor({
               height: coverPageHeight,
             }}
           >
-          {(backCoverImageBlob || backCoverText) &&
+          {backCoverLayout === "text-only" && backCoverText && (
+            <View
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                paddingHorizontal: coverPageWidth * 0.1,
+              }}
+            >
+              <View
+                style={{
+                  width: coverPageWidth * 0.3,
+                  height: 1,
+                  backgroundColor: SCRAPBOOK.ink,
+                  opacity: 0.3,
+                  marginBottom: 16,
+                }}
+              />
+              <Text
+                style={{
+                  fontFamily: "Caveat",
+                  fontWeight: 600,
+                  fontSize: coverPageWidth * 0.09,
+                  color: SCRAPBOOK.ink,
+                  textAlign: "center",
+                }}
+              >
+                {backCoverText}
+              </Text>
+              <View
+                style={{
+                  width: coverPageWidth * 0.3,
+                  height: 1,
+                  backgroundColor: SCRAPBOOK.ink,
+                  opacity: 0.3,
+                  marginTop: 16,
+                }}
+              />
+            </View>
+          )}
+
+          {backCoverLayout === "photo-title" &&
+            (backCoverImageBlob || backCoverText) &&
             (() => {
               const hasImage = !!backCoverImageBlob;
               // Plain text has no photo to mount, so no card/mat either -
@@ -2583,6 +2544,75 @@ function PhotoGridEditor({
                 </View>
               );
             })()}
+
+          {backCoverLayout === "full-bleed" && backCoverImageBlob && (
+            <>
+              <Image
+                src={backCoverImageBlob}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: coverPageWidth,
+                  height: coverPageHeight,
+                  objectFit: "cover",
+                }}
+              />
+              {backCoverText && (
+                <>
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      bottom: 0,
+                      width: coverPageWidth,
+                      height: coverScrimHeight,
+                    }}
+                  >
+                    {Array.from({ length: 10 }, (_, i) => (
+                      <View
+                        key={i}
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          top: (coverScrimHeight * i) / 10,
+                          width: coverPageWidth,
+                          height: coverScrimHeight / 10 + 0.5,
+                          backgroundColor: "#000000",
+                          opacity: (0.55 * (i + 1)) / 10,
+                        }}
+                      />
+                    ))}
+                  </View>
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: coverScrimHeight,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Caveat",
+                        fontWeight: 600,
+                        fontSize: coverPageWidth * 0.06,
+                        color: "#FFFFFF",
+                        textAlign: "center",
+                      }}
+                    >
+                      {backCoverText}
+                    </Text>
+                  </View>
+                </>
+              )}
+            </>
+          )}
+
           </View>
         </Page>
       )}
@@ -2601,24 +2631,19 @@ function PhotoGridEditor({
           if (photo.asset) assetIds.add(photo.asset.id);
         }),
       );
-      const usesPatchworkCover = showCover && coverLayout === "patchwork";
-      if (
-        showCover &&
-        coverLayout !== "text-only" &&
-        coverLayout !== "patchwork" &&
-        coverAsset
-      ) {
+      if (showCover && coverLayout !== "text-only" && coverAsset) {
         assetIds.add(coverAsset.id);
       }
-      if (showCover && backCoverAsset) {
+      if (
+        showCover &&
+        backCoverLayout !== "text-only" &&
+        backCoverAsset
+      ) {
         assetIds.add(backCoverAsset.id);
       }
-      const mosaicIds = usesPatchworkCover
-        ? Array.from(new Set(mosaicAssets.map((a) => a.id)))
-        : [];
 
       const ids = Array.from(assetIds);
-      const totalFetches = ids.length + mosaicIds.length;
+      const totalFetches = ids.length;
       let overallDone = 0;
       setPdfProgress({ done: 0, total: totalFetches });
       const onProgress = () => {
@@ -2641,24 +2666,10 @@ function PhotoGridEditor({
           6,
           onProgress,
         );
-      // Mosaic tiles are small and pre-cached by Immich (unlike
-      // "fullsize", generated on demand), so a higher concurrency is
-      // fine and keeps a large patchwork grid from taking forever.
-      const { blobs: mosaicBlobs, failures: mosaicFailures } =
-        await fetchBlobsWithConcurrency(
-          mosaicIds.map((id) => ({
-            key: id,
-            url: `${window.location.origin}${immichConfig.baseUrl}/assets/${id}/thumbnail?size=thumbnail`,
-          })),
-          12,
-          onProgress,
-        );
 
-      const blob = await pdf(
-        buildPdfDocument(imageBlobs, mosaicBlobs),
-      ).toBlob();
+      const blob = await pdf(buildPdfDocument(imageBlobs)).toBlob();
       setPdfUrl(URL.createObjectURL(blob));
-      const failures = imageFailures + mosaicFailures;
+      const failures = imageFailures;
       if (failures > 0) {
         setPdfError(
           `${failures} of ${totalFetches} photos couldn't be fetched and are missing from the PDF - try generating again.`,
@@ -3243,22 +3254,45 @@ function PhotoGridEditor({
                   </div>
                   <div>
                     <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-                      Back cover photo
+                      Back cover layout
                     </span>
-                    {backCoverAsset ? (
-                      <button
-                        onClick={() => setBackCoverNoPhoto(true)}
-                        className="px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-red-300 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                      >
-                        Remove photo
-                      </button>
-                    ) : (
-                      <p className="text-xs text-gray-400 dark:text-gray-500">
-                        No photo - hover a photo below and click "Set as
-                        back cover" to add one.
-                      </p>
-                    )}
+                    <div className="flex flex-wrap gap-1.5">
+                      {COVER_LAYOUTS.map((layout) => (
+                        <button
+                          key={layout.value}
+                          onClick={() => setBackCoverLayout(layout.value)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                            backCoverLayout === layout.value
+                              ? "bg-indigo-50 dark:bg-indigo-500/20 border-indigo-400 dark:border-indigo-500 text-indigo-700 dark:text-indigo-300"
+                              : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600"
+                          }`}
+                        >
+                          {layout.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                  {(backCoverLayout === "photo-title" ||
+                    backCoverLayout === "full-bleed") && (
+                    <div>
+                      <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+                        Back cover photo
+                      </span>
+                      {backCoverAsset ? (
+                        <button
+                          onClick={() => setBackCoverNoPhoto(true)}
+                          className="px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-red-300 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                        >
+                          Remove photo
+                        </button>
+                      ) : (
+                        <p className="text-xs text-gray-400 dark:text-gray-500">
+                          No photo - hover a photo below and click "Set as
+                          back cover" to add one.
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div>
                     <label
                       htmlFor="backCoverText"
@@ -3275,12 +3309,14 @@ function PhotoGridEditor({
                       className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
                     />
                   </div>
-                  <ToggleSwitch
-                    checked={backCoverPlainText}
-                    onChange={setBackCoverPlainText}
-                    label="Plain back cover text"
-                    sublabel="No card behind the text - only applies when the back cover has no photo"
-                  />
+                  {backCoverLayout === "photo-title" && (
+                    <ToggleSwitch
+                      checked={backCoverPlainText}
+                      onChange={setBackCoverPlainText}
+                      label="Plain back cover text"
+                      sublabel="No card behind the text - only applies when the back cover has no photo"
+                    />
+                  )}
                   <p className="text-xs text-gray-400 dark:text-gray-500">
                     The cover uses the same page background as the rest of
                     the book. Hover a photo below and click "Set as cover"
@@ -3448,34 +3484,6 @@ function PhotoGridEditor({
                       </>
                     )}
 
-                    {coverLayout === "patchwork" && (
-                      <>
-                        <div
-                          className="absolute inset-0 grid overflow-hidden"
-                          style={{
-                            gridTemplateColumns: `repeat(${MOSAIC_COLS}, 1fr)`,
-                            gridTemplateRows: `repeat(${mosaicRows}, 1fr)`,
-                          }}
-                        >
-                          {mosaicAssets.map((a, i) => (
-                            <img
-                              key={i}
-                              src={`${immichConfig.baseUrl}/assets/${a.id}/thumbnail?size=thumbnail`}
-                              alt=""
-                              className="w-full h-full object-cover"
-                            />
-                          ))}
-                        </div>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div
-                            className="px-6 py-3 shadow-lg"
-                            style={{ backgroundColor: "rgba(255,254,252,0.92)" }}
-                          >
-                            {titleInput(displayWidth * 0.06, SCRAPBOOK.ink)}
-                          </div>
-                        </div>
-                      </>
-                    )}
                     </div>
                   </div>
                 </div>
@@ -4048,6 +4056,31 @@ function PhotoGridEditor({
                       previewWidth / (displayWidth + bleedPreviewPt * 2),
                     )
                   : 1;
+              // No placeholder hint here - unlike the front cover's title,
+              // there's no meaningful fallback text for a back cover note,
+              // so an empty one just stays visually blank (still clickable
+              // to type into) rather than showing stray hint text over a
+              // photo the user never asked to see.
+              const backCoverTextInput = (
+                fontSizePx: number,
+                color: string,
+                extraClassName = "",
+              ) => (
+                <input
+                  type="text"
+                  value={backCoverText}
+                  onChange={(e) => setBackCoverText(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className={`text-center bg-transparent focus:outline-none rounded w-[90%] ${extraClassName}`}
+                  style={{
+                    fontFamily: "Caveat",
+                    fontWeight: 500,
+                    fontSize: `${fontSizePx}px`,
+                    color,
+                  }}
+                />
+              );
               return (
                 <div className="relative">
                   <div className="text-center mb-2">
@@ -4084,7 +4117,33 @@ function PhotoGridEditor({
                         height: displayHeight,
                       }}
                     >
-                    {(backCoverAsset || backCoverText !== "") &&
+                    {backCoverLayout === "text-only" && (
+                      <div
+                        className="absolute inset-0 flex flex-col items-center justify-center gap-4"
+                        style={{ paddingLeft: "10%", paddingRight: "10%" }}
+                      >
+                        <div
+                          style={{
+                            width: "30%",
+                            height: 2,
+                            backgroundColor: SCRAPBOOK.ink,
+                            opacity: 0.3,
+                          }}
+                        />
+                        {backCoverTextInput(displayWidth * 0.09, SCRAPBOOK.ink)}
+                        <div
+                          style={{
+                            width: "30%",
+                            height: 2,
+                            backgroundColor: SCRAPBOOK.ink,
+                            opacity: 0.3,
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {backCoverLayout === "photo-title" &&
+                      (backCoverAsset || backCoverText !== "") &&
                       (() => {
                         const imageUrl = backCoverAsset
                           ? `${immichConfig.baseUrl}/assets/${backCoverAsset.id}/thumbnail?size=preview`
@@ -4104,7 +4163,6 @@ function PhotoGridEditor({
                               }
                               onClick={(e) => e.stopPropagation()}
                               onMouseDown={(e) => e.stopPropagation()}
-                              placeholder="Optional closing note"
                               className="absolute text-center bg-transparent focus:outline-none focus:bg-white/40 rounded"
                               style={{
                                 top: 0,
@@ -4166,9 +4224,6 @@ function PhotoGridEditor({
                               }
                               onClick={(e) => e.stopPropagation()}
                               onMouseDown={(e) => e.stopPropagation()}
-                              placeholder={
-                                imageUrl ? "+ text" : "Optional closing note"
-                              }
                               className="absolute text-center bg-transparent focus:outline-none focus:bg-white/70 rounded"
                               style={{
                                 left: frameInset,
@@ -4187,6 +4242,35 @@ function PhotoGridEditor({
                           </div>
                         );
                       })()}
+
+                    {backCoverLayout === "full-bleed" &&
+                      backCoverAsset &&
+                      (() => {
+                        const imageUrl = `${immichConfig.baseUrl}/assets/${backCoverAsset.id}/thumbnail?size=preview`;
+                        return (
+                          <>
+                            <img
+                              src={imageUrl}
+                              alt=""
+                              className="absolute inset-0 w-full h-full object-cover"
+                            />
+                            <div
+                              className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                              style={{
+                                height: "28%",
+                                background:
+                                  "linear-gradient(to top, rgba(0,0,0,0.55), transparent)",
+                              }}
+                            >
+                              {backCoverTextInput(
+                                displayWidth * 0.06,
+                                "#FFFFFF",
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()}
+
                     </div>
                   </div>
                 </div>
