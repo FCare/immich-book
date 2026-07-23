@@ -2683,6 +2683,55 @@ function PhotoGridEditor({
         </div>
       </div>
 
+      {/* Printers - services known to accept a ready-made PDF (this
+          book's own export) rather than requiring their own layout
+          app. Logos sit on a fixed white chip (not dark:-varied) since
+          a couple of them are plain black artwork with no dark-mode
+          variant - a white backdrop keeps every logo legible either
+          way. */}
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+          Imprimer ce PDF chez
+        </span>
+        {[
+          {
+            label: "Flexilivre",
+            url: "https://www.flexilivre.com/fichier/",
+            logo: "/logos/flexilivre.svg",
+          },
+          {
+            label: "Pixartprinting",
+            url: "https://www.pixartprinting.fr/",
+            logo: "/logos/pixartprinting.svg",
+          },
+          {
+            label: "Blurb",
+            url: "https://www.blurb.com/pdf-to-book",
+            logo: "/logos/blurb.png",
+          },
+          {
+            label: "Pumbo",
+            url: "https://www.pumbo.fr/",
+            logo: "/logos/pumbo.png",
+          },
+        ].map((printer) => (
+          <a
+            key={printer.label}
+            href={printer.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={printer.label}
+            className="flex items-center justify-center h-10 px-3.5 rounded-lg bg-white border border-gray-200 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:shadow-sm transition-all"
+          >
+            <img
+              src={printer.logo}
+              alt={printer.label}
+              className="h-4 max-w-[92px] object-contain"
+            />
+          </a>
+        ))}
+      </div>
+
       {/* Settings */}
       <div className="mb-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
