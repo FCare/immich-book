@@ -1406,7 +1406,13 @@ function PhotoGridEditor({
         }
 
         if (draggedPage !== null && targetPage !== null) {
+          const draggedIsText = draggedAssetId.startsWith("text-");
+          const targetIsText = targetAssetId.startsWith("text-");
+
           if (draggedPage === targetPage) {
+            // Same page - the id (and, for photos, its asset) just moves to
+            // a different slot rect; a text card keeps its own id wherever
+            // it lands, so its written content follows automatically.
             const order = pages
               .find((p) => p.pageNumber === draggedPage)!
               .photos.map((p) => p.id);
@@ -1414,7 +1420,34 @@ function PhotoGridEditor({
             const ti = order.indexOf(targetAssetId);
             [order[di], order[ti]] = [order[ti], order[di]];
             setSlotOverrides((prev) => new Map(prev).set(draggedPage!, order));
-          } else {
+            setManuallyMovedIds((prev) => {
+              const next = new Set(prev);
+              next.add(draggedAssetId);
+              next.add(targetAssetId);
+              return next;
+            });
+          } else if (draggedIsText && targetIsText) {
+            // Text cards are page-local slots (their id is tied to a page
+            // number), not movable "assets" in the master sequence - so a
+            // cross-page swap between two of them exchanges their written
+            // content instead of relocating anything.
+            setTextCardContents((prev) => {
+              const next = new Map(prev);
+              const draggedText = prev.get(draggedAssetId) || "";
+              const targetText = prev.get(targetAssetId) || "";
+              if (targetText) next.set(draggedAssetId, targetText);
+              else next.delete(draggedAssetId);
+              if (draggedText) next.set(targetAssetId, draggedText);
+              else next.delete(targetAssetId);
+              return next;
+            });
+            setManuallyMovedIds((prev) => {
+              const next = new Set(prev);
+              next.add(draggedAssetId);
+              next.add(targetAssetId);
+              return next;
+            });
+          } else if (!draggedIsText && !targetIsText) {
             const currentOrder = filteredAssets.map((a) => a.id);
             const i = currentOrder.indexOf(draggedAssetId);
             const j = currentOrder.indexOf(targetAssetId);
@@ -1431,13 +1464,17 @@ function PhotoGridEditor({
               next.delete(targetPage!);
               return next;
             });
+            setManuallyMovedIds((prev) => {
+              const next = new Set(prev);
+              next.add(draggedAssetId);
+              next.add(targetAssetId);
+              return next;
+            });
           }
-          setManuallyMovedIds((prev) => {
-            const next = new Set(prev);
-            next.add(draggedAssetId);
-            next.add(targetAssetId);
-            return next;
-          });
+          // A text card and a real photo on different pages can't trade
+          // places: the text card's slot belongs to its page's layout,
+          // while the photo lives in the master sequence - dropped here,
+          // nothing happens.
         }
       }
 
@@ -3587,19 +3624,38 @@ function PhotoGridEditor({
                     const tapeWidth = containerWidth * 0.22;
 
                     // Text card - no backing photo, an editable note
-                    // mounted the same way as a photo card.
+                    // mounted the same way as a photo card. Draggable via
+                    // the same data-reorder-asset-id/onPointerDown pattern
+                    // as photo cards, keyed off its own synthetic id, so it
+                    // can be swapped with another card (photo or text) and
+                    // its content travels with it.
                     if (!photoBox.asset) {
+                      const isBeingDragged =
+                        reorderDragState?.draggedAssetId === photoBox.id;
+                      const isDropTarget = dropTargetAssetId === photoBox.id;
+                      const isReordered = manuallyMovedIds.has(photoBox.id);
+
                       return (
                         <div
                           key={photoBox.id}
-                          className="absolute"
+                          data-reorder-asset-id={photoBox.id}
+                          className={`absolute group cursor-move ${isBeingDragged ? "opacity-50" : ""}`}
                           style={{
                             left: `${toPoints(photoBox.x)}px`,
                             top: `${toPoints(photoBox.y)}px`,
                             width: `${containerWidth}px`,
                             height: `${containerHeight}px`,
+                            touchAction: "none",
                           }}
+                          onPointerDown={(e) =>
+                            handleReorderPointerDown(photoBox.id, e)
+                          }
                         >
+                          {/* Drop indicator - shown on left edge when hovering during drag */}
+                          {isDropTarget && reorderDragState && (
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500 shadow-lg z-10" />
+                          )}
+
                           <div
                             className="absolute inset-0"
                             style={{
@@ -3668,6 +3724,29 @@ function PhotoGridEditor({
                               }}
                             />
                           </div>
+
+                          {/* Customization indicator */}
+                          {isReordered && (
+                            <div
+                              className="absolute top-2 left-2 w-2 h-2 bg-green-500 rounded-full shadow-lg z-10"
+                              title="Card reordered"
+                            />
+                          )}
+
+                          {/* Reset button - shown on hover for reordered cards */}
+                          {isReordered && (
+                            <div
+                              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded shadow-lg text-xs font-medium"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleResetCard(photoBox.id);
+                              }}
+                              title="Reset order"
+                            >
+                              Reset
+                            </div>
+                          )}
                         </div>
                       );
                     }
