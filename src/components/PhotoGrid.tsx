@@ -471,6 +471,7 @@ interface GlobalConfig {
   showCaptions: boolean;
   fontSize: number;
   pageBackground: PageBackground;
+  cardStyle: CardStyle;
 }
 
 type CoverLayout = "photo-title" | "full-bleed" | "text-only";
@@ -479,6 +480,17 @@ const COVER_LAYOUTS: { value: CoverLayout; label: string }[] = [
   { value: "photo-title", label: "Photo & Title" },
   { value: "full-bleed", label: "Full-bleed Photo" },
   { value: "text-only", label: "Text Only" },
+];
+
+// How interior-page cards (photo and text) are mounted: "scrapbook" is
+// the original look - mildly tilted, matted, a piece of tape at the top;
+// "clean" is a flush, unrotated card the same size as its slot, no
+// mat/shadow/tape, for a plainer/more modern layout.
+type CardStyle = "scrapbook" | "clean";
+
+const CARD_STYLES: { value: CardStyle; label: string }[] = [
+  { value: "scrapbook", label: "Scrapbook" },
+  { value: "clean", label: "Clean" },
 ];
 
 interface AlbumConfig extends GlobalConfig {
@@ -556,6 +568,7 @@ const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   showCaptions: true,
   fontSize: 12,
   pageBackground: "white",
+  cardStyle: "scrapbook",
 };
 
 // Helper functions for config persistence - stored server-side (see
@@ -647,6 +660,7 @@ async function saveAlbumConfig(albumId: string, config: AlbumConfig) {
       showCaptions: config.showCaptions,
       fontSize: config.fontSize,
       pageBackground: config.pageBackground,
+      cardStyle: config.cardStyle,
     };
     await saveGlobalConfig(globalConfig);
   } catch (e) {
@@ -919,6 +933,9 @@ function PhotoGridEditor({
   const [pageBackground, setPageBackground] = useState<PageBackground>(
     initialConfig.pageBackground,
   );
+  const [cardStyle, setCardStyle] = useState<CardStyle>(
+    initialConfig.cardStyle,
+  );
 
   // Customizations
   const [customOrdering, setCustomOrdering] = useState<string[] | null>(
@@ -1091,6 +1108,7 @@ function PhotoGridEditor({
       showCaptions,
       fontSize,
       pageBackground,
+      cardStyle,
       customOrdering,
       layoutVariants: Object.fromEntries(layoutVariants),
       pageCounts: Object.fromEntries(pageCounts),
@@ -1126,6 +1144,7 @@ function PhotoGridEditor({
     showCaptions,
     fontSize,
     pageBackground,
+    cardStyle,
     customOrdering,
     layoutVariants,
     pageCounts,
@@ -2149,6 +2168,35 @@ function PhotoGridEditor({
               // Text card - no backing photo, an editable note
               // mounted the same way as a photo card.
               if (!photoBox.asset) {
+                if (cardStyle === "clean") {
+                  return (
+                    <View
+                      key={photoBox.id}
+                      style={{
+                        position: "absolute",
+                        left: toPoints(photoBox.x),
+                        top: toPoints(photoBox.y),
+                        width,
+                        height,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontFamily: "Caveat",
+                          fontWeight: 500,
+                          fontSize: fontSize * 1.5,
+                          color: SCRAPBOOK.ink,
+                          textAlign: "center",
+                        }}
+                      >
+                        {textCardContents.get(photoBox.id) || ""}
+                      </Text>
+                    </View>
+                  );
+                }
                 return (
                   <View
                     key={photoBox.id}
@@ -2245,6 +2293,87 @@ function PhotoGridEditor({
                 : 0;
               const bottomStripHeight =
                 dateStripHeight + captionStripHeight;
+
+              if (cardStyle === "clean") {
+                return (
+                  <View
+                    key={photoBox.id}
+                    style={{
+                      position: "absolute",
+                      left: toPoints(photoBox.x),
+                      top: toPoints(photoBox.y),
+                      width,
+                      height,
+                    }}
+                  >
+                    <PdfPhotoImage
+                      src={imageBlob}
+                      top={0}
+                      left={0}
+                      containerWidth={width}
+                      containerHeight={height - bottomStripHeight}
+                    />
+                    {cardCaption && (
+                      <View
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          width,
+                          bottom: dateStripHeight,
+                          height: captionStripHeight,
+                          backgroundColor: "rgba(255,255,255,0.85)",
+                          display: "flex",
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontFamily: "Caveat",
+                            fontWeight: 500,
+                            fontSize: fontSize * 1.3,
+                            color: SCRAPBOOK.ink,
+                            textAlign: "center",
+                          }}
+                        >
+                          {cardCaption}
+                        </Text>
+                      </View>
+                    )}
+                    {showDates && asset.fileCreatedAt && (
+                      <View
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          width,
+                          bottom: 0,
+                          height: dateStripHeight,
+                          backgroundColor: "rgba(255,255,255,0.85)",
+                          display: "flex",
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontFamily: "Caveat",
+                            fontWeight: 500,
+                            fontSize: fontSize * 1.3,
+                            color: SCRAPBOOK.ink,
+                          }}
+                        >
+                          {new Date(asset.fileCreatedAt).toLocaleDateString(
+                            undefined,
+                            { year: "numeric", month: "short", day: "numeric" },
+                          )}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              }
 
               return (
                 <View
@@ -3206,6 +3335,81 @@ function PhotoGridEditor({
               </div>
               <div>
                 <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+                  Card Style
+                </span>
+                <div className="flex flex-wrap gap-3">
+                  {CARD_STYLES.map((style) => (
+                    <button
+                      key={style.value}
+                      onClick={() => setCardStyle(style.value)}
+                      className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-colors ${
+                        cardStyle === style.value
+                          ? "bg-indigo-50 dark:bg-indigo-500/20 border-indigo-400 dark:border-indigo-500"
+                          : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                      }`}
+                    >
+                      {/* Mini mockup of the actual card treatment, not
+                          just a label - the tilt/tape vs. flush-edge
+                          difference is much clearer to see than to read. */}
+                      <div className="relative w-16 h-16 rounded-md bg-gray-100 dark:bg-gray-900 overflow-hidden">
+                        {style.value === "scrapbook" ? (
+                          <div
+                            className="absolute"
+                            style={{
+                              top: 10,
+                              left: 11,
+                              right: 11,
+                              bottom: 10,
+                              transform: "rotate(-7deg)",
+                              backgroundColor: SCRAPBOOK.mat,
+                              boxShadow: "1px 2px 4px rgba(0,0,0,0.3)",
+                            }}
+                          >
+                            <div
+                              className="absolute"
+                              style={{
+                                inset: 3,
+                                backgroundColor: "#93A0C2",
+                              }}
+                            />
+                            <div
+                              className="absolute"
+                              style={{
+                                top: -3,
+                                left: "50%",
+                                width: 14,
+                                height: 6,
+                                transform: "translateX(-50%) rotate(5deg)",
+                                backgroundColor: SCRAPBOOK.tape[2],
+                                opacity: 0.9,
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div
+                            className="absolute"
+                            style={{
+                              inset: 6,
+                              backgroundColor: "#93A0C2",
+                            }}
+                          />
+                        )}
+                      </div>
+                      <span
+                        className={`text-xs font-semibold ${
+                          cardStyle === style.value
+                            ? "text-indigo-700 dark:text-indigo-300"
+                            : "text-gray-600 dark:text-gray-300"
+                        }`}
+                      >
+                        {style.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
                   Background
                 </span>
                 <div className="flex flex-col gap-2.5">
@@ -3753,25 +3957,8 @@ function PhotoGridEditor({
                             <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500 shadow-lg z-10" />
                           )}
 
-                          <div
-                            className="absolute inset-0"
-                            style={{
-                              transform: `rotate(${tilt}deg) scale(0.93)`,
-                              boxShadow: `2px 5px 10px ${SCRAPBOOK.shadow}`,
-                              backgroundColor: SCRAPBOOK.mat,
-                            }}
-                          >
-                            {/* Flex wrapper centers the (auto-growing)
-                                textarea both horizontally and vertically -
-                                a native <textarea> has no way to vertically
-                                center its own text, so the box itself has
-                                to hug its content and be centered instead. */}
-                            <div
-                              className="absolute flex items-center justify-center"
-                              style={{
-                                inset: frameInset * 2,
-                              }}
-                            >
+                          {(() => {
+                            const textCardBody = (
                               <textarea
                                 ref={(el) => {
                                   if (!el) return;
@@ -3807,20 +3994,57 @@ function PhotoGridEditor({
                                   lineHeight: 1.2,
                                 }}
                               />
-                            </div>
-                            <div
-                              className="absolute"
-                              style={{
-                                top: -frameInset * 0.5,
-                                left: `calc(50% - ${tapeWidth / 2}px)`,
-                                width: tapeWidth,
-                                height: frameInset * 1.6,
-                                backgroundColor: tape.color,
-                                opacity: 0.8,
-                                transform: `rotate(${tape.tiltDeg}deg)`,
-                              }}
-                            />
-                          </div>
+                            );
+
+                            if (cardStyle === "clean") {
+                              return (
+                                <div
+                                  className="absolute inset-0 flex items-center justify-center"
+                                  style={{ padding: frameInset }}
+                                >
+                                  {textCardBody}
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div
+                                className="absolute inset-0"
+                                style={{
+                                  transform: `rotate(${tilt}deg) scale(0.93)`,
+                                  boxShadow: `2px 5px 10px ${SCRAPBOOK.shadow}`,
+                                  backgroundColor: SCRAPBOOK.mat,
+                                }}
+                              >
+                                {/* Flex wrapper centers the (auto-growing)
+                                    textarea both horizontally and
+                                    vertically - a native <textarea> has no
+                                    way to vertically center its own text,
+                                    so the box itself has to hug its
+                                    content and be centered instead. */}
+                                <div
+                                  className="absolute flex items-center justify-center"
+                                  style={{
+                                    inset: frameInset * 2,
+                                  }}
+                                >
+                                  {textCardBody}
+                                </div>
+                                <div
+                                  className="absolute"
+                                  style={{
+                                    top: -frameInset * 0.5,
+                                    left: `calc(50% - ${tapeWidth / 2}px)`,
+                                    width: tapeWidth,
+                                    height: frameInset * 1.6,
+                                    backgroundColor: tape.color,
+                                    opacity: 0.8,
+                                    transform: `rotate(${tape.tiltDeg}deg)`,
+                                  }}
+                                />
+                              </div>
+                            );
+                          })()}
 
                           {/* Customization indicator */}
                           {isReordered && (
@@ -3890,32 +4114,11 @@ function PhotoGridEditor({
                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500 shadow-lg z-10" />
                         )}
 
-                        {/* Polaroid card - visual only, mildly askew */}
-                        <div
-                          className="absolute inset-0"
-                          style={{
-                            transform: `rotate(${tilt}deg) scale(0.93)`,
-                            boxShadow: `2px 5px 10px ${SCRAPBOOK.shadow}`,
-                            backgroundColor: SCRAPBOOK.mat,
-                          }}
-                        >
-                          <div
-                            className="absolute overflow-hidden"
-                            style={{
-                              top: frameInset,
-                              left: frameInset,
-                              right: frameInset,
-                              bottom: frameInset + bottomStripHeight,
-                            }}
-                          >
-                            <img
-                              src={imageUrl}
-                              alt={asset.originalFileName}
-                              className="object-contain w-full h-full"
-                              loading="lazy"
-                            />
-                          </div>
-                          {
+                        {(() => {
+                          const captionInput = (
+                            insetPx: number,
+                            bottomExtra: number,
+                          ) => (
                             // Always mounted (not conditionally rendered on
                             // hasCardCaption) so typing the first character
                             // doesn't swap the DOM node under the user's
@@ -3953,11 +4156,11 @@ function PhotoGridEditor({
                                   : "opacity-0 pointer-events-none group-hover:opacity-70 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto bg-white/80"
                               }`}
                               style={{
-                                left: frameInset,
-                                right: frameInset,
+                                left: insetPx,
+                                right: insetPx,
                                 bottom: hasCardCaption
-                                  ? frameInset * 0.3 + dateStripHeight
-                                  : frameInset,
+                                  ? bottomExtra + dateStripHeight
+                                  : bottomExtra,
                                 height: fontSize * 1.4,
                                 fontFamily: "Caveat",
                                 fontWeight: 500,
@@ -3966,45 +4169,105 @@ function PhotoGridEditor({
                                 lineHeight: 1,
                               }}
                             />
+                          );
+                          const dateStrip = (
+                            insetPx: number,
+                            bottomExtra: number,
+                          ) =>
+                            showDates &&
+                            asset.fileCreatedAt && (
+                              <div
+                                className="absolute flex items-end justify-center text-center"
+                                style={{
+                                  left: insetPx,
+                                  right: insetPx,
+                                  bottom: bottomExtra,
+                                  height: dateStripHeight,
+                                  fontFamily: "Caveat",
+                                  fontWeight: 500,
+                                  fontSize: `${fontSize * 1.3}px`,
+                                  color: SCRAPBOOK.ink,
+                                  lineHeight: 1,
+                                }}
+                              >
+                                {new Date(
+                                  asset.fileCreatedAt,
+                                ).toLocaleDateString(undefined, {
+                                  year: "numeric",
+                                  month: "short",
+                                  day: "numeric",
+                                })}
+                              </div>
+                            );
+
+                          if (cardStyle === "clean") {
+                            return (
+                              <div className="absolute inset-0">
+                                <div
+                                  className="absolute overflow-hidden"
+                                  style={{
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    bottom: bottomStripHeight,
+                                  }}
+                                >
+                                  <img
+                                    src={imageUrl}
+                                    alt={asset.originalFileName}
+                                    className="object-cover w-full h-full"
+                                    loading="lazy"
+                                  />
+                                </div>
+                                {captionInput(0, 0)}
+                                {dateStrip(0, 0)}
+                              </div>
+                            );
                           }
-                          {showDates && asset.fileCreatedAt && (
+
+                          return (
                             <div
-                              className="absolute flex items-end justify-center text-center"
+                              className="absolute inset-0"
                               style={{
-                                left: frameInset,
-                                right: frameInset,
-                                bottom: frameInset * 0.3,
-                                height: dateStripHeight,
-                                fontFamily: "Caveat",
-                                fontWeight: 500,
-                                fontSize: `${fontSize * 1.3}px`,
-                                color: SCRAPBOOK.ink,
-                                lineHeight: 1,
+                                transform: `rotate(${tilt}deg) scale(0.93)`,
+                                boxShadow: `2px 5px 10px ${SCRAPBOOK.shadow}`,
+                                backgroundColor: SCRAPBOOK.mat,
                               }}
                             >
-                              {new Date(
-                                asset.fileCreatedAt,
-                              ).toLocaleDateString(undefined, {
-                                year: "numeric",
-                                month: "short",
-                                day: "numeric",
-                              })}
+                              <div
+                                className="absolute overflow-hidden"
+                                style={{
+                                  top: frameInset,
+                                  left: frameInset,
+                                  right: frameInset,
+                                  bottom: frameInset + bottomStripHeight,
+                                }}
+                              >
+                                <img
+                                  src={imageUrl}
+                                  alt={asset.originalFileName}
+                                  className="object-contain w-full h-full"
+                                  loading="lazy"
+                                />
+                              </div>
+                              {captionInput(frameInset, frameInset * 0.3)}
+                              {dateStrip(frameInset, frameInset * 0.3)}
+                              {/* Washi tape */}
+                              <div
+                                className="absolute"
+                                style={{
+                                  top: -frameInset * 0.5,
+                                  left: `calc(50% - ${tapeWidth / 2}px)`,
+                                  width: tapeWidth,
+                                  height: frameInset * 1.6,
+                                  backgroundColor: tape.color,
+                                  opacity: 0.8,
+                                  transform: `rotate(${tape.tiltDeg}deg)`,
+                                }}
+                              />
                             </div>
-                          )}
-                          {/* Washi tape */}
-                          <div
-                            className="absolute"
-                            style={{
-                              top: -frameInset * 0.5,
-                              left: `calc(50% - ${tapeWidth / 2}px)`,
-                              width: tapeWidth,
-                              height: frameInset * 1.6,
-                              backgroundColor: tape.color,
-                              opacity: 0.8,
-                              transform: `rotate(${tape.tiltDeg}deg)`,
-                            }}
-                          />
-                        </div>
+                          );
+                        })()}
 
                         {/* Cover picker */}
                         {coverAsset?.id === asset.id ? (
