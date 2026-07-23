@@ -1041,6 +1041,14 @@ function PhotoGridEditor({
     null,
   );
 
+  // Armed card for click-to-swap - an alternative to dragging for two
+  // cards that are far apart (different pages, off the visible area). A
+  // plain click (pointerdown+up with no movement, no drop) arms a card;
+  // a second plain click on another card swaps them. Set from within the
+  // same pointer handling as the drag gesture below, so both are always
+  // available together with no separate mode.
+  const [swapFirstId, setSwapFirstId] = useState<string | null>(null);
+
   // Width available to the preview column - pages (especially combined
   // spreads) are scaled down to fit it, rather than relying on horizontal
   // scroll, which left the right-hand page looking cut off/undersized.
@@ -1368,17 +1376,107 @@ function PhotoGridEditor({
     slotOverrides,
   ]);
 
+  // Swaps two cards outright, wherever they are: same page swaps their
+  // slot assignment directly (the auto layout's aspect-ratio-driven
+  // grouping doesn't otherwise respect a specific drop position - see
+  // slotOverrides in pageLayout.ts); across pages, there's no shared slot
+  // list to swap within, so it swaps their positions in the master
+  // sequence instead, which changes which page each naturally belongs to.
+  // Shared by both the drag-and-drop reorder below and click-to-swap mode.
+  const performSwap = (draggedAssetId: string, targetAssetId: string) => {
+    if (targetAssetId === draggedAssetId) return;
+
+    let draggedPage: number | null = null;
+    let targetPage: number | null = null;
+    for (const page of pages) {
+      const ids = page.photos.map((p) => p.id);
+      if (ids.includes(draggedAssetId)) draggedPage = page.pageNumber;
+      if (ids.includes(targetAssetId)) targetPage = page.pageNumber;
+    }
+
+    if (draggedPage === null || targetPage === null) return;
+
+    const draggedIsText = draggedAssetId.startsWith("text-");
+    const targetIsText = targetAssetId.startsWith("text-");
+
+    if (draggedPage === targetPage) {
+      // Same page - the id (and, for photos, its asset) just moves to
+      // a different slot rect; a text card keeps its own id wherever
+      // it lands, so its written content follows automatically.
+      const order = pages
+        .find((p) => p.pageNumber === draggedPage)!
+        .photos.map((p) => p.id);
+      const di = order.indexOf(draggedAssetId);
+      const ti = order.indexOf(targetAssetId);
+      [order[di], order[ti]] = [order[ti], order[di]];
+      setSlotOverrides((prev) => new Map(prev).set(draggedPage!, order));
+      setManuallyMovedIds((prev) => {
+        const next = new Set(prev);
+        next.add(draggedAssetId);
+        next.add(targetAssetId);
+        return next;
+      });
+    } else if (draggedIsText && targetIsText) {
+      // Text cards are page-local slots (their id is tied to a page
+      // number), not movable "assets" in the master sequence - so a
+      // cross-page swap between two of them exchanges their written
+      // content instead of relocating anything.
+      setTextCardContents((prev) => {
+        const next = new Map(prev);
+        const draggedText = prev.get(draggedAssetId) || "";
+        const targetText = prev.get(targetAssetId) || "";
+        if (targetText) next.set(draggedAssetId, targetText);
+        else next.delete(draggedAssetId);
+        if (draggedText) next.set(targetAssetId, draggedText);
+        else next.delete(targetAssetId);
+        return next;
+      });
+      setManuallyMovedIds((prev) => {
+        const next = new Set(prev);
+        next.add(draggedAssetId);
+        next.add(targetAssetId);
+        return next;
+      });
+    } else if (!draggedIsText && !targetIsText) {
+      const currentOrder = filteredAssets.map((a) => a.id);
+      const i = currentOrder.indexOf(draggedAssetId);
+      const j = currentOrder.indexOf(targetAssetId);
+      [currentOrder[i], currentOrder[j]] = [
+        currentOrder[j],
+        currentOrder[i],
+      ];
+      setCustomOrdering(currentOrder);
+      // Stale now that each page's card membership has changed -
+      // let both pages fall back to a fresh auto tiling.
+      setSlotOverrides((prev) => {
+        const next = new Map(prev);
+        next.delete(draggedPage!);
+        next.delete(targetPage!);
+        return next;
+      });
+      setManuallyMovedIds((prev) => {
+        const next = new Set(prev);
+        next.add(draggedAssetId);
+        next.add(targetAssetId);
+        return next;
+      });
+    }
+    // A text card and a real photo on different pages can't trade
+    // places: the text card's slot belongs to its page's layout,
+    // while the photo lives in the master sequence - dropped here,
+    // nothing happens.
+  };
+
   // While a reorder drag is active, track the pointer over the whole
   // window (not just the card it started on) and hit-test which card is
   // underneath via elementFromPoint - this works correctly regardless of
   // the preview's CSS zoom, since elementFromPoint uses actual rendered
-  // coordinates. Dropping one card onto another swaps them outright:
-  // same page swaps their slot assignment directly (the auto layout's
-  // aspect-ratio-driven grouping doesn't otherwise respect a specific
-  // drop position - see slotOverrides in pageLayout.ts); across pages,
-  // there's no shared slot list to swap within, so it swaps their
-  // positions in the master sequence instead, which changes which page
-  // each naturally belongs to.
+  // coordinates. Both gestures are available at once, no mode switch:
+  // dropping onto a *different* card swaps them immediately (drag);
+  // releasing back over the *same* card (i.e. a plain click, no
+  // movement) arms it instead, so a second plain click on another card
+  // completes the swap - handy when the two cards are far apart and
+  // dragging across the whole preview isn't practical.
   useEffect(() => {
     if (!reorderDragState) return;
     const { draggedAssetId } = reorderDragState;
@@ -1397,84 +1495,16 @@ function PhotoGridEditor({
       const targetAssetId = cardUnderPointer(event.clientX, event.clientY);
 
       if (targetAssetId && targetAssetId !== draggedAssetId) {
-        let draggedPage: number | null = null;
-        let targetPage: number | null = null;
-        for (const page of pages) {
-          const ids = page.photos.map((p) => p.id);
-          if (ids.includes(draggedAssetId)) draggedPage = page.pageNumber;
-          if (ids.includes(targetAssetId)) targetPage = page.pageNumber;
-        }
-
-        if (draggedPage !== null && targetPage !== null) {
-          const draggedIsText = draggedAssetId.startsWith("text-");
-          const targetIsText = targetAssetId.startsWith("text-");
-
-          if (draggedPage === targetPage) {
-            // Same page - the id (and, for photos, its asset) just moves to
-            // a different slot rect; a text card keeps its own id wherever
-            // it lands, so its written content follows automatically.
-            const order = pages
-              .find((p) => p.pageNumber === draggedPage)!
-              .photos.map((p) => p.id);
-            const di = order.indexOf(draggedAssetId);
-            const ti = order.indexOf(targetAssetId);
-            [order[di], order[ti]] = [order[ti], order[di]];
-            setSlotOverrides((prev) => new Map(prev).set(draggedPage!, order));
-            setManuallyMovedIds((prev) => {
-              const next = new Set(prev);
-              next.add(draggedAssetId);
-              next.add(targetAssetId);
-              return next;
-            });
-          } else if (draggedIsText && targetIsText) {
-            // Text cards are page-local slots (their id is tied to a page
-            // number), not movable "assets" in the master sequence - so a
-            // cross-page swap between two of them exchanges their written
-            // content instead of relocating anything.
-            setTextCardContents((prev) => {
-              const next = new Map(prev);
-              const draggedText = prev.get(draggedAssetId) || "";
-              const targetText = prev.get(targetAssetId) || "";
-              if (targetText) next.set(draggedAssetId, targetText);
-              else next.delete(draggedAssetId);
-              if (draggedText) next.set(targetAssetId, draggedText);
-              else next.delete(targetAssetId);
-              return next;
-            });
-            setManuallyMovedIds((prev) => {
-              const next = new Set(prev);
-              next.add(draggedAssetId);
-              next.add(targetAssetId);
-              return next;
-            });
-          } else if (!draggedIsText && !targetIsText) {
-            const currentOrder = filteredAssets.map((a) => a.id);
-            const i = currentOrder.indexOf(draggedAssetId);
-            const j = currentOrder.indexOf(targetAssetId);
-            [currentOrder[i], currentOrder[j]] = [
-              currentOrder[j],
-              currentOrder[i],
-            ];
-            setCustomOrdering(currentOrder);
-            // Stale now that each page's card membership has changed -
-            // let both pages fall back to a fresh auto tiling.
-            setSlotOverrides((prev) => {
-              const next = new Map(prev);
-              next.delete(draggedPage!);
-              next.delete(targetPage!);
-              return next;
-            });
-            setManuallyMovedIds((prev) => {
-              const next = new Set(prev);
-              next.add(draggedAssetId);
-              next.add(targetAssetId);
-              return next;
-            });
-          }
-          // A text card and a real photo on different pages can't trade
-          // places: the text card's slot belongs to its page's layout,
-          // while the photo lives in the master sequence - dropped here,
-          // nothing happens.
+        performSwap(draggedAssetId, targetAssetId);
+        setSwapFirstId(null);
+      } else if (targetAssetId === draggedAssetId) {
+        if (swapFirstId === null) {
+          setSwapFirstId(draggedAssetId);
+        } else if (swapFirstId === draggedAssetId) {
+          setSwapFirstId(null);
+        } else {
+          performSwap(swapFirstId, draggedAssetId);
+          setSwapFirstId(null);
         }
       }
 
@@ -1488,7 +1518,7 @@ function PhotoGridEditor({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [reorderDragState, pages, filteredAssets]);
+  }, [reorderDragState, pages, filteredAssets, swapFirstId]);
 
   // Group page photos by logical page number - matches the numbering
   // already used for pageCaptions/the "Page X of Y" UI: in combined mode
@@ -2835,20 +2865,35 @@ function PhotoGridEditor({
             ))}
           </div>
 
-          {customOrdering !== null && (
-            <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 text-xs">
+            {swapFirstId && (
               <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 font-medium">
                 <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
-                Custom order
+                Card selected - click another card to swap with it
+                <button
+                  onClick={() => setSwapFirstId(null)}
+                  className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full transition-colors font-medium"
+                >
+                  Cancel
+                </button>
               </span>
-              <button
-                onClick={handleResetOrdering}
-                className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full transition-colors font-medium"
-              >
-                Reset
-              </button>
-            </div>
-          )}
+            )}
+
+            {customOrdering !== null && (
+              <>
+                <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 font-medium ml-2">
+                  <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
+                  Custom order
+                </span>
+                <button
+                  onClick={handleResetOrdering}
+                  className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full transition-colors font-medium"
+                >
+                  Reset
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm p-5">
@@ -3634,12 +3679,13 @@ function PhotoGridEditor({
                         reorderDragState?.draggedAssetId === photoBox.id;
                       const isDropTarget = dropTargetAssetId === photoBox.id;
                       const isReordered = manuallyMovedIds.has(photoBox.id);
+                      const isSwapSelected = swapFirstId === photoBox.id;
 
                       return (
                         <div
                           key={photoBox.id}
                           data-reorder-asset-id={photoBox.id}
-                          className={`absolute group cursor-move ${isBeingDragged ? "opacity-50" : ""}`}
+                          className={`absolute group cursor-move ${isBeingDragged ? "opacity-50" : ""} ${isSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2 z-20" : ""}`}
                           style={{
                             left: `${toPoints(photoBox.x)}px`,
                             top: `${toPoints(photoBox.y)}px`,
@@ -3758,6 +3804,7 @@ function PhotoGridEditor({
                       reorderDragState?.draggedAssetId === asset.id;
                     const isDropTarget = dropTargetAssetId === asset.id;
                     const isReordered = manuallyMovedIds.has(asset.id);
+                    const isSwapSelected = swapFirstId === asset.id;
 
                     const dateStripHeight = showDates ? fontSize * 1.6 : 0;
                     const cardCaption = cardCaptions.get(asset.id) || "";
@@ -3775,7 +3822,7 @@ function PhotoGridEditor({
                       <div
                         key={photoBox.id}
                         data-reorder-asset-id={asset.id}
-                        className={`absolute group cursor-move ${isBeingDragged ? "opacity-50" : ""}`}
+                        className={`absolute group cursor-move ${isBeingDragged ? "opacity-50" : ""} ${isSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2 z-20" : ""}`}
                         style={{
                           left: `${toPoints(photoBox.x)}px`,
                           top: `${toPoints(photoBox.y)}px`,
