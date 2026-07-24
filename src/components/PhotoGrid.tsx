@@ -3510,7 +3510,7 @@ function PhotoGridEditor({
               <button
                 onClick={handleGeneratePdf}
                 disabled={isGeneratingPdf}
-                title="Générer le PDF"
+                title={t(language, "generatePdf")}
                 className="w-9 h-9 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-indigo-400 dark:disabled:bg-indigo-800 flex items-center justify-center transition-colors"
               >
                 {isGeneratingPdf ? (
@@ -3524,10 +3524,52 @@ function PhotoGridEditor({
                     stroke="currentColor"
                     strokeWidth="2.2"
                   >
-                    <path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M12 1v6m0 6v6M4.2 4.2l4.2 4.2m7.2 7.2l4.2 4.2M1 12h6m6 0h6M4.2 19.8l4.2-4.2m7.2-7.2l4.2-4.2" />
                   </svg>
                 )}
               </button>
+              {pdfUrl && !isGeneratingPdf && (
+                <a
+                  href={pdfUrl}
+                  download={`${sanitizeFileName(album.albumName)}.pdf`}
+                  title={t(language, "downloadPdf")}
+                  className="w-9 h-9 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 flex items-center justify-center transition-colors"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="15"
+                    height="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                  >
+                    <path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+                  </svg>
+                </a>
+              )}
+              {pdfUrl && !isGeneratingPdf && selectedPrinter.url && (
+                <a
+                  href={selectedPrinter.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={t(language, "printWith") + " " + selectedPrinter.label}
+                  className="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center transition-colors border border-gray-200 dark:border-gray-700"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="15"
+                    height="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                  >
+                    <path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                    <path d="M6 14h12v8H6z" />
+                  </svg>
+                </a>
+              )}
+              <div className="w-8 border-t border-gray-200 dark:border-gray-800" />
               <div className="mt-auto flex flex-col gap-2">
                 {sidebarLanguageToggle}
                 {sidebarThemeToggle}
