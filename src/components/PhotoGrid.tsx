@@ -3023,6 +3023,243 @@ function PhotoGridEditor({
       : coverPageWidth;
     const separatedCoverBleedWidth = separatedCoverWidth + bleedPt * 2;
 
+    // Helper to render back cover content (reused in both standalone and separated modes)
+    const renderBackCoverContent = () => {
+      // This is a direct extraction from the standalone back cover rendering
+      // to ensure separated cover gets the same layouts
+      return (
+        <>
+          {backCoverLayout === "text-only" && backCoverText && (
+            <View
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                paddingHorizontal: coverPageWidth * 0.1,
+              }}
+            >
+              <View
+                style={{
+                  width: coverPageWidth * 0.3,
+                  height: 1,
+                  backgroundColor: SCRAPBOOK.ink,
+                  opacity: 0.3,
+                  marginBottom: 16,
+                }}
+              />
+              <Text
+                style={{
+                  fontFamily: "Caveat",
+                  fontWeight: 600,
+                  fontSize: coverPageWidth * 0.09,
+                  color: SCRAPBOOK.ink,
+                  textAlign: "center",
+                }}
+              >
+                {backCoverText}
+              </Text>
+              <View
+                style={{
+                  width: coverPageWidth * 0.3,
+                  height: 1,
+                  backgroundColor: SCRAPBOOK.ink,
+                  opacity: 0.3,
+                  marginTop: 16,
+                }}
+              />
+            </View>
+          )}
+
+          {backCoverLayout === "photo-title" &&
+            (backCoverImageBlob || backCoverText) &&
+            (() => {
+              const hasImage = !!backCoverImageBlob;
+              if (!hasImage && backCoverPlainText && backCoverText) {
+                const plainWidth = coverPageWidth * 0.7;
+                return (
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: (coverPageWidth - plainWidth) / 2,
+                      width: plainWidth,
+                      height: coverPageHeight,
+                      display: "flex",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Caveat",
+                        fontWeight: 500,
+                        fontSize: fontSize * 1.9,
+                        color: SCRAPBOOK.ink,
+                        textAlign: "center",
+                      }}
+                    >
+                      {backCoverText}
+                    </Text>
+                  </View>
+                );
+              }
+
+              const cardWidth = coverPageWidth * 0.42;
+              const cardHeight = coverPageHeight * 0.3;
+              const cardTop = (coverPageHeight - cardHeight) / 2;
+              const cardLeft = (coverPageWidth - cardWidth) / 2;
+              const frameInset = Math.max(4, cardWidth * 0.045);
+              const captionStripHeight = backCoverText ? fontSize * 1.3 * 1.6 : 0;
+              
+              return (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: cardTop,
+                    left: cardLeft,
+                    width: cardWidth,
+                    height: cardHeight,
+                  }}
+                >
+                  {hasImage && (
+                    <View
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: cardWidth,
+                        height: cardHeight - captionStripHeight,
+                        backgroundColor: SCRAPBOOK.mat,
+                      }}
+                    >
+                      <View
+                        style={{
+                          position: "absolute",
+                          top: frameInset,
+                          left: frameInset,
+                          right: frameInset,
+                          bottom: frameInset,
+                          overflow: "hidden",
+                        }}
+                      >
+                        <Image
+                          src={backCoverImageBlob}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
+                        />
+                      </View>
+                    </View>
+                  )}
+                  {backCoverText && (
+                    <View
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        height: captionStripHeight,
+                        backgroundColor: SCRAPBOOK.mat,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        paddingHorizontal: 8,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontFamily: "Caveat",
+                          fontWeight: 500,
+                          fontSize: fontSize * 1.3,
+                          color: SCRAPBOOK.ink,
+                          textAlign: "center",
+                        }}
+                      >
+                        {backCoverText}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })()}
+
+          {backCoverLayout === "full-bleed" && backCoverImageBlob && (
+            <>
+              <Image
+                src={backCoverImageBlob}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: coverPageWidth,
+                  height: coverPageHeight,
+                  objectFit: "cover",
+                }}
+              />
+              <View
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  bottom: 0,
+                  width: coverPageWidth,
+                  height: coverScrimHeight,
+                }}
+              >
+                {Array.from({ length: 10 }, (_, i) => (
+                  <View
+                    key={i}
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: (coverScrimHeight * i) / 10,
+                      width: coverPageWidth,
+                      height: coverScrimHeight / 10 + 0.5,
+                      backgroundColor: "#000000",
+                      opacity: (0.55 * (i + 1)) / 10,
+                    }}
+                  />
+                ))}
+              </View>
+              {backCoverText && (
+                <View
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    height: coverScrimHeight,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontFamily: "Caveat",
+                      fontWeight: 600,
+                      fontSize: coverPageWidth * 0.06,
+                      color: "#FFFFFF",
+                      textAlign: "center",
+                    }}
+                  >
+                    {backCoverText}
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
+        </>
+      );
+    };
+
     // Helper to render front cover content (reused in both standalone and separated modes)
     const renderFrontCoverContent = () => (
       <>
@@ -3407,52 +3644,7 @@ function PhotoGridEditor({
           >
             {/* Back Cover (left) */}
             <View style={{ width: coverPageWidth, height: coverPageHeight, position: "relative" }}>
-              {/* Render back cover content - copy from standalone back cover */}
-              {backCoverLayout === "text-only" && backCoverText && (
-                <View
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    paddingHorizontal: coverPageWidth * 0.1,
-                  }}
-                >
-                  <View
-                    style={{
-                      width: coverPageWidth * 0.3,
-                      height: 1,
-                      backgroundColor: SCRAPBOOK.ink,
-                      opacity: 0.3,
-                      marginBottom: 16,
-                    }}
-                  />
-                  <Text
-                    style={{
-                      fontFamily: "Caveat",
-                      fontWeight: 600,
-                      fontSize: coverPageWidth * 0.09,
-                      color: SCRAPBOOK.ink,
-                      textAlign: "center",
-                    }}
-                  >
-                    {backCoverText}
-                  </Text>
-                  <View
-                    style={{
-                      width: coverPageWidth * 0.3,
-                      height: 1,
-                      backgroundColor: SCRAPBOOK.ink,
-                      opacity: 0.3,
-                      marginTop: 16,
-                    }}
-                  />
-                </View>
-              )}
+              {renderBackCoverContent()}
             </View>
 
             {/* Spine (middle) */}
