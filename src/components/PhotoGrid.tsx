@@ -4876,6 +4876,65 @@ function PhotoGridEditor({
               {showCover && (
                 <>
                   <ToggleSwitch
+                    checked={separatedCover}
+                    onChange={setSeparatedCover}
+                    label="Separated Cover (for Blurb, etc.)"
+                    sublabel="Creates a single page with back cover, spine, and front cover combined"
+                  />
+                  {separatedCover && (
+                    <>
+                      <div>
+                        <label
+                          htmlFor="spineWidth"
+                          className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                        >
+                          Spine Width (mm)
+                        </label>
+                        <input
+                          type="number"
+                          id="spineWidth"
+                          value={spineWidth}
+                          onChange={(e) => setSpineWidth(Number(e.target.value))}
+                          min="5"
+                          max="50"
+                          step="1"
+                          className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-24"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="spineColor"
+                          className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                        >
+                          Spine Color
+                        </label>
+                        <input
+                          type="color"
+                          id="spineColor"
+                          value={spineColor}
+                          onChange={(e) => setSpineColor(e.target.value)}
+                          className="h-10 w-24 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="spineTitle"
+                          className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                        >
+                          Spine Title
+                        </label>
+                        <input
+                          type="text"
+                          id="spineTitle"
+                          value={spineTitle}
+                          onChange={(e) => setSpineTitle(e.target.value)}
+                          placeholder={album.albumName}
+                          className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
+                        />
+                      </div>
+                    </>
+                  )}
+                  <ToggleSwitch
                     checked={excludeCoverPhotosFromPages}
                     onChange={setExcludeCoverPhotosFromPages}
                     label={t(language, "leaveCoverPhotosOut")}
