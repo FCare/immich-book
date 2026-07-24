@@ -250,6 +250,169 @@ function splitRect(
   ];
 }
 
+// The recursive split produces exact, gap-free tiling, but cells from
+// different branches of the tree can end up with almost - but not quite
+// - the same y and height (e.g. two independently-computed stacked
+// splits under sibling columns of a shared-height parent). A large size
+// difference reads as intentional mosaic variety; a few-percent
+// difference just reads as a misaligned row. This snaps only the
+// latter: contiguous runs of cells sharing close-but-not-equal y/height
+// are forced to a common y/height, with the delta absorbed by whatever
+// sits directly below them - which may itself be more than one cell
+// (e.g. a single tall neighbor's own mate is two stacked cells one
+// level down). The swap only happens when the region below is a
+// complete, gap-free cover of the row's combined width, so the overall
+// tiling never grows a gap or an overlap; anything that doesn't tile
+// that cleanly is left alone.
+function equalizeNearMatchingRows(
+  photos: PhotoBox[],
+  spacing: number,
+): PhotoBox[] {
+  const boxes = photos.map((p) => ({ ...p }));
+  const GEOMETRY_EPS = 2;
+  const ALREADY_EQUAL_EPS = 1;
+  // Two cells that are genuinely meant to align (e.g. the top cells of
+  // two independently-stacked columns under a shared side-by-side
+  // split) inherit the *exact* same y from that shared parent - only
+  // their height can drift apart, from each column computing its own
+  // split fraction independently. So this only needs to absorb
+  // rounding, not "roughly the same row": a wider tolerance starts
+  // matching cells from unrelated rows that just happen to land nearby,
+  // which is exactly the kind of mismatch this is supposed to prevent,
+  // not create.
+  const Y_TOLERANCE = GEOMETRY_EPS;
+  const CLOSE_HEIGHT_RATIO = 0.85;
+
+  // Group boxes into y-bands (close top edge), then split each band
+  // into sub-groups of mutually close heights - two bento tiles can
+  // share a y-band (e.g. a full-height tile next to two stacked ones)
+  // without being anywhere near the same height, and those must stay
+  // untouched.
+  const byY = [...boxes].sort((a, b) => a.y - b.y);
+  const bands: PhotoBox[][] = [];
+  for (const box of byY) {
+    const band = bands.find((b) => Math.abs(b[0].y - box.y) <= Y_TOLERANCE);
+    if (band) band.push(box);
+    else bands.push([box]);
+  }
+
+  const groups: PhotoBox[][] = [];
+  for (const band of bands) {
+    const byHeight = [...band].sort((a, b) => a.height - b.height);
+    let current: PhotoBox[] = [];
+    for (const box of byHeight) {
+      const prev = current[current.length - 1];
+      const closeToRun =
+        current.length === 0 ||
+        Math.min(prev.height, box.height) / Math.max(prev.height, box.height) >=
+          CLOSE_HEIGHT_RATIO;
+      if (closeToRun) {
+        current.push(box);
+      } else {
+        if (current.length >= 2) groups.push(current);
+        current = [box];
+      }
+    }
+    if (current.length >= 2) groups.push(current);
+  }
+
+  // Groups are found once, up front, from the original geometry - but
+  // applying one group mutates boxes in place. A box touched by one
+  // group's resize (whether as a member or as part of what absorbed the
+  // delta below it) must not be touched again by a later group: its
+  // recorded height/position would already be stale relative to when
+  // that later group was classified, and reusing it could silently
+  // reintroduce a gap or overlap instead of preventing one.
+  const touched = new Set<string>();
+
+  for (const group of groups) {
+    if (group.some((b) => touched.has(b.id))) continue;
+
+    // Already matching (within rounding) - nothing to do.
+    const heights = group.map((b) => b.height);
+    if (Math.max(...heights) - Math.min(...heights) < ALREADY_EQUAL_EPS) {
+      continue;
+    }
+
+    const sorted = [...group].sort((a, b) => a.x - b.x);
+    const combinedMinX = sorted[0].x;
+    const combinedMaxX = Math.max(...sorted.map((b) => b.x + b.width));
+    // Group members must themselves tile the combined width with no
+    // gaps - otherwise this isn't really "one row".
+    let contiguous = true;
+    for (let i = 1; i < sorted.length; i++) {
+      const prevRight = sorted[i - 1].x + sorted[i - 1].width;
+      if (Math.abs(sorted[i].x - (prevRight + spacing)) > GEOMETRY_EPS) {
+        contiguous = false;
+        break;
+      }
+    }
+    if (!contiguous) continue;
+
+    const targetY = Math.min(...group.map((b) => b.y));
+    const targetHeight =
+      group.reduce((sum, b) => sum + b.height, 0) / group.length;
+    const groupIds = new Set(group.map((b) => b.id));
+
+    // Collect whatever sits directly below any group member and within
+    // the combined width - possibly several cells, if the region below
+    // is itself split further.
+    const belowSet = new Map<string, PhotoBox>();
+    for (const member of group) {
+      const expectedY = member.y + member.height + spacing;
+      for (const candidate of boxes) {
+        if (groupIds.has(candidate.id)) continue;
+        if (Math.abs(candidate.y - expectedY) > GEOMETRY_EPS) continue;
+        if (
+          candidate.x < combinedMinX - GEOMETRY_EPS ||
+          candidate.x + candidate.width > combinedMaxX + GEOMETRY_EPS
+        ) {
+          continue;
+        }
+        belowSet.set(candidate.id, candidate);
+      }
+    }
+    const below = [...belowSet.values()].sort((a, b) => a.x - b.x);
+    if (below.length === 0) continue; // nothing to absorb the delta into
+    if (below.some((b) => touched.has(b.id))) continue;
+
+    // The below region must itself be a complete, gap-free cover of the
+    // combined width - otherwise resizing it would open a gap or an
+    // overlap next to whatever it doesn't cover.
+    let belowContiguous =
+      below.length > 0 &&
+      Math.abs(below[0].x - combinedMinX) <= GEOMETRY_EPS &&
+      Math.abs(
+        below[below.length - 1].x + below[below.length - 1].width - combinedMaxX,
+      ) <= GEOMETRY_EPS;
+    for (let i = 1; belowContiguous && i < below.length; i++) {
+      const prevRight = below[i - 1].x + below[i - 1].width;
+      if (Math.abs(below[i].x - (prevRight + spacing)) > GEOMETRY_EPS) {
+        belowContiguous = false;
+      }
+    }
+    if (!belowContiguous) continue;
+
+    // Safe to apply: snap the row to a shared y/height, and resize
+    // whatever sits below it by the opposite delta, keeping each of
+    // those cells' own bottom edge fixed.
+    for (const member of group) {
+      member.y = targetY;
+      member.height = targetHeight;
+      touched.add(member.id);
+    }
+    const newBelowTop = targetY + targetHeight + spacing;
+    for (const cell of below) {
+      const bottom = cell.y + cell.height;
+      cell.y = newBelowTop;
+      cell.height = bottom - newBelowTop;
+      touched.add(cell.id);
+    }
+  }
+
+  return boxes;
+}
+
 function layoutBentoPage(
   assets: AssetResponseDto[],
   startIndex: number,
@@ -291,7 +454,7 @@ function layoutBentoPage(
   ];
 
   const photos = splitRect(contentRect, items, spacing, BENTO_CONFIG, seedBase);
-  return { photos, consumed };
+  return { photos: equalizeNearMatchingRows(photos, spacing), consumed };
 }
 
 /**
