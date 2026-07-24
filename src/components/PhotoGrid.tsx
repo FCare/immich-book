@@ -2079,6 +2079,18 @@ function PhotoGridEditor({
           });
         }
         break;
+      
+      case "remove-back-cover-photo":
+        // Undo remove: restore the photo
+        console.log(`[UNDO] Restauration de la photo de 4ème de couverture : ${lastOp.assetName} (ID: ${lastOp.assetId})`);
+        setBackCoverNoPhoto(false);
+        break;
+      
+      case "restore-back-cover-photo":
+        // Undo restore: hide the photo again
+        console.log(`[UNDO] Retrait de la photo de 4ème de couverture`);
+        setBackCoverNoPhoto(true);
+        break;
     }
 
     setHistory(remainingHistory);
@@ -5571,12 +5583,43 @@ function PhotoGridEditor({
                         {t(language, "backCoverPhotoLabel")}
                       </span>
                       {backCoverAsset ? (
-                        <button
-                          onClick={() => setBackCoverNoPhoto(true)}
-                          className="px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-red-300 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                        >
-                          {t(language, "removePhoto")}
-                        </button>
+                        backCoverNoPhoto ? (
+                          <button
+                            onClick={() => {
+                              console.log(`[RESTORE] Restauration de la photo de 4ème de couverture : ${backCoverAsset.originalFileName} (ID: ${backCoverAsset.id})`);
+                              setBackCoverNoPhoto(false);
+                              setHistory((prev) => [
+                                {
+                                  type: "restore-back-cover-photo",
+                                  timestamp: Date.now(),
+                                },
+                                ...prev,
+                              ]);
+                            }}
+                            className="px-3 py-1.5 rounded-full text-xs font-semibold border border-green-200 dark:border-green-700 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+                          >
+                            {t(language, "restorePhoto")}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              console.log(`[REMOVE] Retrait de la photo de 4ème de couverture : ${backCoverAsset.originalFileName} (ID: ${backCoverAsset.id})`);
+                              setBackCoverNoPhoto(true);
+                              setHistory((prev) => [
+                                {
+                                  type: "remove-back-cover-photo",
+                                  assetId: backCoverAsset.id,
+                                  assetName: backCoverAsset.originalFileName,
+                                  timestamp: Date.now(),
+                                },
+                                ...prev,
+                              ]);
+                            }}
+                            className="px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-red-300 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                          >
+                            {t(language, "removePhoto")}
+                          </button>
+                        )
                       ) : (
                         <p className="text-xs text-gray-400 dark:text-gray-500">
                           {t(language, "noPhotoHover")}
