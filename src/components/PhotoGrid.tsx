@@ -3661,7 +3661,7 @@ function PhotoGridEditor({
               <Text
                 style={{
                   fontFamily: "Caveat",
-                  fontSize: spineWidthPt * 0.4,
+                  fontSize: spineWidthPt * 0.7,
                   color: spineTextColor,
                   transform: "rotate(-90deg)",
                 }}
