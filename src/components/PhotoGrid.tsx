@@ -5603,11 +5603,11 @@ function PhotoGridEditor({
                       }}
                     >
                       <span
-                        className="text-white text-xs font-semibold whitespace-nowrap"
+                        className="text-white font-semibold whitespace-nowrap"
                         style={{
                           transform: "rotate(-90deg)",
                           fontFamily: "Caveat",
-                          fontSize: `${Math.max(8, spineWidthPt * scale * 0.4)}px`,
+                          fontSize: `${Math.max(10, (spineWidthPt * scale) * 0.6)}px`,
                         }}
                       >
                         {spineTitle || album.albumName}
