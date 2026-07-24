@@ -1567,7 +1567,9 @@ function PhotoGridEditor({
   // depending on their formats).
   const handleShuffleLayout = (logicalPageNumber: number) => {
     const prevVariant = layoutVariants.get(logicalPageNumber) || 0;
-    const newVariant = prevVariant + 1;
+    // Generate a more random variant to get significantly different layouts
+    // Use a large random jump instead of just +1
+    const newVariant = prevVariant + Math.floor(Math.random() * 100) + 10;
     setLayoutVariants((prev) => {
       const next = new Map(prev);
       next.set(logicalPageNumber, newVariant);
