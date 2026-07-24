@@ -1407,9 +1407,13 @@ function PhotoGridEditor({
       setIsLoading(true);
       setError(null);
       
+      // Respect album's sort order preference (asc = oldest first, desc = newest first)
+      const albumOrder = album.order || "desc";
+      
       // Step 1: Get all time buckets for this album
       const timebuckets = await getTimeBuckets({
         albumId: album.id,
+        order: albumOrder,
       });
       
       if (!timebuckets || timebuckets.length === 0) {
@@ -1444,12 +1448,11 @@ function PhotoGridEditor({
         return;
       }
       
-      // Step 3: Sort assets by creation date ascending
+      // Step 3: Sort assets by creation date, respecting the album's order preference
       const sorted = allAssets.sort((a, b) => {
-        return (
-          new Date(a.fileCreatedAt).getTime() -
-          new Date(b.fileCreatedAt).getTime()
-        );
+        const timeA = new Date(a.fileCreatedAt).getTime();
+        const timeB = new Date(b.fileCreatedAt).getTime();
+        return albumOrder === "asc" ? timeA - timeB : timeB - timeA;
       });
       setAssets(sorted);
     } catch (err) {
