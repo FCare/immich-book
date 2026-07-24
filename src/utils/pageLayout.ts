@@ -568,8 +568,28 @@ export function calculatePageLayout(
         });
       }
     }
+    if (combinedPages.length % 2 !== 0) {
+      combinedPages.push(
+        blankPage(
+          combinedPages.length + 1,
+          pageDimensions.width * 2,
+          pageDimensions.height,
+        ),
+      );
+    }
     return combinedPages;
   }
 
+  if (pages.length % 2 !== 0) {
+    pages.push(blankPage(pages.length + 1, pageDimensions.width, pageDimensions.height));
+  }
+
   return pages;
+}
+
+// A plain, photo-less page appended to keep the total page count even -
+// most print binderies require it, since a book is printed and bound in
+// sheets rather than single leaves.
+function blankPage(pageNumber: number, width: number, height: number): Page {
+  return { pageNumber, photos: [], width, height };
 }

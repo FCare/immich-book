@@ -3042,24 +3042,6 @@ function PhotoGridEditor({
                 </p>
               </div>
 
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={handleGenerateCaptions}
-                  disabled={isGeneratingCaptions}
-                  className="px-4 py-2 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold transition-colors"
-                  title="Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)"
-                >
-                  {isGeneratingCaptions
-                    ? `Génération... ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
-                    : "Générer les légendes"}
-                </button>
-                {captionError && (
-                  <p className="text-xs text-red-600 dark:text-red-400">
-                    {captionError}
-                  </p>
-                )}
-              </div>
-
       {/* Settings - styled like browser tabs: the tab strip sits on a
           muted background, the active tab "lifts" into the content
           pane below by sharing its background, and the content pane
@@ -3130,7 +3112,10 @@ function PhotoGridEditor({
           ))}
         </div>
 
-        {(swapFirstId || customOrdering !== null) && (
+        {(swapFirstId ||
+          customOrdering !== null ||
+          slotOverrides.size > 0 ||
+          manuallyMovedIds.size > 0) && (
           <div className="flex flex-wrap items-center gap-2 text-xs bg-white dark:bg-gray-950 px-3 pt-3">
             {swapFirstId && (
               <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 font-medium">
@@ -3145,17 +3130,20 @@ function PhotoGridEditor({
               </span>
             )}
 
-            {customOrdering !== null && (
+            {(customOrdering !== null ||
+              slotOverrides.size > 0 ||
+              manuallyMovedIds.size > 0) && (
               <>
                 <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 font-medium ml-2">
                   <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
-                  Custom order
+                  Photos reordered
                 </span>
                 <button
                   onClick={handleResetOrdering}
+                  title="Reset every photo's position and order back to automatic"
                   className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full transition-colors font-medium"
                 >
-                  Reset
+                  Reset order
                 </button>
               </>
             )}
@@ -3668,6 +3656,21 @@ function PhotoGridEditor({
       </div>
 
               <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleGenerateCaptions}
+                  disabled={isGeneratingCaptions}
+                  className="px-4 py-2 rounded-full bg-violet-600 text-white hover:bg-violet-700 disabled:bg-violet-400 dark:disabled:bg-violet-800 disabled:cursor-not-allowed text-sm font-semibold shadow-sm transition-colors"
+                  title="Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)"
+                >
+                  {isGeneratingCaptions
+                    ? `Génération... ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
+                    : "Générer les légendes"}
+                </button>
+                {captionError && (
+                  <p className="text-xs text-red-600 dark:text-red-400">
+                    {captionError}
+                  </p>
+                )}
                 <button
                   onClick={handleGeneratePdf}
                   disabled={isGeneratingPdf}
