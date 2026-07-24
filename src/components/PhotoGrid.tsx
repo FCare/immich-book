@@ -7571,9 +7571,8 @@ function PhotoGridEditor({
           historyCollapsed ? "w-16" : "w-80"
         }`}
       >
-        <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar flex flex-col">
           {historyCollapsed ? (
-            <div className="flex flex-col items-center gap-3 py-4">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar flex flex-col items-center gap-3 py-4">
               <button
                 onClick={() => setHistoryCollapsed(false)}
                 title={t(language, "history")}
@@ -7649,45 +7648,64 @@ function PhotoGridEditor({
               )}
             </div>
           ) : (
-            <div className="flex flex-col gap-4 p-4 min-h-full">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
-                  {t(language, "historyTitle")}
-                </h2>
-                <button
-                  onClick={() => setHistoryCollapsed(true)}
-                  title={t(language, "closePanel")}
-                  className="w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300 flex items-center justify-center transition-colors"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="14"
-                    height="14"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
+            <>
+              {/* Header - Sticky */}
+              <div className="flex-none p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
+                    {t(language, "historyTitle")}
+                  </h2>
+                  <button
+                    onClick={() => setHistoryCollapsed(true)}
+                    title={t(language, "closePanel")}
+                    className="w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300 flex items-center justify-center transition-colors"
                   >
-                    <path d="M9 18l6-6-6-6" />
-                  </svg>
-                </button>
-              </div>
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                    >
+                      <path d="M9 18l6-6-6-6" />
+                    </svg>
+                  </button>
+                </div>
 
-              {/* Reset All and Flatten buttons */}
-              {(history.length > 0 ||
-                customOrdering !== null ||
-                slotOverrides.size > 0 ||
-                manuallyMovedIds.size > 0 ||
-                layoutVariants.size > 0 ||
-                pageCounts.size > 0 ||
-                textCardCounts.size > 0 ||
-                textCardContents.size > 0 ||
-                pageCaptions.size > 0 ||
-                cardCaptions.size > 0) && (
-                <div className="flex flex-col gap-2">
-                  {history.length > 0 && (
+                {/* Reset All and Flatten buttons */}
+                {(history.length > 0 ||
+                  customOrdering !== null ||
+                  slotOverrides.size > 0 ||
+                  manuallyMovedIds.size > 0 ||
+                  layoutVariants.size > 0 ||
+                  pageCounts.size > 0 ||
+                  textCardCounts.size > 0 ||
+                  textCardContents.size > 0 ||
+                  pageCaptions.size > 0 ||
+                  cardCaptions.size > 0) && (
+                  <div className="flex flex-col gap-2">
+                    {history.length > 0 && (
+                      <button
+                        onClick={() => setShowResetConfirmation(true)}
+                        className="w-full px-4 py-2 rounded-lg border-2 border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          width="16"
+                          height="16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                        {t(language, "resetAll")}
+                      </button>
+                    )}
                     <button
-                      onClick={() => setShowResetConfirmation(true)}
-                      className="w-full px-4 py-2 rounded-lg border-2 border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                      onClick={() => setShowFlattenConfirmation(true)}
+                      className="w-full px-4 py-2 rounded-lg border-2 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
                     >
                       <svg
                         viewBox="0 0 24 24"
@@ -7697,30 +7715,16 @@ function PhotoGridEditor({
                         stroke="currentColor"
                         strokeWidth="2"
                       >
-                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <path d="M7 10v12M21 10v12M5 4h16v6H5zM3 4h2M3 22h18" />
                       </svg>
-                      {t(language, "resetAll")}
+                      {t(language, "flatten")}
                     </button>
-                  )}
-                  <button
-                    onClick={() => setShowFlattenConfirmation(true)}
-                    className="w-full px-4 py-2 rounded-lg border-2 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="16"
-                      height="16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <path d="M7 10v12M21 10v12M5 4h16v6H5zM3 4h2M3 22h18" />
-                    </svg>
-                    {t(language, "flatten")}
-                  </button>
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
 
+              {/* Scrollable content */}
+              <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar p-4">
               {history.length === 0 ? (
                 <div className="flex-1 flex items-center justify-center p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
                   {t(language, "noOperations")}
@@ -7811,9 +7815,9 @@ function PhotoGridEditor({
                })}
                 </div>
               )}
-            </div>
+              </div>
+            </>
           )}
-        </div>
 
         {/* Undo button - Sticky at bottom */}
         {history.length > 0 && (
