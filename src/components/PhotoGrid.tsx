@@ -5805,30 +5805,137 @@ function PhotoGridEditor({
                         height: `${displayHeight * scale}px`,
                       }}
                     >
-                      {backCoverImageUrl && backCoverLayout === "full-bleed" && (
-                        <img
-                          src={backCoverImageUrl}
-                          alt="Back cover"
-                          className="absolute inset-0 w-full h-full object-cover"
-                        />
+                      {backCoverLayout === "text-only" && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <input
+                            value={backCoverText}
+                            onFocus={(e) => {
+                              e.target.dataset.initialValue = backCoverText;
+                            }}
+                            onChange={(e) => setBackCoverText(e.target.value)}
+                            onBlur={(e) => {
+                              const prevText = e.target.dataset.initialValue || "";
+                              const newText = e.target.value.trim();
+                              if (prevText !== newText) {
+                                setHistory((prev) => [
+                                  {
+                                    type: "edit-back-cover-text",
+                                    prevText,
+                                    newText,
+                                    timestamp: Date.now(),
+                                  },
+                                  ...prev,
+                                ]);
+                              }
+                            }}
+                            placeholder={t(language, "backCoverTextPlaceholder")}
+                            className="text-center bg-transparent focus:outline-none rounded w-[80%] text-gray-700 dark:text-gray-300"
+                            style={{
+                              fontFamily: "Caveat",
+                              fontWeight: 600,
+                              fontSize: `${14 * scale}px`,
+                            }}
+                          />
+                        </div>
                       )}
-                      {backCoverImageUrl && backCoverLayout === "photo-title" && (
-                        <img
-                          src={backCoverImageUrl}
-                          alt="Back cover"
-                          className="absolute inset-0 w-full h-full object-cover"
-                        />
+                      
+                      {backCoverLayout === "photo-title" && backCoverImageUrl && (
+                        <>
+                          <img
+                            src={backCoverImageUrl}
+                            alt="Back cover"
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                          <div
+                            className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                            style={{ height: "20%" }}
+                          >
+                            <input
+                              value={backCoverText}
+                              onFocus={(e) => {
+                                e.target.dataset.initialValue = backCoverText;
+                              }}
+                              onChange={(e) => setBackCoverText(e.target.value)}
+                              onBlur={(e) => {
+                                const prevText = e.target.dataset.initialValue || "";
+                                const newText = e.target.value.trim();
+                                if (prevText !== newText) {
+                                  setHistory((prev) => [
+                                    {
+                                      type: "edit-back-cover-text",
+                                      prevText,
+                                      newText,
+                                      timestamp: Date.now(),
+                                    },
+                                    ...prev,
+                                  ]);
+                                }
+                              }}
+                              placeholder={t(language, "backCoverTextPlaceholder")}
+                              className="text-center bg-transparent focus:outline-none focus:bg-white/60 rounded w-[90%]"
+                              style={{
+                                fontFamily: "Caveat",
+                                fontWeight: 500,
+                                fontSize: `${(displayWidth * scale) * 0.04}px`,
+                                color: SCRAPBOOK.ink,
+                              }}
+                            />
+                          </div>
+                        </>
                       )}
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        {backCoverLayout === "text-only" && backCoverText && (
-                          <span className="text-gray-700 dark:text-gray-300 text-sm font-semibold" style={{ fontFamily: "Caveat" }}>
-                            {backCoverText}
-                          </span>
-                        )}
-                        {!backCoverImageUrl && !backCoverText && (
+                      
+                      {backCoverLayout === "full-bleed" && backCoverImageUrl && (
+                        <>
+                          <img
+                            src={backCoverImageUrl}
+                            alt="Back cover"
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                          <div
+                            className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                            style={{
+                              height: "28%",
+                              background: "linear-gradient(to top, rgba(0,0,0,0.55), transparent)",
+                            }}
+                          >
+                            <input
+                              value={backCoverText}
+                              onFocus={(e) => {
+                                e.target.dataset.initialValue = backCoverText;
+                              }}
+                              onChange={(e) => setBackCoverText(e.target.value)}
+                              onBlur={(e) => {
+                                const prevText = e.target.dataset.initialValue || "";
+                                const newText = e.target.value.trim();
+                                if (prevText !== newText) {
+                                  setHistory((prev) => [
+                                    {
+                                      type: "edit-back-cover-text",
+                                      prevText,
+                                      newText,
+                                      timestamp: Date.now(),
+                                    },
+                                    ...prev,
+                                  ]);
+                                }
+                              }}
+                              placeholder={t(language, "backCoverTextPlaceholder")}
+                              className="text-center bg-transparent focus:outline-none rounded w-[90%] text-white"
+                              style={{
+                                fontFamily: "Caveat",
+                                fontWeight: 600,
+                                fontSize: `${(displayWidth * scale) * 0.06}px`,
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
+                      
+                      {!backCoverImageUrl && backCoverLayout !== "text-only" && (
+                        <div className="absolute inset-0 flex items-center justify-center">
                           <span className="text-gray-400 text-xs">{t(language, "backCover")}</span>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Spine (middle) */}
@@ -5861,23 +5968,137 @@ function PhotoGridEditor({
                         height: `${displayHeight * scale}px`,
                       }}
                     >
-                      {coverImageUrl && (coverLayout === "full-bleed" || coverLayout === "photo-title") && (
-                        <img
-                          src={coverImageUrl}
-                          alt="Front cover"
-                          className="absolute inset-0 w-full h-full object-cover"
-                        />
+                      {coverLayout === "text-only" && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <input
+                            value={coverTitle}
+                            onFocus={(e) => {
+                              e.target.dataset.initialValue = coverTitle;
+                            }}
+                            onChange={(e) => setCoverTitle(e.target.value)}
+                            onBlur={(e) => {
+                              const prevText = e.target.dataset.initialValue || "";
+                              const newText = e.target.value.trim();
+                              if (prevText !== newText) {
+                                setHistory((prev) => [
+                                  {
+                                    type: "edit-cover-title",
+                                    prevText,
+                                    newText,
+                                    timestamp: Date.now(),
+                                  },
+                                  ...prev,
+                                ]);
+                              }
+                            }}
+                            placeholder={album.albumName}
+                            className="text-center bg-transparent focus:outline-none rounded w-[80%] text-gray-700 dark:text-gray-300"
+                            style={{
+                              fontFamily: "Caveat",
+                              fontWeight: 600,
+                              fontSize: `${14 * scale}px`,
+                            }}
+                          />
+                        </div>
                       )}
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        {coverLayout === "text-only" && (
-                          <span className="text-gray-700 dark:text-gray-300 text-sm font-semibold" style={{ fontFamily: "Caveat" }}>
-                            {coverTitle || album.albumName}
-                          </span>
-                        )}
-                        {!coverImageUrl && coverLayout !== "text-only" && (
+                      
+                      {coverLayout === "photo-title" && coverImageUrl && (
+                        <>
+                          <img
+                            src={coverImageUrl}
+                            alt="Front cover"
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                          <div
+                            className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                            style={{ height: "20%" }}
+                          >
+                            <input
+                              value={coverTitle}
+                              onFocus={(e) => {
+                                e.target.dataset.initialValue = coverTitle;
+                              }}
+                              onChange={(e) => setCoverTitle(e.target.value)}
+                              onBlur={(e) => {
+                                const prevText = e.target.dataset.initialValue || "";
+                                const newText = e.target.value.trim();
+                                if (prevText !== newText) {
+                                  setHistory((prev) => [
+                                    {
+                                      type: "edit-cover-title",
+                                      prevText,
+                                      newText,
+                                      timestamp: Date.now(),
+                                    },
+                                    ...prev,
+                                  ]);
+                                }
+                              }}
+                              placeholder={album.albumName}
+                              className="text-center bg-transparent focus:outline-none focus:bg-white/60 rounded w-[90%]"
+                              style={{
+                                fontFamily: "Caveat",
+                                fontWeight: 600,
+                                fontSize: `${(displayWidth * scale) * 0.055}px`,
+                                color: SCRAPBOOK.ink,
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
+                      
+                      {coverLayout === "full-bleed" && coverImageUrl && (
+                        <>
+                          <img
+                            src={coverImageUrl}
+                            alt="Front cover"
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                          <div
+                            className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                            style={{
+                              height: "28%",
+                              background: "linear-gradient(to top, rgba(0,0,0,0.55), transparent)",
+                            }}
+                          >
+                            <input
+                              value={coverTitle}
+                              onFocus={(e) => {
+                                e.target.dataset.initialValue = coverTitle;
+                              }}
+                              onChange={(e) => setCoverTitle(e.target.value)}
+                              onBlur={(e) => {
+                                const prevText = e.target.dataset.initialValue || "";
+                                const newText = e.target.value.trim();
+                                if (prevText !== newText) {
+                                  setHistory((prev) => [
+                                    {
+                                      type: "edit-cover-title",
+                                      prevText,
+                                      newText,
+                                      timestamp: Date.now(),
+                                    },
+                                    ...prev,
+                                  ]);
+                                }
+                              }}
+                              placeholder={album.albumName}
+                              className="text-center bg-transparent focus:outline-none rounded w-[90%] text-white"
+                              style={{
+                                fontFamily: "Caveat",
+                                fontWeight: 600,
+                                fontSize: `${(displayWidth * scale) * 0.06}px`,
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
+                      
+                      {!coverImageUrl && coverLayout !== "text-only" && (
+                        <div className="absolute inset-0 flex items-center justify-center">
                           <span className="text-gray-400 text-xs">{t(language, "frontCover")}</span>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                   
