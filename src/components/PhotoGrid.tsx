@@ -449,6 +449,8 @@ interface PhotoGridProps {
   immichConfig: ImmichConfig;
   album: AlbumResponseDto;
   onBack: () => void;
+  darkMode: boolean;
+  onToggleDarkMode: () => void;
 }
 
 interface GlobalConfig {
@@ -837,11 +839,13 @@ function PhotoGrid(props: PhotoGridProps) {
 
   if (!initialConfig) {
     return (
-      <div className="text-center py-12">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
-        <p className="mt-4 text-gray-600 dark:text-gray-400">
-          Loading photobook...
-        </p>
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">
+            Loading photobook...
+          </p>
+        </div>
       </div>
     );
   }
@@ -862,6 +866,8 @@ function PhotoGridEditor({
   immichConfig,
   album,
   onBack,
+  darkMode,
+  onToggleDarkMode,
   initialConfig,
 }: PhotoGridEditorProps) {
   const [assets, setAssets] = useState<AssetResponseDto[]>([]);
@@ -1031,6 +1037,18 @@ function PhotoGridEditor({
   const [settingsTab, setSettingsTab] = useState<
     "page" | "layout" | "presentation" | "cover"
   >("page");
+  // Sidebar collapse is a layout preference, not per-album content, so
+  // it lives in its own localStorage key (same pattern as dark mode)
+  // rather than in AlbumConfig.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem("immich-book-sidebar-collapsed") === "true",
+  );
+  useEffect(() => {
+    localStorage.setItem(
+      "immich-book-sidebar-collapsed",
+      String(sidebarCollapsed),
+    );
+  }, [sidebarCollapsed]);
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
   const [captionProgress, setCaptionProgress] = useState<{
     done: number;
@@ -1794,32 +1812,36 @@ function PhotoGridEditor({
 
   if (isLoading) {
     return (
-      <div className="text-center py-12">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
-        <p className="mt-4 text-gray-600 dark:text-gray-400">
-          Loading photos...
-        </p>
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">
+            Loading photos...
+          </p>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="max-w-md mx-auto">
-        <button
-          onClick={onBack}
-          className="mb-4 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
-        >
-          ← Back to albums
-        </button>
-        <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-md">
-          <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950 px-4">
+        <div className="max-w-md w-full">
           <button
-            onClick={loadAlbumAssets}
-            className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm transition-colors shadow-sm font-medium"
+            onClick={onBack}
+            className="mb-4 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
           >
-            Retry
+            ← Back to albums
           </button>
+          <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-md">
+            <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
+            <button
+              onClick={loadAlbumAssets}
+              className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm transition-colors shadow-sm font-medium"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -2854,195 +2876,262 @@ function PhotoGridEditor({
     }
   };
 
+  const sidebarBrand = (
+    <div
+      className={`flex items-center gap-2 font-bold text-gray-900 dark:text-gray-50 ${sidebarCollapsed ? "justify-center" : ""}`}
+    >
+      <span className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs font-extrabold flex-none">
+        IB
+      </span>
+      {!sidebarCollapsed && <span className="text-sm">Immich Book</span>}
+    </div>
+  );
+
+  const sidebarThemeToggle = (
+    <button
+      onClick={onToggleDarkMode}
+      title="Toggle dark mode"
+      className={
+        sidebarCollapsed
+          ? "w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-colors"
+          : "flex items-center gap-2 px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 text-xs font-semibold transition-colors"
+      }
+    >
+      {darkMode ? (
+        <svg
+          viewBox="0 0 24 24"
+          width="13"
+          height="13"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+        >
+          <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" />
+        </svg>
+      ) : (
+        <svg
+          viewBox="0 0 24 24"
+          width="13"
+          height="13"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+        >
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+        </svg>
+      )}
+      {!sidebarCollapsed && (darkMode ? "Dark" : "Light")}
+    </button>
+  );
+
   return (
-    <div>
-      {/* App bar */}
-      <div className="mb-6 flex flex-col lg:flex-row flex-1 items-start lg:items-center lg:justify-between gap-4 lg:gap-8">
-        <div className="w-full lg:w-auto">
-          <button
-            onClick={onBack}
-            className="inline-flex items-center gap-1 text-sm font-semibold text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 mb-2 transition-colors"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.4"
-            >
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-            Albums
-          </button>
-          <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
-            {album.albumName}
-          </h2>
-          <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm tabular-nums">
-            {filteredAssets.length}{" "}
-            {filteredAssets.length !== assets.length && `of ${assets.length}`}{" "}
-            assets
-          </p>
-        </div>
-
-        <div className="flex flex-col items-start lg:items-end gap-2 w-full lg:w-auto">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleGenerateCaptions}
-              disabled={isGeneratingCaptions}
-              className="px-4 py-2 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold transition-colors"
-              title="Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)"
-            >
-              {isGeneratingCaptions
-                ? `Génération... ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
-                : "Générer les légendes"}
-            </button>
-            <button
-              onClick={handleGeneratePdf}
-              disabled={isGeneratingPdf}
-              className="px-5 py-2 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-indigo-400 dark:disabled:bg-indigo-800 disabled:cursor-not-allowed text-sm font-semibold shadow-sm transition-colors flex items-center gap-2"
-            >
-              {isGeneratingPdf && <PdfSpinner />}
-              {isGeneratingPdf
-                ? pdfProgress
-                  ? `Génération... ${pdfProgress.done}/${pdfProgress.total}`
-                  : "Génération..."
-                : "Générer le PDF"}
-            </button>
-            {pdfUrl && !isGeneratingPdf && (
-              <a
-                href={pdfUrl}
-                download={`${sanitizeFileName(album.albumName)}.pdf`}
-                className="px-5 py-2 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-semibold shadow-sm transition-colors"
-              >
-                Télécharger le PDF
-              </a>
-            )}
-          </div>
-          {captionError && (
-            <p className="text-xs text-red-600 dark:text-red-400 max-w-xs lg:text-right">
-              {captionError}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Printers - services known to accept a ready-made PDF (this
-          book's own export) rather than requiring their own layout
-          app. Logos sit on a fixed white chip (not dark:-varied) since
-          a couple of them are plain black artwork with no dark-mode
-          variant - a white backdrop keeps every logo legible either
-          way. */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-          Imprimer ce PDF chez
-        </span>
-        {[
-          {
-            label: "Flexilivre",
-            url: "https://www.flexilivre.com/fichier/",
-            logo: "/logos/flexilivre.svg",
-          },
-          {
-            label: "Pixartprinting",
-            url: "https://www.pixartprinting.fr/",
-            logo: "/logos/pixartprinting.svg",
-          },
-          {
-            label: "Blurb",
-            url: "https://www.blurb.com/pdf-to-book",
-            logo: "/logos/blurb.png",
-          },
-          {
-            label: "Pumbo",
-            url: "https://www.pumbo.fr/",
-            logo: "/logos/pumbo.png",
-          },
-        ].map((printer) => (
-          <a
-            key={printer.label}
-            href={printer.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={printer.label}
-            className="flex items-center justify-center h-10 px-3.5 rounded-lg bg-white border border-gray-200 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:shadow-sm transition-all"
-          >
-            <img
-              src={printer.logo}
-              alt={printer.label}
-              className="h-4 max-w-[92px] object-contain"
-            />
-          </a>
-        ))}
-      </div>
-
-      {/* Settings */}
-      <div className="mb-6">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <div className="inline-flex p-1 bg-gray-100 dark:bg-gray-900 rounded-full gap-0.5">
-            {(
-              [
-                {
-                  key: "page" as const,
-                  label: "Page",
-                  icon: (
-                    <rect x="4" y="3" width="16" height="18" rx="2" />
-                  ),
-                },
-                {
-                  key: "layout" as const,
-                  label: "Layout",
-                  icon: (
-                    <>
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <path d="M3 9h18M9 21V9" />
-                    </>
-                  ),
-                },
-                {
-                  key: "presentation" as const,
-                  label: "Presentation",
-                  icon: (
-                    <>
-                      <circle cx="12" cy="12" r="9" />
-                      <path d="M12 7v5l3 3" />
-                    </>
-                  ),
-                },
-                {
-                  key: "cover" as const,
-                  label: "Cover",
-                  icon: (
-                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z" />
-                  ),
-                },
-              ]
-            ).map((tab) => (
+    <div className="flex h-screen overflow-hidden bg-white dark:bg-gray-950">
+      <aside
+        className={`flex-none flex flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 transition-all duration-200 overflow-hidden ${
+          sidebarCollapsed ? "w-16" : "w-80"
+        }`}
+      >
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          {sidebarCollapsed ? (
+            <div className="flex flex-col items-center gap-3 py-4">
+              {sidebarBrand}
               <button
-                key={tab.key}
-                onClick={() => setSettingsTab(tab.key)}
-                className={`px-3.5 py-1.5 rounded-full text-sm font-semibold flex items-center gap-1.5 transition-colors ${
-                  settingsTab === tab.key
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                }`}
+                onClick={() => setSidebarCollapsed(false)}
+                title="Ouvrir le volet"
+                className="w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-colors"
               >
                 <svg
                   viewBox="0 0 24 24"
-                  width="14"
-                  height="14"
+                  width="15"
+                  height="15"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="2.2"
                 >
-                  {tab.icon}
+                  <path d="M9 18l6-6-6-6" />
                 </svg>
-                {tab.label}
               </button>
-            ))}
-          </div>
+              <div className="w-8 border-t border-gray-200 dark:border-gray-800" />
+              <button
+                onClick={onBack}
+                title="Retour aux albums"
+                className="w-9 h-9 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-colors"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                >
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+              <button
+                onClick={handleGeneratePdf}
+                disabled={isGeneratingPdf}
+                title="Générer le PDF"
+                className="w-9 h-9 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-indigo-400 dark:disabled:bg-indigo-800 flex items-center justify-center transition-colors"
+              >
+                {isGeneratingPdf ? (
+                  <PdfSpinner />
+                ) : (
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="15"
+                    height="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                  >
+                    <path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+                  </svg>
+                )}
+              </button>
+              <div className="mt-auto">{sidebarThemeToggle}</div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-6 p-4 min-h-full">
+              <div className="flex items-center justify-between">
+                {sidebarBrand}
+                <button
+                  onClick={() => setSidebarCollapsed(true)}
+                  title="Réduire le volet"
+                  className="w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300 flex items-center justify-center transition-colors"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                  >
+                    <path d="M15 18l-6-6 6-6" />
+                  </svg>
+                </button>
+              </div>
 
-          <div className="flex items-center gap-2 text-xs">
+              <div>
+                <button
+                  onClick={onBack}
+                  className="inline-flex items-center gap-1 text-sm font-semibold text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 mb-2 transition-colors"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                  >
+                    <path d="M15 18l-6-6 6-6" />
+                  </svg>
+                  Albums
+                </button>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
+                  {album.albumName}
+                </h2>
+                <p className="text-gray-500 dark:text-gray-400 mt-1 text-xs tabular-nums">
+                  {filteredAssets.length}{" "}
+                  {filteredAssets.length !== assets.length &&
+                    `of ${assets.length}`}{" "}
+                  assets
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleGenerateCaptions}
+                  disabled={isGeneratingCaptions}
+                  className="px-4 py-2 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold transition-colors"
+                  title="Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)"
+                >
+                  {isGeneratingCaptions
+                    ? `Génération... ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
+                    : "Générer les légendes"}
+                </button>
+                {captionError && (
+                  <p className="text-xs text-red-600 dark:text-red-400">
+                    {captionError}
+                  </p>
+                )}
+              </div>
+
+      {/* Settings - styled like browser tabs: the tab strip sits on a
+          muted background, the active tab "lifts" into the content
+          pane below by sharing its background, and the content pane
+          itself has no separate card border - it just reads as the
+          continuation of whichever tab is open. */}
+      <div>
+        <div className="flex gap-0.5 p-1 bg-gray-100 dark:bg-gray-900 rounded-t-xl">
+          {(
+            [
+              {
+                key: "page" as const,
+                label: "Page",
+                icon: <rect x="4" y="3" width="16" height="18" rx="2" />,
+              },
+              {
+                key: "layout" as const,
+                label: "Layout",
+                icon: (
+                  <>
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <path d="M3 9h18M9 21V9" />
+                  </>
+                ),
+              },
+              {
+                key: "presentation" as const,
+                label: "Presentation",
+                icon: (
+                  <>
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 7v5l3 3" />
+                  </>
+                ),
+              },
+              {
+                key: "cover" as const,
+                label: "Cover",
+                icon: (
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z" />
+                ),
+              },
+            ]
+          ).map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setSettingsTab(tab.key)}
+              className={`flex-1 min-w-0 flex flex-col items-center gap-1 px-1 py-2 rounded-t-lg transition-colors ${
+                settingsTab === tab.key
+                  ? "bg-white dark:bg-gray-950 text-indigo-600 dark:text-indigo-400"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+              }`}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="flex-none"
+              >
+                {tab.icon}
+              </svg>
+              <span className="text-[10px] font-semibold leading-tight text-center">
+                {tab.label}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {(swapFirstId || customOrdering !== null) && (
+          <div className="flex flex-wrap items-center gap-2 text-xs bg-white dark:bg-gray-950 px-3 pt-3">
             {swapFirstId && (
               <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 font-medium">
                 <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
@@ -3071,9 +3160,9 @@ function PhotoGridEditor({
               </>
             )}
           </div>
-        </div>
+        )}
 
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm p-5">
+        <div className="bg-white dark:bg-gray-950 rounded-b-xl px-3 pb-3 pt-3">
           {settingsTab === "page" && (
             <div className="flex flex-col gap-5">
               <div>
@@ -3578,11 +3667,114 @@ function PhotoGridEditor({
         </div>
       </div>
 
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleGeneratePdf}
+                  disabled={isGeneratingPdf}
+                  className="px-5 py-2 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-indigo-400 dark:disabled:bg-indigo-800 disabled:cursor-not-allowed text-sm font-semibold shadow-sm transition-colors flex items-center justify-center gap-2"
+                >
+                  {isGeneratingPdf && <PdfSpinner />}
+                  {isGeneratingPdf
+                    ? pdfProgress
+                      ? `Génération... ${pdfProgress.done}/${pdfProgress.total}`
+                      : "Génération..."
+                    : "Générer le PDF"}
+                </button>
+                {pdfUrl && !isGeneratingPdf && (
+                  <a
+                    href={pdfUrl}
+                    download={`${sanitizeFileName(album.albumName)}.pdf`}
+                    className="px-5 py-2 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-semibold shadow-sm transition-colors text-center"
+                  >
+                    Télécharger le PDF
+                  </a>
+                )}
+              </div>
+
+              {/* Printers - services known to accept a ready-made PDF
+                  (this book's own export) rather than requiring their
+                  own layout app. Logos sit on a fixed white chip (not
+                  dark:-varied) since a couple of them are plain black
+                  artwork with no dark-mode variant - a white backdrop
+                  keeps every logo legible either way. */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                  Imprimer ce PDF chez
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    {
+                      label: "Flexilivre",
+                      url: "https://www.flexilivre.com/fichier/",
+                      logo: "/logos/flexilivre.svg",
+                    },
+                    {
+                      label: "Pixartprinting",
+                      url: "https://www.pixartprinting.fr/",
+                      logo: "/logos/pixartprinting.svg",
+                    },
+                    {
+                      label: "Blurb",
+                      url: "https://www.blurb.com/pdf-to-book",
+                      logo: "/logos/blurb.png",
+                    },
+                    {
+                      label: "Pumbo",
+                      url: "https://www.pumbo.fr/",
+                      logo: "/logos/pumbo.png",
+                    },
+                  ].map((printer) => (
+                    <a
+                      key={printer.label}
+                      href={printer.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={printer.label}
+                      className="flex items-center justify-center h-10 px-3.5 rounded-lg bg-white border border-gray-200 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:shadow-sm transition-all"
+                    >
+                      <img
+                        src={printer.logo}
+                        alt={printer.label}
+                        className="h-4 max-w-[92px] object-contain"
+                      />
+                    </a>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-auto pt-2 flex justify-start">
+                {sidebarThemeToggle}
+              </div>
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <main className="flex-1 overflow-y-auto relative">
+        {sidebarCollapsed && (
+          <button
+            onClick={() => setSidebarCollapsed(false)}
+            title="Ouvrir le volet"
+            className="fixed top-4 left-[76px] z-10 w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center shadow-sm transition-colors"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="15"
+              height="15"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+            >
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+        )}
+
       {/* Live Preview - always shown; the generated PDF (if any)
           appears below once ready, rather than replacing this editor. */}
         <div
           ref={previewContainerRef}
-          className="space-y-8 pb-8 px-4 sm:px-0"
+          className="space-y-8 pb-8 px-4 sm:px-0 pt-6"
         >
           {showCover &&
             (() => {
@@ -4602,6 +4794,7 @@ function PhotoGridEditor({
           />
         </div>
       )}
+      </main>
     </div>
   );
 }

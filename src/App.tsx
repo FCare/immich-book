@@ -129,6 +129,22 @@ function App() {
     window.location.hash = "";
   };
 
+  // The PhotoGrid editor owns its own full-viewport layout (a
+  // collapsible sidebar + main content), so it renders without this
+  // shared header/max-width wrapper - only the album picker and the
+  // loading/error states use it.
+  if (immichConfig && !configError && !isLoadingAlbum && selectedAlbum) {
+    return (
+      <PhotoGrid
+        immichConfig={immichConfig}
+        album={selectedAlbum}
+        onBack={handleBackToAlbums}
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode((prev) => !prev)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 transition-colors">
       {/* Header */}
@@ -193,16 +209,10 @@ function App() {
               {immichConfig ? "Loading album..." : "Connecting..."}
             </p>
           </div>
-        ) : !selectedAlbum ? (
+        ) : (
           <AlbumSelector
             immichConfig={immichConfig}
             onSelectAlbum={handleAlbumSelect}
-          />
-        ) : (
-          <PhotoGrid
-            immichConfig={immichConfig}
-            album={selectedAlbum}
-            onBack={handleBackToAlbums}
           />
         )}
       </main>
