@@ -677,6 +677,15 @@ interface AlbumConfig extends GlobalConfig {
   // generate their own cover and don't want one in the submitted PDF, so
   // this needs an explicit on/off rather than always including it.
   showCover: boolean;
+  // Separated cover for print services like Blurb - creates a single page
+  // with back cover, spine, and front cover combined
+  separatedCover: boolean;
+  // Spine width in mm (typical 10mm for ~100 pages)
+  spineWidth: number;
+  // Background color for the spine
+  spineColor: string;
+  // Title on spine (written vertically)
+  spineTitle: string;
   // Empty string falls back to the album's own name at render time.
   coverTitle: string;
   // Which photo to use on the cover - null falls back to the first photo
@@ -766,6 +775,10 @@ async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     slotOverrides: {},
     manuallyMovedIds: [],
     showCover: true,
+    separatedCover: false,
+    spineWidth: 10,
+    spineColor: "#FFFFFF",
+    spineTitle: "",
     coverTitle: "",
     coverAssetId: null,
     coverLayout: "photo-title",
@@ -1270,6 +1283,10 @@ function PhotoGridEditor({
   const [selectedNewAsset, setSelectedNewAsset] = useState<AssetResponseDto | null>(null);
   const [loadedNewAssetIds, setLoadedNewAssetIds] = useState<Set<string>>(new Set());
   const [showCover, setShowCover] = useState(initialConfig.showCover);
+  const [separatedCover, setSeparatedCover] = useState(initialConfig.separatedCover);
+  const [spineWidth, setSpineWidth] = useState(initialConfig.spineWidth);
+  const [spineColor, setSpineColor] = useState(initialConfig.spineColor);
+  const [spineTitle, setSpineTitle] = useState(initialConfig.spineTitle || album.albumName);
   const [coverTitle, setCoverTitle] = useState(
     initialConfig.coverTitle || album.albumName,
   );
@@ -1636,6 +1653,10 @@ function PhotoGridEditor({
       slotOverrides: Object.fromEntries(slotOverrides),
       manuallyMovedIds: Array.from(manuallyMovedIds),
       showCover,
+      separatedCover,
+      spineWidth,
+      spineColor,
+      spineTitle,
       coverTitle,
       coverAssetId,
       coverLayout,
@@ -1671,6 +1692,10 @@ function PhotoGridEditor({
     pageCaptions,
     cardCaptions,
     showCover,
+    separatedCover,
+    spineWidth,
+    spineColor,
+    spineTitle,
     coverTitle,
     coverAssetId,
     coverLayout,
