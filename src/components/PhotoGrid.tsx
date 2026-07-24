@@ -1450,6 +1450,8 @@ function PhotoGridEditor({
     | {
         type: "delete-placeholder";
         placeholderAsset: AssetResponseDto;
+        pageNumber: number | null;
+        prevPageCount: number | null;
         timestamp: number;
       };
 
@@ -1992,9 +1994,21 @@ function PhotoGridEditor({
         break;
       
       case "delete-placeholder":
-        // Undo delete: restore the placeholder
+        // Undo delete: restore the placeholder and pageCount
         setAssets(prev => [...prev, lastOp.placeholderAsset]);
         setMissingAssetIds(prev => new Set([...prev, lastOp.placeholderAsset.id]));
+        // Restore previous pageCount
+        if (lastOp.pageNumber !== null) {
+          setPageCounts(prev => {
+            const next = new Map(prev);
+            if (lastOp.prevPageCount === null) {
+              next.delete(lastOp.pageNumber!);
+            } else {
+              next.set(lastOp.pageNumber!, lastOp.prevPageCount);
+            }
+            return next;
+          });
+        }
         break;
     }
 
@@ -3986,9 +4000,61 @@ function PhotoGridEditor({
                   </svg>
                   {t(language, "albums")}
                 </button>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
-                  {album.albumName}
-                </h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50 flex-1">
+                    {album.albumName}
+                  </h2>
+                  <button
+                    onClick={() => {
+                      setIsDetectingChanges(true);
+                      fetch(`/photobooks/${encodeURIComponent(album.id)}/detect-changes`, {
+                        method: 'POST',
+                      })
+                        .then(res => res.json())
+                        .then(({ missingAssets, newAssetIds }) => {
+                          console.log(`Manual sync: ${newAssetIds.length} new, ${missingAssets.length} missing`);
+                          
+                          // Update missing assets
+                          setMissingAssetIds(new Set(missingAssets.map((a: AssetResponseDto) => a.id)));
+                          
+                          // Handle new photos
+                          if (newAssetIds.length > 0) {
+                            const newPhotos = assets.filter(a => newAssetIds.includes(a.id));
+                            setNewAssets(prev => {
+                              // Merge with existing newAssets, avoiding duplicates
+                              const existing = new Set(prev.map(a => a.id));
+                              const toAdd = newPhotos.filter(a => !existing.has(a.id));
+                              return [...prev, ...toAdd];
+                            });
+                            // Remove from main assets
+                            setAssets(prev => prev.filter(a => !newAssetIds.includes(a.id)));
+                            console.log(`${newPhotos.length} new photos added to panel`);
+                          }
+                          
+                          setChangesDetected(missingAssets.length > 0 || newAssetIds.length > 0);
+                        })
+                        .catch(err => {
+                          console.error('Sync failed:', err);
+                        })
+                        .finally(() => {
+                          setIsDetectingChanges(false);
+                        });
+                    }}
+                    disabled={isDetectingChanges}
+                    title="Sync with Immich"
+                    className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg
+                      className={`w-4 h-4 text-gray-600 dark:text-gray-400 ${isDetectingChanges ? 'animate-spin' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </button>
+                </div>
                 <p className="text-gray-500 dark:text-gray-400 mt-1 text-xs tabular-nums">
                   {filteredAssets.length}{" "}
                   {filteredAssets.length !== assets.length &&
@@ -4778,10 +4844,10 @@ function PhotoGridEditor({
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto custom-scrollbar relative">
+      <main className="flex-1 flex flex-col relative">
         {/* Top Panel - New Photos */}
         {newAssets.length > 0 && (
-          <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-md z-40 p-4">
+          <div className="flex-none bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-md z-10 p-4">
             <div className="flex flex-col gap-3">
               <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
                 {t(language, "newPhotosToPlace")}: {newAssets.length}
@@ -4824,12 +4890,14 @@ function PhotoGridEditor({
           </div>
         )}
         
-      {/* Live Preview - always shown; the generated PDF (if any)
-          appears below once ready, rather than replacing this editor. */}
-        <div
-          ref={previewContainerRef}
-          className="space-y-8 pb-8 px-4 sm:px-0 pt-6"
-        >
+        {/* Scrollable content area - only this area scrolls, not the panels */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          {/* Live Preview - always shown; the generated PDF (if any)
+              appears below once ready, rather than replacing this editor. */}
+          <div
+            ref={previewContainerRef}
+            className="space-y-8 pb-8 px-4 sm:px-0 pt-6"
+          >
           {showCover &&
             (() => {
               const displayWidth = toPoints(validPageWidth);
@@ -5763,6 +5831,18 @@ function PhotoGridEditor({
                               e.stopPropagation();
                               console.log(`DELETE placeholder: ${asset.id}`);
                               
+                              // Find which page this placeholder is on
+                              let placeholderPage: number | null = null;
+                              for (const page of pages) {
+                                if (page.photos.some(p => p.asset?.id === asset.id)) {
+                                  placeholderPage = page.pageNumber;
+                                  break;
+                                }
+                              }
+                              
+                              // Count photos on this page before deletion
+                              const prevPageCount = placeholderPage !== null ? pageCounts.get(placeholderPage) ?? null : null;
+                              
                               // Remove this asset from missing list and from the layout
                               setMissingAssetIds(prev => {
                                 const next = new Set(prev);
@@ -5774,10 +5854,33 @@ function PhotoGridEditor({
                               const updatedAssets = assets.filter(a => a.id !== asset.id);
                               setAssets(updatedAssets);
                               
-                              // Add to history
+                              // Decrease pageCount to prevent layout shift
+                              if (placeholderPage !== null) {
+                                const currentPage = pages.find(p => p.pageNumber === placeholderPage);
+                                if (currentPage) {
+                                  const currentPhotoCount = currentPage.photos.filter(p => p.asset && !p.id.startsWith('text-')).length;
+                                  const newCount = Math.max(0, currentPhotoCount - 1);
+                                  console.log(`Decreasing page ${placeholderPage} count from ${currentPhotoCount} to ${newCount}`);
+                                  
+                                  if (newCount === 0) {
+                                    // Remove the page entirely if no photos left
+                                    setPageCounts(prev => {
+                                      const next = new Map(prev);
+                                      next.delete(placeholderPage!);
+                                      return next;
+                                    });
+                                  } else {
+                                    handleSetPageCount(placeholderPage, newCount);
+                                  }
+                                }
+                              }
+                              
+                              // Add to history with page info for undo
                               setHistory(prev => [{
                                 type: "delete-placeholder",
                                 placeholderAsset: asset,
+                                pageNumber: placeholderPage,
+                                prevPageCount,
                                 timestamp: Date.now(),
                               }, ...prev]);
                               
@@ -6132,6 +6235,76 @@ function PhotoGridEditor({
           />
         </div>
       )}
+        </div> {/* Close scrollable wrapper */}
+
+        {/* Bottom Panel - Pages with Placeholders */}
+        {missingAssetIds.size > 0 && (
+          <div className="flex-none border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-lg pt-4 z-10 overflow-y-auto custom-scrollbar" style={{ maxHeight: '140px' }}>
+            <div className="px-4 pb-4">
+              <div className="flex flex-col gap-3">
+                <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  {t(language, "pagesWithPlaceholders")}:
+                </span>
+                <div className="flex flex-wrap gap-3">
+                  {pages
+                    .filter(page => 
+                      page.photos.some(photo => 
+                        photo.asset && missingAssetIds.has(photo.asset.id)
+                      )
+                    )
+                    .map(page => {
+                      // Get up to 4 photos from this page for thumbnail
+                      const thumbnailPhotos = page.photos.slice(0, 4).filter(p => p.asset);
+                      
+                      return (
+                        <button
+                          key={page.pageNumber}
+                          onClick={() => {
+                            const element = document.querySelector(`[data-page-number="${page.pageNumber}"]`);
+                            element?.scrollIntoView({ behavior: "smooth", block: "center" });
+                          }}
+                          className="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        >
+                          <div className="w-20 h-24 bg-gray-200 dark:bg-gray-700 rounded border-2 border-red-400 dark:border-red-600 overflow-hidden relative">
+                            {thumbnailPhotos.length > 0 ? (
+                              <div className={`grid h-full ${thumbnailPhotos.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-0.5`}>
+                                {thumbnailPhotos.map((photo, idx) => {
+                                  if (!photo.asset) return null; // Safety guard
+                                  const isMissing = missingAssetIds.has(photo.asset.id);
+                                  return (
+                                    <div key={idx} className="relative bg-gray-300 dark:bg-gray-600">
+                                      {isMissing ? (
+                                        <div className="absolute inset-0 flex items-center justify-center bg-gray-400 dark:bg-gray-600">
+                                          <span className="text-red-500 text-xl font-bold">✕</span>
+                                        </div>
+                                      ) : (
+                                        <img
+                                          src={`${immichConfig.baseUrl}/assets/${photo.asset.id}/thumbnail?size=preview`}
+                                          alt=""
+                                          className="w-full h-full object-cover"
+                                        />
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center h-full">
+                                <span className="text-xs text-gray-500 dark:text-gray-400">Empty</span>
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                            Page {page.pageNumber}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* History Panel - Right Side */}
@@ -6526,82 +6699,6 @@ function PhotoGridEditor({
               >
                 {t(language, "flatten")}
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bottom Panel - Pages with Placeholders */}
-      {missingAssetIds.size > 0 && (
-        <div 
-          className="fixed bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 shadow-lg z-30 overflow-y-auto custom-scrollbar"
-          style={{
-            left: sidebarCollapsed ? '64px' : '320px',
-            right: historyCollapsed ? '64px' : '320px',
-            maxHeight: '200px',
-          }}
-        >
-          <div className="p-4">
-            <div className="flex flex-col gap-3">
-              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                {t(language, "pagesWithPlaceholders")}:
-              </span>
-              <div className="flex flex-wrap gap-3">
-                {pages
-                  .filter(page => 
-                    page.photos.some(photo => 
-                      photo.asset && missingAssetIds.has(photo.asset.id)
-                    )
-                  )
-                  .map(page => {
-                    // Get up to 4 photos from this page for thumbnail
-                    const thumbnailPhotos = page.photos.slice(0, 4).filter(p => p.asset);
-                    
-                    return (
-                      <button
-                        key={page.pageNumber}
-                        onClick={() => {
-                          const element = document.querySelector(`[data-page-number="${page.pageNumber}"]`);
-                          element?.scrollIntoView({ behavior: "smooth", block: "center" });
-                        }}
-                        className="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                      >
-                        <div className="w-20 h-24 bg-gray-200 dark:bg-gray-700 rounded border-2 border-red-400 dark:border-red-600 overflow-hidden relative">
-                          {thumbnailPhotos.length > 0 ? (
-                            <div className={`grid h-full ${thumbnailPhotos.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-0.5`}>
-                              {thumbnailPhotos.map((photo, idx) => {
-                                if (!photo.asset) return null; // Safety guard
-                                const isMissing = missingAssetIds.has(photo.asset.id);
-                                return (
-                                  <div key={idx} className="relative bg-gray-300 dark:bg-gray-600">
-                                    {isMissing ? (
-                                      <div className="absolute inset-0 flex items-center justify-center bg-gray-400 dark:bg-gray-600">
-                                        <span className="text-red-500 text-xl font-bold">✕</span>
-                                      </div>
-                                    ) : (
-                                      <img
-                                        src={`${immichConfig.baseUrl}/assets/${photo.asset.id}/thumbnail?size=preview`}
-                                        alt=""
-                                        className="w-full h-full object-cover"
-                                      />
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-center h-full">
-                              <span className="text-xs text-gray-500 dark:text-gray-400">Empty</span>
-                            </div>
-                          )}
-                        </div>
-                        <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                          Page {page.pageNumber}
-                        </span>
-                      </button>
-                    );
-                  })}
-              </div>
             </div>
           </div>
         </div>
