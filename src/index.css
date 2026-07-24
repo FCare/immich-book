@@ -28,10 +28,10 @@
 }
 
 @layer components {
-  /* Scrollbar personnalisée pour le main */
+  /* Scrollbar personnalisée pour le main et les sidebars */
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
+    scrollbar-color: rgba(156, 163, 175, 0.4) transparent;
   }
 
   .custom-scrollbar::-webkit-scrollbar {
@@ -43,25 +43,25 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgba(156, 163, 175, 0.3);
+    background-color: rgba(156, 163, 175, 0.4);
     border-radius: 4px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(156, 163, 175, 0.5);
+    background-color: rgba(156, 163, 175, 0.6);
   }
 
   .dark .custom-scrollbar {
-    scrollbar-color: rgba(75, 85, 99, 0.3) transparent;
+    scrollbar-color: rgba(75, 85, 99, 0.5) transparent;
   }
 
   .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgba(75, 85, 99, 0.3);
+    background-color: rgba(75, 85, 99, 0.5);
   }
 
   .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(75, 85, 99, 0.5);
+    background-color: rgba(75, 85, 99, 0.7);
   }
 }
