@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { getAllAlbums, type AlbumResponseDto } from "@immich/sdk";
 import type { ImmichConfig } from "../types";
+import { syncAllAlbums, getAlbumSyncStatus } from "../services/albumSync";
+import { albumStorage } from "../db/albumStorage";
 
 interface AlbumSelectorProps {
   immichConfig: ImmichConfig;
@@ -27,10 +29,33 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
   const [albums, setAlbums] = useState<AlbumResponseDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
+  const [syncStats, setSyncStats] = useState<Map<string, { missingCount: number; newCount: number }>>(new Map());
 
   useEffect(() => {
     loadAlbums();
+    loadSyncStats();
   }, []);
+
+  const loadSyncStats = async () => {
+    try {
+      const storedAlbums = await albumStorage.getAllAlbums();
+      const stats = new Map<string, { missingCount: number; newCount: number }>();
+      
+      for (const album of storedAlbums) {
+        const syncStatus = await getAlbumSyncStatus(album.id);
+        stats.set(album.id, {
+          missingCount: syncStatus.missingCount,
+          newCount: syncStatus.newCount,
+        });
+      }
+      
+      setSyncStats(stats);
+    } catch (error) {
+      console.error("Failed to load sync stats:", error);
+    }
+  };
 
   const loadAlbums = async () => {
     try {
@@ -87,6 +112,35 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
     }
   };
 
+  const handleSyncAll = async () => {
+    setIsSyncing(true);
+    setSyncProgress({ current: 0, total: albums.length });
+    
+    try {
+      const results = await syncAllAlbums(
+        albums,
+        immichConfig.baseUrl,
+        (current, total) => {
+          setSyncProgress({ current, total });
+        }
+      );
+      
+      // Update sync stats
+      await loadSyncStats();
+      
+      const totalMissing = results.reduce((sum, r) => sum + r.missingCount, 0);
+      const totalNew = results.reduce((sum, r) => sum + r.newCount, 0);
+      
+      alert(`Sync completed!\n${totalNew} new photos\n${totalMissing} missing photos`);
+    } catch (error) {
+      console.error("Sync failed:", error);
+      alert("Sync failed. Check console for details.");
+    } finally {
+      setIsSyncing(false);
+      setSyncProgress(null);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="text-center py-12">
@@ -128,13 +182,33 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
-          Select an Album
-        </h2>
-        <p className="text-gray-600 dark:text-gray-400 mt-1">
-          Choose an album to create a photo book ({albums.length} albums found)
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
+            Select an Album
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">
+            Choose an album to create a photo book ({albums.length} albums found)
+          </p>
+        </div>
+        <button
+          onClick={handleSyncAll}
+          disabled={isSyncing}
+          className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-indigo-400 disabled:cursor-not-allowed text-sm font-semibold shadow-sm transition-colors flex items-center gap-2"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className={isSyncing ? "animate-spin" : ""}
+          >
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+          </svg>
+          {isSyncing ? `Syncing ${syncProgress?.current}/${syncProgress?.total}...` : "Sync All"}
+        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -173,9 +247,25 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
               <h3 className="font-semibold text-gray-900 dark:text-gray-50 truncate">
                 {album.albumName}
               </h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                {album.assetCount} {album.assetCount === 1 ? "photo" : "photos"}
-              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {album.assetCount} {album.assetCount === 1 ? "photo" : "photos"}
+                </p>
+                {syncStats.has(album.id) && (
+                  <>
+                    {syncStats.get(album.id)!.newCount > 0 && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                        +{syncStats.get(album.id)!.newCount} new
+                      </span>
+                    )}
+                    {syncStats.get(album.id)!.missingCount > 0 && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                        {syncStats.get(album.id)!.missingCount} missing
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
               {album.description && (
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-2">
                   {album.description}
