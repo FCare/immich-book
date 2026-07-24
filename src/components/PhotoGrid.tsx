@@ -1264,6 +1264,10 @@ function PhotoGridEditor({
   // Missing photo placeholders - asset IDs that were in the photobook but removed from album
   const [missingAssetIds, setMissingAssetIds] = useState<Set<string>>(new Set());
   const [changesDetected, setChangesDetected] = useState(false);
+  const [isDetectingChanges, setIsDetectingChanges] = useState(true);
+  // New photos - assets in the album but not in the photobook yet
+  const [newAssets, setNewAssets] = useState<AssetResponseDto[]>([]);
+  const [selectedNewAsset, setSelectedNewAsset] = useState<AssetResponseDto | null>(null);
   const [showCover, setShowCover] = useState(initialConfig.showCover);
   const [coverTitle, setCoverTitle] = useState(
     initialConfig.coverTitle || album.albumName,
@@ -1483,6 +1487,7 @@ function PhotoGridEditor({
   useEffect(() => {
     loadAlbumAssets();
     setChangesDetected(false);  // Reset flag when changing albums
+    setIsDetectingChanges(true); // Start detecting changes
 
     // Clean up old localStorage keys (migration)
     localStorage.removeItem(`immich-book-aspect-ratios-${album.id}`);
@@ -1500,6 +1505,7 @@ function PhotoGridEditor({
       .then(({ missingAssets, newAssetIds }) => {
         console.log(`Album changes: ${newAssetIds.length} new, ${missingAssets.length} missing`);
         setChangesDetected(true);
+        setIsDetectingChanges(false); // Detection complete
         
         if (missingAssets.length > 0) {
           setMissingAssetIds(new Set(missingAssets.map(a => a.id)));
@@ -1532,10 +1538,19 @@ function PhotoGridEditor({
             }),
           });
         }
-        // TODO Phase 3: handle newAssetIds (new photos panel)
+        
+        // Handle new photos - extract them from assets and keep them separate
+        if (newAssetIds.length > 0) {
+          const newPhotos = assets.filter(a => newAssetIds.includes(a.id));
+          setNewAssets(newPhotos);
+          // Remove new photos from the main assets array (they stay in newAssets panel until placed)
+          setAssets(prev => prev.filter(a => !newAssetIds.includes(a.id)));
+          console.log(`${newPhotos.length} new photos available for placement`);
+        }
       })
       .catch(err => {
         console.error("Failed to detect album changes:", err);
+        setIsDetectingChanges(false); // Stop loading even on error
       });
   }, [assets, changesDetected, album.id, initialConfig]);
 
@@ -2483,6 +2498,23 @@ function PhotoGridEditor({
             +
           </button>
         </span>
+        
+        {/* Add new photo button - only visible when a new photo is selected */}
+        {selectedNewAsset && (
+          <>
+            {divider}
+            <button
+              onClick={() => {
+                // TODO: Handle insert of new photo on this page
+                console.log(`Insert new photo ${selectedNewAsset.id} on page ${logicalPageNumber}`);
+              }}
+              title={t(language, "addHere")}
+              className="px-2 py-1 text-xs font-semibold text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-500/20 rounded transition-colors whitespace-nowrap"
+            >
+              {t(language, "addHere")}
+            </button>
+          </>
+        )}
       </div>
     );
   };
@@ -2492,13 +2524,31 @@ function PhotoGridEditor({
   // /llm/ - see nginx.conf.template). Explicit action rather than automatic:
   // this hits a shared local GPU and results are meant to be reviewed/edited
   // before printing, not regenerated on every layout tweak.
-  if (isLoading) {
+  if (isLoading || isDetectingChanges) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">
-            Loading photos...
+          {/* Elaborate flower spinner */}
+          <div className="relative w-24 h-24 mx-auto">
+            <svg className="animate-spin-slow w-24 h-24" viewBox="0 0 100 100">
+              <g className="text-indigo-600 dark:text-indigo-400" fill="currentColor" opacity="0.9">
+                {[...Array(8)].map((_, i) => (
+                  <circle
+                    key={i}
+                    cx="50"
+                    cy="15"
+                    r="8"
+                    transform={`rotate(${i * 45} 50 50)`}
+                    className="animate-pulse"
+                    style={{ animationDelay: `${i * 0.15}s` }}
+                  />
+                ))}
+              </g>
+              <circle cx="50" cy="50" r="12" className="text-indigo-500 dark:text-indigo-300" fill="currentColor" />
+            </svg>
+          </div>
+          <p className="mt-6 text-gray-600 dark:text-gray-400 font-medium">
+            {isLoading ? t(language, "loadingPhotos") : t(language, "analyzingChanges")}
           </p>
         </div>
       </div>
@@ -4554,6 +4604,48 @@ function PhotoGridEditor({
       </aside>
 
       <main className="flex-1 overflow-y-auto custom-scrollbar relative">
+        {/* Top Panel - New Photos */}
+        {newAssets.length > 0 && (
+          <div 
+            className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-md z-40 overflow-y-auto custom-scrollbar"
+            style={{ maxHeight: '180px' }}
+          >
+            <div className="p-4">
+              <div className="flex flex-col gap-3">
+                <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  {t(language, "newPhotosToPlace")}: {newAssets.length}
+                </span>
+                <div className="flex flex-wrap gap-3">
+                  {newAssets.map((asset) => (
+                    <button
+                      key={asset.id}
+                      onClick={() => setSelectedNewAsset(selectedNewAsset?.id === asset.id ? null : asset)}
+                      className={`relative rounded-lg overflow-hidden transition-all ${
+                        selectedNewAsset?.id === asset.id
+                          ? 'ring-4 ring-indigo-500 scale-105'
+                          : 'hover:scale-105 hover:shadow-lg'
+                      }`}
+                    >
+                      <img
+                        src={`${immichConfig.baseUrl}/assets/${asset.id}/thumbnail?size=preview`}
+                        alt={asset.originalFileName}
+                        className="w-20 h-20 object-cover"
+                      />
+                      {selectedNewAsset?.id === asset.id && (
+                        <div className="absolute inset-0 bg-indigo-500/20 flex items-center justify-center">
+                          <svg className="w-8 h-8 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        
       {/* Live Preview - always shown; the generated PDF (if any)
           appears below once ready, rather than replacing this editor. */}
         <div

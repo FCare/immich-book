@@ -179,6 +179,12 @@ export const translations = {
     pagesWithPlaceholders: "Pages avec photos manquantes",
     missingPhoto: "Photo manquante",
     deletePlaceholder: "Supprimer ce placeholder",
+    
+    // New photos
+    newPhotosToPlace: "Nouvelles photos à placer",
+    addHere: "+ Ajouter ici",
+    loadingPhotos: "Chargement des photos...",
+    analyzingChanges: "Analyse des changements...",
   },
   en: {
     // Header
@@ -358,6 +364,12 @@ export const translations = {
     pagesWithPlaceholders: "Pages with missing photos",
     missingPhoto: "Missing photo",
     deletePlaceholder: "Delete this placeholder",
+    
+    // New photos
+    newPhotosToPlace: "New photos to place",
+    addHere: "+ Add here",
+    loadingPhotos: "Loading photos...",
+    analyzingChanges: "Analyzing changes...",
   },
 };
 
