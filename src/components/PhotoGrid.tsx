@@ -436,13 +436,92 @@ function captionAtBottom(logicalPageNumber: number): boolean {
   return logicalPageNumber % 2 === 0;
 }
 
-// Quick page-format presets - the width/height mm fields stay fully
-// editable regardless, this is just a shortcut to common sizes.
-const PAGE_FORMAT_PRESETS = [
-  { label: "A4 Portrait", widthMm: 210, heightMm: 297 },
-  { label: "A4 Landscape", widthMm: 297, heightMm: 210 },
-  { label: "Square 21x21", widthMm: 210, heightMm: 210 },
-  { label: "Square 30x30", widthMm: 300, heightMm: 300 },
+interface PageFormat {
+  label: string;
+  widthMm: number;
+  heightMm: number;
+}
+
+interface Printer {
+  id: string;
+  label: string;
+  logo: string | null;
+  formats: PageFormat[];
+  // Recommended bleed in mm - null means bleed isn't part of this
+  // printer's expected file (adding it would make the PDF the wrong
+  // size), so the bleed control is locked off instead of just defaulted.
+  bleedMm: number | null;
+  // Real printers only accept exactly their own listed trim sizes, and
+  // (per their own submission docs) one physical page per PDF page - so
+  // width/height become chip-only and spreads are disabled. PDF Libre
+  // keeps every field freely editable, as before.
+  constrained: boolean;
+  note?: string;
+}
+
+// Sources: Flexilivre's own upload/format help pages (single PDF, cover
+// as first/last page, no separate back-cover pages, 5mm bleed) and a
+// real Blurb "PDF to Book" upload error for this album (Small Square
+// "18x18cm" nominal actually rejects anything but 6.875in/174.625mm
+// exactly). Pixartprinting and Pumbo need a genuinely different file
+// structure (a separate wraparound cover spread with computed spine/
+// mors/chasse) that this tool doesn't produce yet - see the "Imprimer
+// chez" section below, where they're commented out for the same reason.
+const PRINTERS: Printer[] = [
+  {
+    id: "libre",
+    label: "PDF Libre",
+    logo: null,
+    formats: [
+      { label: "A4 Portrait", widthMm: 210, heightMm: 297 },
+      { label: "A4 Landscape", widthMm: 297, heightMm: 210 },
+      { label: "Square 21x21", widthMm: 210, heightMm: 210 },
+      { label: "Square 30x30", widthMm: 300, heightMm: 300 },
+    ],
+    bleedMm: null,
+    constrained: false,
+  },
+  {
+    id: "flexilivre",
+    label: "Flexilivre",
+    logo: "/logos/flexilivre.svg",
+    formats: [
+      { label: "A4 Portrait", widthMm: 210, heightMm: 297 },
+      { label: "A4 Paysage", widthMm: 297, heightMm: 210 },
+      { label: "A5 Portrait", widthMm: 150, heightMm: 210 },
+      { label: "A5 Paysage", widthMm: 210, heightMm: 150 },
+      { label: "Carré 21x21", widthMm: 210, heightMm: 210 },
+      { label: "Grand carré 30x30", widthMm: 300, heightMm: 300 },
+    ],
+    bleedMm: 5,
+    constrained: true,
+  },
+  {
+    id: "blurb",
+    label: "Blurb",
+    logo: "/logos/blurb.png",
+    formats: [
+      // Confirmed exactly, three independent ways: Small Square from a
+      // real "PDF to Book" upload error for this album (174.625mm was
+      // the size Blurb actually required, not the 18cm the nominal name
+      // implies); Standard Portrait/Landscape and Large Landscape from
+      // Blurb's own BookWright template files (.blurb = a SQLite
+      // archive; book width/height in bbf2.xml are in points at 72/in);
+      // Mini Square and Large Square from Blurb's spec calculator trim
+      // size (its "final exported PDF" figure bakes in an asymmetric,
+      // no-bleed-on-the-spine convention this tool doesn't produce, so
+      // only the plain trim size is used here - same flat convention as
+      // every other row).
+      { label: "Small Square (nominal 18x18cm)", widthMm: 174.625, heightMm: 174.625 },
+      { label: "Mini Square (nominal 13x13cm)", widthMm: 127, heightMm: 127 },
+      { label: "Standard Portrait (nominal 20x25cm)", widthMm: 206.375, heightMm: 260.35 },
+      { label: "Standard Landscape (nominal 25x20cm)", widthMm: 244.475, heightMm: 209.55 },
+      { label: "Large Landscape (nominal 33x28cm)", widthMm: 320.675, heightMm: 276.225 },
+      { label: "Large Square (nominal 30x30cm)", widthMm: 298.45, heightMm: 298.45 },
+    ],
+    bleedMm: null,
+    constrained: true,
+  },
 ];
 
 interface PhotoGridProps {
@@ -455,6 +534,9 @@ interface PhotoGridProps {
 
 interface GlobalConfig {
   // Page settings
+  // Which printer's constraints (available sizes, bleed, one-page-per-
+  // PDF-page) apply - "libre" leaves every field freely editable.
+  printerId: string;
   pageWidth: number;
   pageHeight: number;
   margin: number;
@@ -558,6 +640,7 @@ interface AlbumConfig extends GlobalConfig {
 }
 
 const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
+  printerId: "libre",
   pageWidth: 2515,
   pageHeight: 3260,
   margin: 118,
@@ -650,6 +733,7 @@ async function saveAlbumConfig(albumId: string, config: AlbumConfig) {
     // Also update global config with page and layout settings, used to
     // seed the defaults for the next album that has no photobook yet.
     const globalConfig: GlobalConfig = {
+      printerId: config.printerId,
       pageWidth: config.pageWidth,
       pageHeight: config.pageHeight,
       margin: config.margin,
@@ -777,14 +861,18 @@ function ToggleSwitch({
   onChange,
   label,
   sublabel,
+  disabled,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   label: string;
   sublabel?: string;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0 border-b border-gray-100 dark:border-gray-800 last:border-none">
+    <div
+      className={`flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0 border-b border-gray-100 dark:border-gray-800 last:border-none ${disabled ? "opacity-50" : ""}`}
+    >
       <span>
         <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">
           {label}
@@ -799,12 +887,11 @@ function ToggleSwitch({
         type="button"
         role="switch"
         aria-checked={checked}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
         className={`relative inline-flex h-[22px] w-9 flex-none items-center rounded-full transition-colors ${
-          checked
-            ? "bg-indigo-600"
-            : "bg-gray-200 dark:bg-gray-700"
-        }`}
+          disabled ? "cursor-not-allowed" : ""
+        } ${checked ? "bg-indigo-600" : "bg-gray-200 dark:bg-gray-700"}`}
       >
         <span
           className={`inline-block h-[18px] w-[18px] transform rounded-full bg-white shadow transition-transform ${
@@ -890,6 +977,7 @@ function PhotoGridEditor({
   }, [pdfUrl]);
 
   // Page settings
+  const [printerId, setPrinterId] = useState(initialConfig.printerId);
   const [pageWidth, setPageWidth] = useState(initialConfig.pageWidth);
   const [pageHeight, setPageHeight] = useState(initialConfig.pageHeight);
   const [margin, setMargin] = useState(initialConfig.margin);
@@ -906,6 +994,33 @@ function PhotoGridEditor({
     initialConfig.bleedEnabled,
   );
   const [bleed, setBleed] = useState(initialConfig.bleed);
+
+  const selectedPrinter =
+    PRINTERS.find((p) => p.id === printerId) ?? PRINTERS[0];
+
+  // Switching printer re-derives everything that printer constrains:
+  // snaps to its first format, forces bleed to its requirement (or off,
+  // if bleed isn't part of that printer's expected file), and turns off
+  // spreads (every printer profile here expects one physical page per
+  // PDF page - only "PDF Libre" leaves this alone).
+  const handleSelectPrinter = (id: string) => {
+    const printer = PRINTERS.find((p) => p.id === id) ?? PRINTERS[0];
+    setPrinterId(id);
+    const firstFormat = printer.formats[0];
+    if (firstFormat) {
+      setPageWidth(mmToPixels(firstFormat.widthMm));
+      setPageHeight(mmToPixels(firstFormat.heightMm));
+    }
+    if (printer.constrained) {
+      setCombinePages(false);
+      if (printer.bleedMm !== null) {
+        setBleedEnabled(true);
+        setBleed(mmToPixels(printer.bleedMm));
+      } else {
+        setBleedEnabled(false);
+      }
+    }
+  };
 
   // Validation helpers
   const isPageWidthValid = pageWidth >= 1000 && pageWidth <= 10000;
@@ -1114,6 +1229,7 @@ function PhotoGridEditor({
     }
 
     const config: AlbumConfig = {
+      printerId,
       pageWidth,
       pageHeight,
       margin,
@@ -1150,6 +1266,7 @@ function PhotoGridEditor({
     saveAlbumConfig(album.id, config);
   }, [
     album.id,
+    printerId,
     pageWidth,
     pageHeight,
     margin,
@@ -3155,13 +3272,48 @@ function PhotoGridEditor({
             <div className="flex flex-col gap-5">
               <div>
                 <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+                  Imprimeur
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {PRINTERS.map((printer) => {
+                    const active = printer.id === printerId;
+                    return (
+                      <button
+                        key={printer.id}
+                        onClick={() => handleSelectPrinter(printer.id)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                          active
+                            ? "bg-indigo-50 dark:bg-indigo-500/20 border-indigo-400 dark:border-indigo-500 text-indigo-700 dark:text-indigo-300"
+                            : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600"
+                        }`}
+                      >
+                        {printer.logo && (
+                          <img
+                            src={printer.logo}
+                            alt=""
+                            className="h-3.5 w-auto max-w-[60px] object-contain bg-white rounded-sm px-0.5"
+                          />
+                        )}
+                        {printer.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedPrinter.note && (
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                    {selectedPrinter.note}
+                  </p>
+                )}
+              </div>
+              <div>
+                <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
                   Format
                 </span>
                 <div className="flex flex-wrap gap-1.5">
-                  {PAGE_FORMAT_PRESETS.map((p) => {
+                  {selectedPrinter.formats.map((p) => {
                     const active =
-                      p.widthMm === Math.round(pixelsToMm(pageWidth)) &&
-                      p.heightMm === Math.round(pixelsToMm(pageHeight));
+                      Math.abs(p.widthMm - pixelsToMm(pageWidth)) < 0.1 &&
+                      Math.abs(p.heightMm - pixelsToMm(pageHeight)) < 0.1;
                     return (
                       <button
                         key={p.label}
@@ -3193,7 +3345,8 @@ function PhotoGridEditor({
                     <input
                       type="number"
                       id="pageWidth"
-                      value={Math.round(pixelsToMm(pageWidth))}
+                      value={Math.round(pixelsToMm(pageWidth) * 1000) / 1000}
+                      disabled={selectedPrinter.constrained}
                       onChange={(e) => {
                         const value = Number(e.target.value);
                         if (!isNaN(value)) {
@@ -3203,7 +3356,7 @@ function PhotoGridEditor({
                       min={Math.round(pixelsToMm(1000))}
                       max={Math.round(pixelsToMm(10000))}
                       step="1"
-                      className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                      className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed ${
                         isPageWidthValid
                           ? "border-gray-200 dark:border-gray-700"
                           : "border-red-500 bg-red-50 dark:bg-red-950/40"
@@ -3225,7 +3378,8 @@ function PhotoGridEditor({
                     <input
                       type="number"
                       id="pageHeight"
-                      value={Math.round(pixelsToMm(pageHeight))}
+                      value={Math.round(pixelsToMm(pageHeight) * 1000) / 1000}
+                      disabled={selectedPrinter.constrained}
                       onChange={(e) => {
                         const value = Number(e.target.value);
                         if (!isNaN(value)) {
@@ -3235,7 +3389,7 @@ function PhotoGridEditor({
                       min={Math.round(pixelsToMm(1000))}
                       max={Math.round(pixelsToMm(10000))}
                       step="1"
-                      className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                      className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed ${
                         isPageHeightValid
                           ? "border-gray-200 dark:border-gray-700"
                           : "border-red-500 bg-red-50 dark:bg-red-950/40"
@@ -3250,8 +3404,13 @@ function PhotoGridEditor({
               <ToggleSwitch
                 checked={combinePages}
                 onChange={setCombinePages}
+                disabled={selectedPrinter.constrained}
                 label="Combine Pages"
-                sublabel="Show spreads side by side, in the editor and the PDF"
+                sublabel={
+                  selectedPrinter.constrained
+                    ? `${selectedPrinter.label} attend une page physique par page de PDF`
+                    : "Show spreads side by side, in the editor and the PDF"
+                }
               />
             </div>
           )}
@@ -3328,8 +3487,15 @@ function PhotoGridEditor({
                 <ToggleSwitch
                   checked={bleedEnabled}
                   onChange={setBleedEnabled}
+                  disabled={selectedPrinter.constrained}
                   label="Bleed"
-                  sublabel="Extra border filled with the page background, for print production - trimmed off after printing"
+                  sublabel={
+                    selectedPrinter.constrained
+                      ? selectedPrinter.bleedMm !== null
+                        ? `${selectedPrinter.label} requiert ${selectedPrinter.bleedMm}mm de fond perdu`
+                        : `${selectedPrinter.label} n'attend pas de fond perdu sur ce fichier`
+                      : "Extra border filled with the page background, for print production - trimmed off after printing"
+                  }
                 />
                 {bleedEnabled && (
                   <div className="mt-3 flex items-center gap-1.5">
@@ -3337,6 +3503,7 @@ function PhotoGridEditor({
                       type="number"
                       id="bleed"
                       value={Math.round(pixelsToMm(bleed))}
+                      disabled={selectedPrinter.constrained}
                       onChange={(e) => {
                         const value = Number(e.target.value);
                         if (!isNaN(value)) {
@@ -3348,7 +3515,7 @@ function PhotoGridEditor({
                         pixelsToMm(Math.min(pageWidth, pageHeight)) / 4,
                       )}
                       step="1"
-                      className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                      className={`px-2.5 py-1.5 w-20 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed ${
                         isBleedValid
                           ? "border-gray-200 dark:border-gray-700"
                           : "border-red-500 bg-red-50 dark:bg-red-950/40"
@@ -3712,20 +3879,26 @@ function PhotoGridEditor({
                       logo: "/logos/flexilivre.svg",
                     },
                     {
-                      label: "Pixartprinting",
-                      url: "https://www.pixartprinting.fr/",
-                      logo: "/logos/pixartprinting.svg",
-                    },
-                    {
                       label: "Blurb",
                       url: "https://www.blurb.com/pdf-to-book",
                       logo: "/logos/blurb.png",
                     },
-                    {
-                      label: "Pumbo",
-                      url: "https://www.pumbo.fr/",
-                      logo: "/logos/pumbo.png",
-                    },
+                    // Pixartprinting and Pumbo are temporarily removed -
+                    // their exact photo book trim sizes are gated behind
+                    // an interactive configurator we haven't been able to
+                    // confirm publicly (unlike Flexilivre/Blurb, verified
+                    // against their help docs and a real Blurb upload
+                    // error). Re-add once those dimensions are confirmed.
+                    // {
+                    //   label: "Pixartprinting",
+                    //   url: "https://www.pixartprinting.fr/",
+                    //   logo: "/logos/pixartprinting.svg",
+                    // },
+                    // {
+                    //   label: "Pumbo",
+                    //   url: "https://www.pumbo.fr/",
+                    //   logo: "/logos/pumbo.png",
+                    // },
                   ].map((printer) => (
                     <a
                       key={printer.label}
