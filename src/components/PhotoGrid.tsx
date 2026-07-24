@@ -3011,7 +3011,7 @@ function PhotoGridEditor({
     const coverBleedHeight = coverPageHeight + bleedPt * 2;
     
     // Separated cover (for Blurb, etc.): back + spine + front in one page
-    const spineWidthPt = toPoints(spineWidth);
+    const spineWidthPt = toPoints(mmToPixels(spineWidth)); // Convert mm → px → points
     const separatedCoverWidth = separatedCover 
       ? coverPageWidth * 2 + spineWidthPt 
       : coverPageWidth;
@@ -5523,7 +5523,7 @@ function PhotoGridEditor({
             (() => {
               const displayWidth = toPoints(validPageWidth);
               const displayHeight = toPoints(validPageHeight);
-              const spineWidthPt = toPoints(spineWidth);
+              const spineWidthPt = toPoints(mmToPixels(spineWidth)); // Convert mm → px → points
               const separatedWidth = displayWidth * 2 + spineWidthPt;
               const bleedPreviewPt = bleedEnabled ? toPoints(validBleed) : 0;
               // Force scale to 0.5 so the wide combined page doesn't push everything aside
