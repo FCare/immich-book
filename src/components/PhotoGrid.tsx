@@ -2991,7 +2991,7 @@ function PhotoGridEditor({
   // fetching turned out to be unreliable on its own (photos randomly,
   // but reproducibly, missing), so every photo is fetched ourselves with
   // real error handling and handed to <Image> as a Blob instead of a URL.
-  const buildPdfDocument = (imageBlobs: Map<string, Blob>) => {
+  const buildPdfDocument = (imageBlobs: Map<string, Blob>, pdfType: 'full' | 'cover' | 'interior' = 'full') => {
     const coverPageWidth = toPoints(validPageWidth);
     const coverPageHeight = toPoints(validPageHeight);
     const coverImageBlob = coverAsset
@@ -3017,9 +3017,179 @@ function PhotoGridEditor({
       : coverPageWidth;
     const separatedCoverBleedWidth = separatedCoverWidth + bleedPt * 2;
 
+    // Helper to render front cover content (reused in both standalone and separated modes)
+    const renderFrontCoverContent = () => (
+      <>
+        {coverLayout === "text-only" && (
+          <View
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: coverPageWidth * 0.1,
+            }}
+          >
+            <View
+              style={{
+                width: coverPageWidth * 0.3,
+                height: 1,
+                backgroundColor: SCRAPBOOK.ink,
+                opacity: 0.3,
+                marginBottom: 16,
+              }}
+            />
+            <Text
+              style={{
+                fontFamily: "Caveat",
+                fontWeight: 600,
+                fontSize: coverPageWidth * 0.09,
+                color: SCRAPBOOK.ink,
+                textAlign: "center",
+              }}
+            >
+              {coverTitle || album.albumName}
+            </Text>
+            <View
+              style={{
+                width: coverPageWidth * 0.3,
+                height: 1,
+                backgroundColor: SCRAPBOOK.ink,
+                opacity: 0.3,
+                marginTop: 16,
+              }}
+            />
+          </View>
+        )}
+
+        {coverLayout === "photo-title" && coverImageBlob && (
+          <>
+            <View
+              style={{
+                position: "absolute",
+                top: coverPageHeight * 0.08,
+                left: coverPageWidth * 0.1,
+                right: coverPageWidth * 0.1,
+                height: coverPageHeight * 0.64,
+              }}
+            >
+              <PdfPhotoCard
+                imageBlob={coverImageBlob}
+                cardStyle={cardStyle}
+                containerWidth={coverPageWidth * 0.8}
+                containerHeight={coverPageHeight * 0.64}
+              />
+            </View>
+            <View
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: coverPageHeight * 0.2,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: "Caveat",
+                  fontWeight: 600,
+                  fontSize: coverPageWidth * 0.055,
+                  color: SCRAPBOOK.ink,
+                  textAlign: "center",
+                }}
+              >
+                {coverTitle || album.albumName}
+              </Text>
+            </View>
+          </>
+        )}
+
+        {coverLayout === "full-bleed" && coverImageBlob && (
+          <>
+            <Image
+              src={coverImageBlob}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: coverPageWidth,
+                height: coverPageHeight,
+                objectFit: "cover",
+              }}
+            />
+            <View
+              style={{
+                position: "absolute",
+                left: 0,
+                bottom: 0,
+                width: coverPageWidth,
+                height: coverScrimHeight,
+              }}
+            >
+              {Array.from({ length: 10 }, (_, i) => (
+                <View
+                  key={i}
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: (coverScrimHeight * i) / 10,
+                    width: coverPageWidth,
+                    height: coverScrimHeight / 10 + 0.5,
+                    backgroundColor: "#000000",
+                    opacity: (0.55 * (i + 1)) / 10,
+                  }}
+                />
+              ))}
+            </View>
+            <View
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: coverScrimHeight,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: "Caveat",
+                  fontWeight: 600,
+                  fontSize: coverPageWidth * 0.06,
+                  color: "#FFFFFF",
+                  textAlign: "center",
+                }}
+              >
+                {coverTitle || album.albumName}
+              </Text>
+            </View>
+          </>
+        )}
+      </>
+    );
+
+    // Determine what to include based on PDF type
+    const includeFrontCover = pdfType === 'full' 
+      ? (showCover && !separatedCover) 
+      : false;
+    const includeBackCover = pdfType === 'full' 
+      ? (showCover && !separatedCover) 
+      : false;
+    const includeSeparatedCover = pdfType === 'cover' || (pdfType === 'full' && separatedCover);
+    const includeInteriorPages = pdfType === 'full' || pdfType === 'interior';
+
     return (
     <Document pageLayout={pageLayout}>
-      {showCover && !separatedCover && (
+      {includeFrontCover && (
         <Page
           size={{ width: coverBleedWidth, height: coverBleedHeight }}
           style={{
@@ -3206,7 +3376,7 @@ function PhotoGridEditor({
         </Page>
       )}
 
-      {showCover && separatedCover && (
+      {includeSeparatedCover && showCover && (
         <Page
           size={{ width: separatedCoverBleedWidth, height: coverBleedHeight }}
           style={{
@@ -3267,7 +3437,7 @@ function PhotoGridEditor({
         </Page>
       )}
 
-      {pages.map((pageData) => {
+      {includeInteriorPages && pages.map((pageData) => {
         // FIXME: pdfkit (internal of react-pdf) uses 72dpi internally and we downscale everything here;
         // instead we should produce a high-quality 300 dpi pdf
 
@@ -3744,7 +3914,7 @@ function PhotoGridEditor({
         );
       })}
 
-      {showCover && !separatedCover && (
+      {includeBackCover && (
         <Page
           size={{ width: coverBleedWidth, height: coverBleedHeight }}
           style={{
@@ -4062,8 +4232,37 @@ function PhotoGridEditor({
           onProgress,
         );
 
-      const blob = await pdf(buildPdfDocument(imageBlobs)).toBlob();
-      setPdfUrl(URL.createObjectURL(blob));
+      if (separatedCover && showCover) {
+        // Generate two PDFs: one for cover, one for interior
+        const coverBlob = await pdf(buildPdfDocument(imageBlobs, 'cover')).toBlob();
+        const interiorBlob = await pdf(buildPdfDocument(imageBlobs, 'interior')).toBlob();
+        
+        // Download both files
+        const albumSlug = album.albumName.replace(/[^a-z0-9]/gi, '-').toLowerCase();
+        const coverUrl = URL.createObjectURL(coverBlob);
+        const interiorUrl = URL.createObjectURL(interiorBlob);
+        
+        // Create download links
+        const coverLink = document.createElement('a');
+        coverLink.href = coverUrl;
+        coverLink.download = `${albumSlug}-cover.pdf`;
+        coverLink.click();
+        
+        setTimeout(() => {
+          const interiorLink = document.createElement('a');
+          interiorLink.href = interiorUrl;
+          interiorLink.download = `${albumSlug}-interior.pdf`;
+          interiorLink.click();
+          
+          // Show the cover PDF in preview
+          setPdfUrl(coverUrl);
+        }, 500);
+      } else {
+        // Generate single PDF with everything
+        const blob = await pdf(buildPdfDocument(imageBlobs, 'full')).toBlob();
+        setPdfUrl(URL.createObjectURL(blob));
+      }
+      
       const failures = imageFailures;
       if (failures > 0) {
         setPdfError(
