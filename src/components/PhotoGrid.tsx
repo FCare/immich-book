@@ -23,6 +23,7 @@ import {
 } from "../utils/pageLayout";
 import type { ImmichConfig } from "../types";
 import { t, type Language } from "../i18n";
+import { syncAlbum } from "../services/albumSync";
 import roboto400 from "@fontsource/roboto/files/roboto-latin-400-normal.woff?url";
 import roboto500 from "@fontsource/roboto/files/roboto-latin-500-normal.woff?url";
 import caveat500 from "@fontsource/caveat/files/caveat-latin-500-normal.woff?url";
@@ -1441,11 +1442,25 @@ function PhotoGridEditor({
   useEffect(() => {
     loadAlbumAssets();
 
+    // Auto-sync this album when opening it
+    syncAlbum(album.id, immichConfig.baseUrl)
+      .then((result) => {
+        if (result.success) {
+          console.log(`Album synced: ${result.newCount} new, ${result.missingCount} missing`);
+          // TODO Phase 2: Handle missing/new photos in UI
+        } else {
+          console.error(`Album sync failed: ${result.error}`);
+        }
+      })
+      .catch((err) => {
+        console.error("Album sync error:", err);
+      });
+
     // Clean up old localStorage keys (migration)
     localStorage.removeItem(`immich-book-aspect-ratios-${album.id}`);
     localStorage.removeItem(`immich-book-ordering-${album.id}`);
     localStorage.removeItem(`immich-book-description-positions-${album.id}`);
-  }, [album.id]);
+  }, [album.id, immichConfig.baseUrl]);
 
   // Save config to localStorage whenever it changes (with clamped values)
   useEffect(() => {
