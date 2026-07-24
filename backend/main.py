@@ -33,6 +33,47 @@ def init_db():
         if "assets_snapshot" not in columns:
             print("Migrating photobooks table: adding assets_snapshot column")
             conn.execute("ALTER TABLE photobooks ADD COLUMN assets_snapshot TEXT")
+        
+        # Migration: add user_id column and duplicate existing data for both "Sophie Boulme" and "admin"
+        if "user_id" not in columns:
+            print("Migrating photobooks table: adding user_id column")
+            conn.execute("ALTER TABLE photobooks ADD COLUMN user_id TEXT")
+            
+            # Drop old primary key and create new composite primary key
+            # SQLite doesn't support DROP PRIMARY KEY, so we need to recreate the table
+            print("Recreating photobooks table with composite primary key (user_id, album_id)")
+            conn.execute("ALTER TABLE photobooks RENAME TO photobooks_old")
+            conn.execute(
+                """
+                CREATE TABLE photobooks (
+                    user_id TEXT NOT NULL,
+                    album_id TEXT NOT NULL,
+                    config TEXT NOT NULL,
+                    assets_snapshot TEXT,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, album_id)
+                )
+                """
+            )
+            
+            # Duplicate existing photobooks for both Sophie Boulme and admin
+            conn.execute(
+                """
+                INSERT INTO photobooks (user_id, album_id, config, assets_snapshot, updated_at)
+                SELECT 'Sophie Boulme', album_id, config, assets_snapshot, updated_at FROM photobooks_old
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO photobooks (user_id, album_id, config, assets_snapshot, updated_at)
+                SELECT 'admin', album_id, config, assets_snapshot, updated_at FROM photobooks_old
+                """
+            )
+            conn.execute("DROP TABLE photobooks_old")
+            
+            photobook_count = conn.execute("SELECT COUNT(*) FROM photobooks WHERE user_id = 'Sophie Boulme'").fetchone()[0]
+            print(f"Migration complete: duplicated {photobook_count} photobooks for 'Sophie Boulme' and 'admin'")
+        
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS global_config (
@@ -61,20 +102,28 @@ def health():
 
 
 @app.get("/photobooks")
-def list_photobooks():
+def list_photobooks(request: Request):
     """Album ids that currently have a stored photobook - used by the
     frontend to prune photobooks whose Immich album no longer exists."""
+    user_id = request.headers.get("x-vk-user")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing x-vk-user header")
+    
     with get_db() as conn:
-        rows = conn.execute("SELECT album_id FROM photobooks").fetchall()
+        rows = conn.execute("SELECT album_id FROM photobooks WHERE user_id = ?", (user_id,)).fetchall()
     return {"albumIds": [r[0] for r in rows]}
 
 
 @app.get("/photobooks/{album_id}")
-def get_photobook(album_id: str):
+def get_photobook(album_id: str, request: Request):
     """Get photobook config only (no change detection)."""
+    user_id = request.headers.get("x-vk-user")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing x-vk-user header")
+    
     with get_db() as conn:
         row = conn.execute(
-            "SELECT config FROM photobooks WHERE album_id = ?", (album_id,)
+            "SELECT config FROM photobooks WHERE user_id = ? AND album_id = ?", (user_id, album_id)
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="No photobook for this album")
@@ -90,6 +139,10 @@ async def detect_changes(album_id: str, request: Request):
     
     POST body: { "currentAssetIds": ["id1", "id2", ...] }
     """
+    user_id = request.headers.get("x-vk-user")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing x-vk-user header")
+    
     body = await request.body()
     try:
         payload = json.loads(body)
@@ -100,7 +153,7 @@ async def detect_changes(album_id: str, request: Request):
     
     with get_db() as conn:
         row = conn.execute(
-            "SELECT assets_snapshot FROM photobooks WHERE album_id = ?", (album_id,)
+            "SELECT assets_snapshot FROM photobooks WHERE user_id = ? AND album_id = ?", (user_id, album_id)
         ).fetchone()
     
     if row is None:
@@ -140,6 +193,10 @@ async def detect_changes(album_id: str, request: Request):
 
 @app.put("/photobooks/{album_id}")
 async def put_photobook(album_id: str, request: Request):
+    user_id = request.headers.get("x-vk-user")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing x-vk-user header")
+    
     body = await request.body()
     try:
         payload = json.loads(body)
@@ -154,35 +211,39 @@ async def put_photobook(album_id: str, request: Request):
             # Update both config and snapshot
             conn.execute(
                 """
-                INSERT INTO photobooks (album_id, config, assets_snapshot, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(album_id) DO UPDATE SET
+                INSERT INTO photobooks (user_id, album_id, config, assets_snapshot, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, album_id) DO UPDATE SET
                     config = excluded.config,
                     assets_snapshot = excluded.assets_snapshot,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (album_id, json.dumps(config), json.dumps(assets)),
+                (user_id, album_id, json.dumps(config), json.dumps(assets)),
             )
         else:
             # Update only config, preserve existing snapshot
             conn.execute(
                 """
-                INSERT INTO photobooks (album_id, config, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(album_id) DO UPDATE SET
+                INSERT INTO photobooks (user_id, album_id, config, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, album_id) DO UPDATE SET
                     config = excluded.config,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (album_id, json.dumps(config)),
+                (user_id, album_id, json.dumps(config)),
             )
         conn.commit()
     return {"status": "ok"}
 
 
 @app.delete("/photobooks/{album_id}")
-def delete_photobook(album_id: str):
+def delete_photobook(album_id: str, request: Request):
+    user_id = request.headers.get("x-vk-user")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing x-vk-user header")
+    
     with get_db() as conn:
-        conn.execute("DELETE FROM photobooks WHERE album_id = ?", (album_id,))
+        conn.execute("DELETE FROM photobooks WHERE user_id = ? AND album_id = ?", (user_id, album_id))
         conn.commit()
     return {"status": "ok"}
 
