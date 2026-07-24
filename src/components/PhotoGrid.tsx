@@ -2096,31 +2096,192 @@ function PhotoGridEditor({
   };
 
   const handleResetAll = () => {
-    if (flattenedState) {
-      // Reset to flattened state
-      setCustomOrdering(flattenedState.customOrdering);
-      setSlotOverrides(new Map(Object.entries(flattenedState.slotOverrides).map(([k, v]) => [Number(k), v])));
-      setLayoutVariants(new Map(Object.entries(flattenedState.layoutVariants).map(([k, v]) => [Number(k), v])));
-      setPageCounts(new Map(Object.entries(flattenedState.pageCounts).map(([k, v]) => [Number(k), v])));
-      setTextCardCounts(new Map(Object.entries(flattenedState.textCardCounts).map(([k, v]) => [Number(k), v])));
-      setTextCardContents(new Map(Object.entries(flattenedState.textCardContents)));
-      setPageCaptions(new Map(Object.entries(flattenedState.pageCaptions).map(([k, v]) => [Number(k), v])));
-      setCardCaptions(new Map(Object.entries(flattenedState.cardCaptions)));
-    } else {
-      // Reset to initial empty state
-      setCustomOrdering(null);
-      setSlotOverrides(new Map());
-      setLayoutVariants(new Map());
-      setPageCounts(new Map());
-      setTextCardCounts(new Map());
-      setTextCardContents(new Map());
-      setPageCaptions(new Map());
-      setCardCaptions(new Map());
-    }
+    // Undo all operations by processing the entire history
+    const currentHistory = [...history];
     
-    // Clear history and manuallyMovedIds (remove green dots)
+    // Process all operations in reverse (from most recent to oldest)
+    currentHistory.forEach((op) => {
+      switch (op.type) {
+        case "swap-same-page":
+          setSlotOverrides((prev) =>
+            new Map(prev).set(op.pageNumber, op.prevOrder)
+          );
+          setManuallyMovedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(op.assetIds[0]);
+            next.delete(op.assetIds[1]);
+            return next;
+          });
+          break;
+
+        case "swap-text-cards":
+          setTextCardContents((prev) => {
+            const next = new Map(prev);
+            const [id1, id2] = op.assetIds;
+            const [text1, text2] = op.prevContents;
+            if (text1) next.set(id1, text1);
+            else next.delete(id1);
+            if (text2) next.set(id2, text2);
+            else next.delete(id2);
+            return next;
+          });
+          setManuallyMovedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(op.assetIds[0]);
+            next.delete(op.assetIds[1]);
+            return next;
+          });
+          break;
+
+        case "swap-cross-page":
+          setCustomOrdering(op.prevOrder);
+          setSlotOverrides((prev) => {
+            const next = new Map(prev);
+            next.delete(op.draggedPage);
+            next.delete(op.targetPage);
+            return next;
+          });
+          setManuallyMovedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(op.assetIds[0]);
+            next.delete(op.assetIds[1]);
+            return next;
+          });
+          break;
+
+        case "shuffle-layout":
+          setLayoutVariants((prev) =>
+            new Map(prev).set(op.pageNumber, op.prevVariant)
+          );
+          break;
+
+        case "set-page-count":
+          setPageCounts((prev) => {
+            const next = new Map(prev);
+            if (op.prevCount === null) {
+              next.delete(op.pageNumber);
+            } else {
+              next.set(op.pageNumber, op.prevCount);
+            }
+            return next;
+          });
+          break;
+
+        case "set-text-card-count":
+          setTextCardCounts((prev) => {
+            const next = new Map(prev);
+            if (op.prevCount === 0) {
+              next.delete(op.pageNumber);
+            } else {
+              next.set(op.pageNumber, op.prevCount);
+            }
+            return next;
+          });
+          break;
+
+        case "edit-page-caption":
+          setPageCaptions((prev) => {
+            const next = new Map(prev);
+            if (op.prevText) {
+              next.set(op.pageNumber, op.prevText);
+            } else {
+              next.delete(op.pageNumber);
+            }
+            return next;
+          });
+          break;
+
+        case "edit-card-caption":
+          setCardCaptions((prev) => {
+            const next = new Map(prev);
+            if (op.prevText) {
+              next.set(op.assetId, op.prevText);
+            } else {
+              next.delete(op.assetId);
+            }
+            return next;
+          });
+          break;
+
+        case "edit-text-card":
+          setTextCardContents((prev) => {
+            const next = new Map(prev);
+            if (op.prevText) {
+              next.set(op.cardId, op.prevText);
+            } else {
+              next.delete(op.cardId);
+            }
+            return next;
+          });
+          break;
+
+        case "set-cover":
+          setCoverAssetId(op.prevAssetId);
+          break;
+
+        case "set-back-cover":
+          setBackCoverAssetId(op.prevAssetId);
+          break;
+
+        case "edit-cover-title":
+          setCoverTitle(op.prevText);
+          break;
+
+        case "edit-back-cover-text":
+          setBackCoverText(op.prevText);
+          break;
+        
+        case "swap-new-photo":
+          // Undo swap: put back the replaced asset, add new asset to newAssets
+          setAssets(prev => prev.map(a => a.id === op.newAsset.id ? op.replacedAsset : a));
+          setNewAssets(prev => [...prev, op.newAsset]);
+          break;
+        
+        case "replace-placeholder":
+          // Undo replace: restore placeholder, add new asset to newAssets
+          setAssets(prev => prev.map(a => a.id === op.newAsset.id ? op.placeholderAsset : a));
+          setNewAssets(prev => [...prev, op.newAsset]);
+          setMissingAssetIds(prev => new Set([...prev, op.placeholderAsset.id]));
+          break;
+        
+        case "insert-new-photo":
+          // Undo insert: remove the new asset, restore pageCount, add back to newAssets
+          setAssets(prev => prev.filter(a => a.id !== op.newAsset.id));
+          setNewAssets(prev => [...prev, op.newAsset]);
+          // Restore previous pageCount
+          setPageCounts(prev => {
+            const next = new Map(prev);
+            if (op.prevPageCount === null) {
+              next.delete(op.pageNumber);
+            } else {
+              next.set(op.pageNumber, op.prevPageCount);
+            }
+            return next;
+          });
+          break;
+        
+        case "delete-placeholder":
+          // Undo delete: restore the placeholder and pageCount
+          setAssets(prev => [...prev, op.placeholderAsset]);
+          setMissingAssetIds(prev => new Set([...prev, op.placeholderAsset.id]));
+          // Restore previous pageCount
+          if (op.pageNumber !== null) {
+            setPageCounts(prev => {
+              const next = new Map(prev);
+              if (op.prevPageCount === null) {
+                next.delete(op.pageNumber!);
+              } else {
+                next.set(op.pageNumber!, op.prevPageCount);
+              }
+              return next;
+            });
+          }
+          break;
+      }
+    });
+    
+    // Clear history after undoing everything
     setHistory([]);
-    setManuallyMovedIds(new Set());
     
     // Close confirmation dialog
     setShowResetConfirmation(false);
@@ -5551,6 +5712,12 @@ function PhotoGridEditor({
                           }
                         }}
                         onPointerDown={(e) => {
+                          // Don't trigger drag/swap if clicking on delete button
+                          const target = e.target as HTMLElement;
+                          if (target.closest('button')) {
+                            return;
+                          }
+                          
                           // Only allow drag if no new photo is selected
                           if (!selectedNewAsset) {
                             handleReorderPointerDown(asset.id, e);
@@ -5830,6 +5997,9 @@ function PhotoGridEditor({
                               e.preventDefault();
                               e.stopPropagation();
                               console.log(`DELETE placeholder: ${asset.id}`);
+                              
+                              // Reset swap mode if active
+                              setSwapFirstId(null);
                               
                               // Find which page this placeholder is on
                               let placeholderPage: number | null = null;
@@ -6362,7 +6532,8 @@ function PhotoGridEditor({
               )}
               
               {/* Flatten button (collapsed) */}
-              {(customOrdering !== null ||
+              {(history.length > 0 ||
+                customOrdering !== null ||
                 slotOverrides.size > 0 ||
                 manuallyMovedIds.size > 0 ||
                 layoutVariants.size > 0 ||
@@ -6414,7 +6585,8 @@ function PhotoGridEditor({
               </div>
 
               {/* Reset All and Flatten buttons */}
-              {(customOrdering !== null ||
+              {(history.length > 0 ||
+                customOrdering !== null ||
                 slotOverrides.size > 0 ||
                 manuallyMovedIds.size > 0 ||
                 layoutVariants.size > 0 ||
