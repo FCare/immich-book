@@ -1266,13 +1266,6 @@ function PhotoGridEditor({
       String(sidebarCollapsed),
     );
   }, [sidebarCollapsed]);
-  const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
-  const [captionProgress, setCaptionProgress] = useState<{
-    done: number;
-    total: number;
-  } | null>(null);
-  const [captionError, setCaptionError] = useState<string | null>(null);
-
   // Drag state for reordering - dropping one card onto another swaps
   // them outright (see the pointermove/pointerup effect below), rather
   // than splicing the dragged card into the sequence at the drop
@@ -2406,84 +2399,6 @@ function PhotoGridEditor({
   // /llm/ - see nginx.conf.template). Explicit action rather than automatic:
   // this hits a shared local GPU and results are meant to be reviewed/edited
   // before printing, not regenerated on every layout tweak.
-  const handleGenerateCaptions = async () => {
-    const candidates = logicalPages
-      .map((lp) => ({
-        number: lp.number,
-        descriptions: lp.photos
-          .map((p) => p.asset?.exifInfo?.description)
-          .filter((d): d is string => !!d && d.trim().length > 0),
-      }))
-      .filter((c) => c.descriptions.length > 0);
-
-    if (candidates.length === 0) {
-      setCaptionError(
-        "Aucune photo de l'album n'a de description Immich à partir de laquelle générer une légende.",
-      );
-      return;
-    }
-
-    setIsGeneratingCaptions(true);
-    setCaptionError(null);
-    setCaptionProgress({ done: 0, total: candidates.length });
-
-    const newCaptions = new Map(pageCaptions);
-    let failures = 0;
-
-    for (let i = 0; i < candidates.length; i++) {
-      const { number, descriptions } = candidates[i];
-      try {
-        const prompt = `Voici les descriptions de plusieurs photos qui apparaissent ensemble sur une page d'un album photo :\n${descriptions
-          .map((d) => `- ${d}`)
-          .join(
-            "\n",
-          )}\n\nPropose une courte légende pour cette page, dans le style d'un album photo (3 à 6 mots, chaleureuse et familière, par exemple "À la mer" ou "On se la coule douce"). Réponds uniquement avec la légende, sans guillemets ni point final.`;
-
-        const response = await fetch("/llm/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "google/gemma-4-12B-it-qat-w4a16-ct",
-            messages: [{ role: "user", content: prompt }],
-            max_tokens: 20,
-            temperature: 0.8,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        const raw = data.choices?.[0]?.message?.content ?? "";
-        const caption = raw
-          .trim()
-          .replace(/^["'«»]+|["'«».]+$/g, "")
-          .trim();
-
-        if (caption) {
-          newCaptions.set(number, caption);
-        }
-      } catch (err) {
-        console.error(`Failed to generate caption for page ${number}:`, err);
-        failures++;
-      }
-
-      setCaptionProgress({ done: i + 1, total: candidates.length });
-    }
-
-    setPageCaptions(newCaptions);
-    setIsGeneratingCaptions(false);
-    setCaptionProgress(null);
-    if (failures > 0) {
-      setCaptionError(
-        `${failures} légende${failures > 1 ? "s" : ""} sur ${candidates.length} n'${
-          failures > 1 ? "ont" : "a"
-        } pas pu être générée${failures > 1 ? "s" : ""}.`,
-      );
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
@@ -4478,21 +4393,6 @@ function PhotoGridEditor({
 
               <div className="flex flex-col gap-2">
                 <button
-                  onClick={handleGenerateCaptions}
-                  disabled={isGeneratingCaptions}
-                  className="px-4 py-2 rounded-full bg-violet-600 text-white hover:bg-violet-700 disabled:bg-violet-400 dark:disabled:bg-violet-800 disabled:cursor-not-allowed text-sm font-semibold shadow-sm transition-colors"
-                  title={language === "fr" ? "Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)" : "Generates a caption per page from Immich photo descriptions (via thebrain)"}
-                >
-                  {isGeneratingCaptions
-                    ? `${t(language, "generating")} ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
-                    : t(language, "generateCaptions")}
-                </button>
-                {captionError && (
-                  <p className="text-xs text-red-600 dark:text-red-400">
-                    {captionError}
-                  </p>
-                )}
-                <button
                   onClick={handleGeneratePdf}
                   disabled={isGeneratingPdf}
                   className="px-5 py-2 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-indigo-400 dark:disabled:bg-indigo-800 disabled:cursor-not-allowed text-sm font-semibold shadow-sm transition-colors flex items-center justify-center gap-2"
@@ -5709,7 +5609,7 @@ function PhotoGridEditor({
                 <button
                   onClick={() => setShowFlattenConfirmation(true)}
                   title={t(language, "flatten")}
-                  className="w-9 h-9 rounded-lg border-2 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 flex items-center justify-center transition-colors"
+                  className="w-9 h-9 rounded-lg border-2 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 flex items-center justify-center transition-colors"
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -5802,7 +5702,7 @@ function PhotoGridEditor({
                   )}
                   <button
                     onClick={() => setShowFlattenConfirmation(true)}
-                    className="w-full px-4 py-2 rounded-lg border-2 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                    className="w-full px-4 py-2 rounded-lg border-2 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
                   >
                     <svg
                       viewBox="0 0 24 24"
@@ -6018,7 +5918,7 @@ function PhotoGridEditor({
               </button>
               <button
                 onClick={handleFlatten}
-                className="flex-1 px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-sm transition-colors"
+                className="flex-1 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors"
               >
                 {t(language, "flatten")}
               </button>
