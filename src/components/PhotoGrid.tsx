@@ -3486,7 +3486,7 @@ function PhotoGridEditor({
           sidebarCollapsed ? "w-16" : "w-80"
         }`}
       >
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
           {sidebarCollapsed ? (
             <div className="flex flex-col items-center gap-3 py-4">
               {sidebarBrand}
@@ -5384,7 +5384,7 @@ function PhotoGridEditor({
           historyCollapsed ? "w-16" : "w-80"
         }`}
       >
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
           {historyCollapsed ? (
             <div className="flex flex-col items-center gap-3 py-4">
               <button
@@ -5461,7 +5461,7 @@ function PhotoGridEditor({
                   {t(language, "noOperations")}
                 </div>
               ) : (
-                <div className="flex-1 overflow-y-auto -mx-4 px-4 space-y-2">
+                <div className="flex-1 overflow-y-auto custom-scrollbar -mx-4 px-4 space-y-2">
               {history.map((op, index) => {
                 const timeAgo = Math.floor((Date.now() - op.timestamp) / 1000);
                 const timeStr =
