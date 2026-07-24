@@ -437,6 +437,11 @@ function captionAtBottom(logicalPageNumber: number): boolean {
 }
 
 interface PageFormat {
+  // Which product line this belongs to (e.g. "Photo Book", "Livre de
+  // poche") - printers with more than one category get a category
+  // selector above the format chips, so picking a size is two short
+  // steps instead of one long, mixed list.
+  category: string;
   label: string;
   widthMm: number;
   heightMm: number;
@@ -446,6 +451,9 @@ interface Printer {
   id: string;
   label: string;
   logo: string | null;
+  // Where to actually upload the generated PDF - absent for "libre",
+  // since it isn't tied to a specific print service.
+  url?: string;
   formats: PageFormat[];
   // Recommended bleed in mm - null means bleed isn't part of this
   // printer's expected file (adding it would make the PDF the wrong
@@ -473,10 +481,10 @@ const PRINTERS: Printer[] = [
     label: "PDF Libre",
     logo: null,
     formats: [
-      { label: "A4 Portrait", widthMm: 210, heightMm: 297 },
-      { label: "A4 Landscape", widthMm: 297, heightMm: 210 },
-      { label: "Square 21x21", widthMm: 210, heightMm: 210 },
-      { label: "Square 30x30", widthMm: 300, heightMm: 300 },
+      { category: "Standard", label: "A4 Portrait", widthMm: 210, heightMm: 297 },
+      { category: "Standard", label: "A4 Landscape", widthMm: 297, heightMm: 210 },
+      { category: "Standard", label: "Square 21x21", widthMm: 210, heightMm: 210 },
+      { category: "Standard", label: "Square 30x30", widthMm: 300, heightMm: 300 },
     ],
     bleedMm: null,
     constrained: false,
@@ -485,13 +493,14 @@ const PRINTERS: Printer[] = [
     id: "flexilivre",
     label: "Flexilivre",
     logo: "/logos/flexilivre.svg",
+    url: "https://www.flexilivre.com/fichier/",
     formats: [
-      { label: "A4 Portrait", widthMm: 210, heightMm: 297 },
-      { label: "A4 Paysage", widthMm: 297, heightMm: 210 },
-      { label: "A5 Portrait", widthMm: 150, heightMm: 210 },
-      { label: "A5 Paysage", widthMm: 210, heightMm: 150 },
-      { label: "Carré 21x21", widthMm: 210, heightMm: 210 },
-      { label: "Grand carré 30x30", widthMm: 300, heightMm: 300 },
+      { category: "Standard", label: "A4 Portrait", widthMm: 210, heightMm: 297 },
+      { category: "Standard", label: "A4 Paysage", widthMm: 297, heightMm: 210 },
+      { category: "Standard", label: "A5 Portrait", widthMm: 150, heightMm: 210 },
+      { category: "Standard", label: "A5 Paysage", widthMm: 210, heightMm: 150 },
+      { category: "Standard", label: "Carré 21x21", widthMm: 210, heightMm: 210 },
+      { category: "Standard", label: "Grand carré 30x30", widthMm: 300, heightMm: 300 },
     ],
     bleedMm: 5,
     constrained: true,
@@ -500,24 +509,78 @@ const PRINTERS: Printer[] = [
     id: "blurb",
     label: "Blurb",
     logo: "/logos/blurb.png",
+    url: "https://www.blurb.com/pdf-to-book",
     formats: [
-      // Confirmed exactly, three independent ways: Small Square from a
-      // real "PDF to Book" upload error for this album (174.625mm was
-      // the size Blurb actually required, not the 18cm the nominal name
-      // implies); Standard Portrait/Landscape and Large Landscape from
-      // Blurb's own BookWright template files (.blurb = a SQLite
-      // archive; book width/height in bbf2.xml are in points at 72/in);
-      // Mini Square and Large Square from Blurb's spec calculator trim
-      // size (its "final exported PDF" figure bakes in an asymmetric,
-      // no-bleed-on-the-spine convention this tool doesn't produce, so
-      // only the plain trim size is used here - same flat convention as
-      // every other row).
-      { label: "Small Square (nominal 18x18cm)", widthMm: 174.625, heightMm: 174.625 },
-      { label: "Mini Square (nominal 13x13cm)", widthMm: 127, heightMm: 127 },
-      { label: "Standard Portrait (nominal 20x25cm)", widthMm: 206.375, heightMm: 260.35 },
-      { label: "Standard Landscape (nominal 25x20cm)", widthMm: 244.475, heightMm: 209.55 },
-      { label: "Large Landscape (nominal 33x28cm)", widthMm: 320.675, heightMm: 276.225 },
-      { label: "Large Square (nominal 30x30cm)", widthMm: 298.45, heightMm: 298.45 },
+      // Confirmed via Blurb's spec calculator, which clearly separates
+      // trim ("Format de la page / repère de rognage") from the
+      // bleed-inclusive "final exported PDF" figure - only the trim
+      // value is used here, matching this tool's flat-page convention.
+      // Interior trim is identical across cover types (softcover, rigide
+      // jaquette, rigide imprimée) for a given size - only the cover
+      // file itself differs, which this tool doesn't generate anyway.
+      // Small Square is additionally confirmed by a real "PDF to Book"
+      // upload error for this album (174.625mm was the size Blurb
+      // actually required, not the 18cm the nominal name implies).
+      {
+        category: "Photo Book",
+        label: "Mini Square",
+        widthMm: 127,
+        heightMm: 127,
+      },
+      {
+        category: "Photo Book",
+        label: "Small Square",
+        widthMm: 174.625,
+        heightMm: 174.625,
+      },
+      {
+        category: "Photo Book",
+        label: "Large Square",
+        widthMm: 298.45,
+        heightMm: 298.45,
+      },
+      {
+        category: "Photo Book",
+        label: "Portrait standard",
+        widthMm: 203.2,
+        heightMm: 254.01,
+      },
+      {
+        category: "Photo Book",
+        label: "Paysage standard",
+        widthMm: 241.3,
+        heightMm: 203.21,
+      },
+      {
+        category: "Photo Book",
+        label: "Grand paysage",
+        widthMm: 317.5,
+        heightMm: 269.88,
+      },
+      {
+        category: "Livre de poche",
+        label: "13x20cm",
+        widthMm: 127,
+        heightMm: 203.21,
+      },
+      {
+        category: "Livre de poche",
+        label: "15x23cm",
+        widthMm: 152.4,
+        heightMm: 228.61,
+      },
+      {
+        category: "Livre de poche",
+        label: "20x25cm",
+        widthMm: 203.2,
+        heightMm: 254.01,
+      },
+      {
+        category: "Magazine",
+        label: "Premium - 21.5x28cm",
+        widthMm: 215.9,
+        heightMm: 279.4,
+      },
     ],
     bleedMm: null,
     constrained: true,
@@ -998,6 +1061,23 @@ function PhotoGridEditor({
   const selectedPrinter =
     PRINTERS.find((p) => p.id === printerId) ?? PRINTERS[0];
 
+  // Printers with more than one product line (Blurb: Photo Book / Livre
+  // de poche / Magazine) get a category selector above the format
+  // chips, so the list stays short instead of mixing every size from
+  // every product together. Not persisted - just derived from whichever
+  // printer/format is initially active.
+  const [formatCategory, setFormatCategory] = useState(
+    () =>
+      PRINTERS.find((p) => p.id === initialConfig.printerId)?.formats.find(
+        (f) =>
+          Math.abs(f.widthMm - pixelsToMm(initialConfig.pageWidth)) < 0.1 &&
+          Math.abs(f.heightMm - pixelsToMm(initialConfig.pageHeight)) < 0.1,
+      )?.category ??
+      PRINTERS.find((p) => p.id === initialConfig.printerId)?.formats[0]
+        ?.category ??
+      "",
+  );
+
   // Switching printer re-derives everything that printer constrains:
   // snaps to its first format, forces bleed to its requirement (or off,
   // if bleed isn't part of that printer's expected file), and turns off
@@ -1010,6 +1090,7 @@ function PhotoGridEditor({
     if (firstFormat) {
       setPageWidth(mmToPixels(firstFormat.widthMm));
       setPageHeight(mmToPixels(firstFormat.heightMm));
+      setFormatCategory(firstFormat.category);
     }
     if (printer.constrained) {
       setCombinePages(false);
@@ -1019,6 +1100,20 @@ function PhotoGridEditor({
       } else {
         setBleedEnabled(false);
       }
+    }
+  };
+
+  // Switching category snaps to its first format, same reasoning as
+  // switching printer - keeps the format chip row always showing one
+  // active selection instead of momentarily matching nothing.
+  const handleSelectCategory = (category: string) => {
+    setFormatCategory(category);
+    const firstFormat = selectedPrinter.formats.find(
+      (f) => f.category === category,
+    );
+    if (firstFormat) {
+      setPageWidth(mmToPixels(firstFormat.widthMm));
+      setPageHeight(mmToPixels(firstFormat.heightMm));
     }
   };
 
@@ -3305,32 +3400,63 @@ function PhotoGridEditor({
                   </p>
                 )}
               </div>
+              {(() => {
+                const categories = Array.from(
+                  new Set(selectedPrinter.formats.map((f) => f.category)),
+                );
+                return (
+                  categories.length > 1 && (
+                    <div>
+                      <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+                        Catégorie
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {categories.map((category) => (
+                          <button
+                            key={category}
+                            onClick={() => handleSelectCategory(category)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                              category === formatCategory
+                                ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600"
+                            }`}
+                          >
+                            {category}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                );
+              })()}
               <div>
                 <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
                   Format
                 </span>
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedPrinter.formats.map((p) => {
-                    const active =
-                      Math.abs(p.widthMm - pixelsToMm(pageWidth)) < 0.1 &&
-                      Math.abs(p.heightMm - pixelsToMm(pageHeight)) < 0.1;
-                    return (
-                      <button
-                        key={p.label}
-                        onClick={() => {
-                          setPageWidth(mmToPixels(p.widthMm));
-                          setPageHeight(mmToPixels(p.heightMm));
-                        }}
-                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                          active
-                            ? "bg-indigo-50 dark:bg-indigo-500/20 border-indigo-400 dark:border-indigo-500 text-indigo-700 dark:text-indigo-300"
-                            : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600"
-                        }`}
-                      >
-                        {p.label}
-                      </button>
-                    );
-                  })}
+                  {selectedPrinter.formats
+                    .filter((p) => p.category === formatCategory)
+                    .map((p) => {
+                      const active =
+                        Math.abs(p.widthMm - pixelsToMm(pageWidth)) < 0.1 &&
+                        Math.abs(p.heightMm - pixelsToMm(pageHeight)) < 0.1;
+                      return (
+                        <button
+                          key={p.label}
+                          onClick={() => {
+                            setPageWidth(mmToPixels(p.widthMm));
+                            setPageHeight(mmToPixels(p.heightMm));
+                          }}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                            active
+                              ? "bg-indigo-50 dark:bg-indigo-500/20 border-indigo-400 dark:border-indigo-500 text-indigo-700 dark:text-indigo-300"
+                              : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600"
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    })}
                 </div>
               </div>
               <div className="flex flex-wrap items-end gap-5">
@@ -3861,62 +3987,41 @@ function PhotoGridEditor({
                 )}
               </div>
 
-              {/* Printers - services known to accept a ready-made PDF
-                  (this book's own export) rather than requiring their
-                  own layout app. Logos sit on a fixed white chip (not
-                  dark:-varied) since a couple of them are plain black
-                  artwork with no dark-mode variant - a white backdrop
-                  keeps every logo legible either way. */}
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                  Imprimer ce PDF chez
-                </span>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    {
-                      label: "Flexilivre",
-                      url: "https://www.flexilivre.com/fichier/",
-                      logo: "/logos/flexilivre.svg",
-                    },
-                    {
-                      label: "Blurb",
-                      url: "https://www.blurb.com/pdf-to-book",
-                      logo: "/logos/blurb.png",
-                    },
-                    // Pixartprinting and Pumbo are temporarily removed -
-                    // their exact photo book trim sizes are gated behind
-                    // an interactive configurator we haven't been able to
-                    // confirm publicly (unlike Flexilivre/Blurb, verified
-                    // against their help docs and a real Blurb upload
-                    // error). Re-add once those dimensions are confirmed.
-                    // {
-                    //   label: "Pixartprinting",
-                    //   url: "https://www.pixartprinting.fr/",
-                    //   logo: "/logos/pixartprinting.svg",
-                    // },
-                    // {
-                    //   label: "Pumbo",
-                    //   url: "https://www.pumbo.fr/",
-                    //   logo: "/logos/pumbo.png",
-                    // },
-                  ].map((printer) => (
-                    <a
-                      key={printer.label}
-                      href={printer.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={printer.label}
-                      className="flex items-center justify-center h-10 px-3.5 rounded-lg bg-white border border-gray-200 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:shadow-sm transition-all"
-                    >
+              {/* Printer link - only shown once a specific printer is
+                  selected (Page tab), and only that one printer's link:
+                  the page is now sized/bled for that printer specifically,
+                  so the other services' links would just be misleading.
+                  "PDF Libre" isn't tied to a print service, so this
+                  section disappears entirely for it. Logo sits on a
+                  fixed white chip (not dark:-varied) since a couple of
+                  the logos are plain black artwork with no dark-mode
+                  variant. */}
+              {selectedPrinter.url && (
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    Imprimer ce PDF chez
+                  </span>
+                  <a
+                    href={selectedPrinter.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={selectedPrinter.label}
+                    className="inline-flex items-center justify-center h-10 px-3.5 rounded-lg bg-white border border-gray-200 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:shadow-sm transition-all w-fit"
+                  >
+                    {selectedPrinter.logo ? (
                       <img
-                        src={printer.logo}
-                        alt={printer.label}
+                        src={selectedPrinter.logo}
+                        alt={selectedPrinter.label}
                         className="h-4 max-w-[92px] object-contain"
                       />
-                    </a>
-                  ))}
+                    ) : (
+                      <span className="text-xs font-semibold text-gray-700">
+                        {selectedPrinter.label}
+                      </span>
+                    )}
+                  </a>
                 </div>
-              </div>
+              )}
 
               <div className="mt-auto pt-2 flex justify-start">
                 {sidebarThemeToggle}
