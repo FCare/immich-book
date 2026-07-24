@@ -5841,11 +5841,23 @@ function PhotoGridEditor({
                       
                       {backCoverLayout === "photo-title" && backCoverImageUrl && (
                         <>
-                          <img
-                            src={backCoverImageUrl}
-                            alt="Back cover"
-                            className="absolute inset-0 w-full h-full object-cover"
-                          />
+                          <div
+                            className="absolute shadow-lg overflow-hidden"
+                            style={{
+                              top: "8%",
+                              left: "8%",
+                              right: "8%",
+                              bottom: "24%",
+                              backgroundColor: SCRAPBOOK.mat,
+                              padding: "3%",
+                            }}
+                          >
+                            <img
+                              src={backCoverImageUrl}
+                              alt="Back cover"
+                              className="w-full h-full object-contain"
+                            />
+                          </div>
                           <div
                             className="absolute inset-x-0 bottom-0 flex items-center justify-center"
                             style={{ height: "20%" }}
@@ -6004,11 +6016,23 @@ function PhotoGridEditor({
                       
                       {coverLayout === "photo-title" && coverImageUrl && (
                         <>
-                          <img
-                            src={coverImageUrl}
-                            alt="Front cover"
-                            className="absolute inset-0 w-full h-full object-cover"
-                          />
+                          <div
+                            className="absolute shadow-lg overflow-hidden"
+                            style={{
+                              top: "8%",
+                              left: "8%",
+                              right: "8%",
+                              bottom: "24%",
+                              backgroundColor: SCRAPBOOK.mat,
+                              padding: "3%",
+                            }}
+                          >
+                            <img
+                              src={coverImageUrl}
+                              alt="Front cover"
+                              className="w-full h-full object-contain"
+                            />
+                          </div>
                           <div
                             className="absolute inset-x-0 bottom-0 flex items-center justify-center"
                             style={{ height: "20%" }}
