@@ -51,6 +51,7 @@ export interface LayoutOptions {
   margin: number; // in pixels
   spacing: number; // in pixels
   combinePages?: boolean; // combine two pages into one PDF page
+  forceTimeline?: boolean; // preserve chronological order instead of grouping by aspect ratio
   // Bumping a page's variant reshuffles its bento arrangement (same
   // photos, different split pattern) without changing anything else -
   // lets a user "try another layout" per page.
@@ -176,30 +177,41 @@ function splitRect(
   spacing: number,
   config: SplitConfig,
   path: string,
+  forceTimeline: boolean = false,
 ): PhotoBox[] {
   if (items.length === 1) {
     return [{ id: items[0].id, asset: items[0].asset, ...rect }];
   }
 
-  // Group photos by aspect ratio so each side of the split is shape-
-  // homogeneous - which side is "first" alternates for variety.
-  const sorted = [...items].sort(
-    (a, b) => itemAspectRatio(a) - itemAspectRatio(b),
-  );
-  const countRatio =
-    config.ratioMin +
-    seededRandom(path + "-count") * (config.ratioMax - config.ratioMin);
-  const firstCount = Math.max(
-    1,
-    Math.min(items.length - 1, Math.round(items.length * countRatio)),
-  );
-  const portraitFirst = seededRandom(path + "-side") < 0.5;
-  const firstItems = portraitFirst
-    ? sorted.slice(0, firstCount)
-    : sorted.slice(-firstCount);
-  const secondItems = portraitFirst
-    ? sorted.slice(firstCount)
-    : sorted.slice(0, sorted.length - firstCount);
+  let firstItems: LayoutItem[];
+  let secondItems: LayoutItem[];
+
+  if (forceTimeline) {
+    // Preserve chronological order: split items in sequence, not by aspect ratio
+    const firstCount = Math.max(1, Math.floor(items.length / 2));
+    firstItems = items.slice(0, firstCount);
+    secondItems = items.slice(firstCount);
+  } else {
+    // Group photos by aspect ratio so each side of the split is shape-
+    // homogeneous - which side is "first" alternates for variety.
+    const sorted = [...items].sort(
+      (a, b) => itemAspectRatio(a) - itemAspectRatio(b),
+    );
+    const countRatio =
+      config.ratioMin +
+      seededRandom(path + "-count") * (config.ratioMax - config.ratioMin);
+    const firstCount = Math.max(
+      1,
+      Math.min(items.length - 1, Math.round(items.length * countRatio)),
+    );
+    const portraitFirst = seededRandom(path + "-side") < 0.5;
+    firstItems = portraitFirst
+      ? sorted.slice(0, firstCount)
+      : sorted.slice(-firstCount);
+    secondItems = portraitFirst
+      ? sorted.slice(firstCount)
+      : sorted.slice(0, sorted.length - firstCount);
+  }
 
   const r1 = averageAspectRatio(firstItems);
   const r2 = averageAspectRatio(secondItems);
@@ -245,8 +257,8 @@ function splitRect(
   }
 
   return [
-    ...splitRect(firstRect, firstItems, spacing, config, path + "A"),
-    ...splitRect(secondRect, secondItems, spacing, config, path + "B"),
+    ...splitRect(firstRect, firstItems, spacing, config, path + "A", forceTimeline),
+    ...splitRect(secondRect, secondItems, spacing, config, path + "B", forceTimeline),
   ];
 }
 
@@ -422,6 +434,7 @@ function layoutBentoPage(
   variant: number,
   forcedCount: number | undefined,
   textCardCount: number,
+  forceTimeline: boolean,
 ): { photos: PhotoBox[]; consumed: number } {
   const seedBase = `bento-${pageNumber}-v${variant}`;
   let totalSlots: number;
@@ -453,7 +466,7 @@ function layoutBentoPage(
     })),
   ];
 
-  const photos = splitRect(contentRect, items, spacing, BENTO_CONFIG, seedBase);
+  const photos = splitRect(contentRect, items, spacing, BENTO_CONFIG, seedBase, forceTimeline);
   return { photos: equalizeNearMatchingRows(photos, spacing), consumed };
 }
 
@@ -472,6 +485,7 @@ export function calculatePageLayout(
     pageHeight,
     margin,
     spacing,
+    forceTimeline,
     layoutVariants,
     pageCounts,
     textCardCounts,
@@ -504,6 +518,7 @@ export function calculatePageLayout(
       variant,
       forcedCount,
       textCardCount,
+      forceTimeline || false,
     );
 
     // A manual slot override wins outright over the auto-computed

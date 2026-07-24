@@ -610,6 +610,7 @@ interface GlobalConfig {
   // Layout settings
   spacing: number;
   filterVideos: boolean;
+  forceTimeline: boolean;
   // Bleed ("fond perdu") - optional border around the trim size, filled
   // with the page background, for print production.
   bleedEnabled: boolean;
@@ -712,6 +713,7 @@ const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   combinePages: false,
   spacing: 20,
   filterVideos: true,
+  forceTimeline: false,
   bleedEnabled: false,
   bleed: mmToPixels(3),
   showDates: true,
@@ -805,6 +807,7 @@ async function saveAlbumConfig(albumId: string, config: AlbumConfig) {
       combinePages: config.combinePages,
       spacing: config.spacing,
       filterVideos: config.filterVideos,
+      forceTimeline: config.forceTimeline,
       bleedEnabled: config.bleedEnabled,
       bleed: config.bleed,
       showDates: config.showDates,
@@ -1051,6 +1054,7 @@ function PhotoGridEditor({
   // Layout settings
   const [spacing, setSpacing] = useState(initialConfig.spacing);
   const [filterVideos, setFilterVideos] = useState(initialConfig.filterVideos);
+  const [forceTimeline, setForceTimeline] = useState(initialConfig.forceTimeline);
   // Bleed ("fond perdu") - an optional border around the trim size,
   // filled with the page background, so a print shop trimming the book
   // doesn't reveal a white edge. Off by default since most digital/home
@@ -1333,6 +1337,7 @@ function PhotoGridEditor({
       combinePages,
       spacing,
       filterVideos,
+      forceTimeline,
       bleedEnabled,
       bleed,
       showDates,
@@ -1370,6 +1375,7 @@ function PhotoGridEditor({
     combinePages,
     spacing,
     filterVideos,
+    forceTimeline,
     bleedEnabled,
     bleed,
     showDates,
@@ -1664,6 +1670,7 @@ function PhotoGridEditor({
       margin: layoutMargin,
       spacing: validSpacing,
       combinePages,
+      forceTimeline,
       layoutVariants,
       pageCounts,
       textCardCounts,
@@ -1676,6 +1683,7 @@ function PhotoGridEditor({
     validPageWidth,
     validPageHeight,
     combinePages,
+    forceTimeline,
     layoutVariants,
     pageCounts,
     textCardCounts,
@@ -3706,6 +3714,11 @@ function PhotoGridEditor({
                   checked={filterVideos}
                   onChange={setFilterVideos}
                   label="Exclude Videos"
+                />
+                <ToggleSwitch
+                  checked={forceTimeline}
+                  onChange={setForceTimeline}
+                  label="Force Timeline Order"
                 />
                 <ToggleSwitch
                   checked={showDates}
