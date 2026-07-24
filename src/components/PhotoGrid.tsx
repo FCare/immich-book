@@ -557,8 +557,8 @@ const PRINTERS: Printer[] = [
       {
         category: "Photo Book",
         label: "Grand paysage",
-        widthMm: 317.5,
-        heightMm: 269.88,
+        widthMm: 320.675,
+        heightMm: 276.225,
       },
       {
         category: "Livre de poche",
