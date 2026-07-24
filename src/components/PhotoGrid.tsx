@@ -3009,10 +3009,17 @@ function PhotoGridEditor({
     const bleedPt = bleedEnabled ? toPoints(validBleed) : 0;
     const coverBleedWidth = coverPageWidth + bleedPt * 2;
     const coverBleedHeight = coverPageHeight + bleedPt * 2;
+    
+    // Separated cover (for Blurb, etc.): back + spine + front in one page
+    const spineWidthPt = toPoints(spineWidth);
+    const separatedCoverWidth = separatedCover 
+      ? coverPageWidth * 2 + spineWidthPt 
+      : coverPageWidth;
+    const separatedCoverBleedWidth = separatedCoverWidth + bleedPt * 2;
 
     return (
     <Document pageLayout={pageLayout}>
-      {showCover && (
+      {showCover && !separatedCover && (
         <Page
           size={{ width: coverBleedWidth, height: coverBleedHeight }}
           style={{
@@ -3195,6 +3202,67 @@ function PhotoGridEditor({
             </>
           )}
 
+          </View>
+        </Page>
+      )}
+
+      {showCover && separatedCover && (
+        <Page
+          size={{ width: separatedCoverBleedWidth, height: coverBleedHeight }}
+          style={{
+            ...staticStyles.page,
+            backgroundColor: PAGE_BACKGROUNDS[pageBackground].base,
+          }}
+        >
+          <PdfPageBackground
+            background={pageBackground}
+            width={separatedCoverBleedWidth}
+            height={coverBleedHeight}
+          />
+          <View
+            style={{
+              position: "absolute",
+              top: bleedPt,
+              left: bleedPt,
+              width: separatedCoverWidth,
+              height: coverPageHeight,
+              flexDirection: "row",
+            }}
+          >
+            {/* Back Cover (left) */}
+            <View style={{ width: coverPageWidth, height: coverPageHeight, position: "relative" }}>
+              {/* TODO: Render back cover content here */}
+              <Text style={{ fontSize: 12, color: "#999" }}>Back Cover</Text>
+            </View>
+
+            {/* Spine (middle) */}
+            <View
+              style={{
+                width: spineWidthPt,
+                height: coverPageHeight,
+                backgroundColor: spineColor,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: "Caveat",
+                  fontSize: spineWidthPt * 0.4,
+                  color: "#FFFFFF",
+                  transform: "rotate(-90deg)",
+                }}
+              >
+                {spineTitle || album.albumName}
+              </Text>
+            </View>
+
+            {/* Front Cover (right) */}
+            <View style={{ width: coverPageWidth, height: coverPageHeight, position: "relative" }}>
+              {/* TODO: Render front cover content here */}
+              <Text style={{ fontSize: 12, color: "#999" }}>Front Cover</Text>
+            </View>
           </View>
         </Page>
       )}
@@ -3676,7 +3744,7 @@ function PhotoGridEditor({
         );
       })}
 
-      {showCover && (
+      {showCover && !separatedCover && (
         <Page
           size={{ width: coverBleedWidth, height: coverBleedHeight }}
           style={{
