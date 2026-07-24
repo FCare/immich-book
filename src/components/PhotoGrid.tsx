@@ -415,7 +415,7 @@ function PdfPhotoImage({
         left,
         width: containerWidth,
         height: containerHeight,
-        objectFit: "contain",
+        objectFit: "cover",
       }}
     />
   );
