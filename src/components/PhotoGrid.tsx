@@ -3321,14 +3321,16 @@ function PhotoGridEditor({
               style={{
                 position: "absolute",
                 top: coverPageHeight * 0.08,
-                left: coverPageWidth * 0.1,
-                right: coverPageWidth * 0.1,
-                height: coverPageHeight * 0.64,
+                left: coverPageWidth * 0.08,
+                width: coverPageWidth * 0.84,
+                height: coverPageHeight * 0.68,
+                backgroundColor: SCRAPBOOK.mat,
               }}
             >
-              <PdfPhotoCard
-                imageBlob={coverImageBlob}
-                cardStyle={cardStyle}
+              <PdfPhotoImage
+                src={coverImageBlob}
+                top={coverPageWidth * 0.02}
+                left={coverPageWidth * 0.02}
                 containerWidth={coverPageWidth * 0.8}
                 containerHeight={coverPageHeight * 0.64}
               />
