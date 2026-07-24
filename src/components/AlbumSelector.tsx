@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react";
 import { getAllAlbums, type AlbumResponseDto } from "@immich/sdk";
 import type { ImmichConfig } from "../types";
-import { getAlbumSyncStatus } from "../services/albumSync";
-import { albumStorage } from "../db/albumStorage";
 
 interface AlbumSelectorProps {
   immichConfig: ImmichConfig;
@@ -29,31 +27,10 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
   const [albums, setAlbums] = useState<AlbumResponseDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [syncStats, setSyncStats] = useState<Map<string, { missingCount: number; newCount: number }>>(new Map());
 
   useEffect(() => {
     loadAlbums();
-    loadSyncStats();
   }, []);
-
-  const loadSyncStats = async () => {
-    try {
-      const storedAlbums = await albumStorage.getAllAlbums();
-      const stats = new Map<string, { missingCount: number; newCount: number }>();
-      
-      for (const album of storedAlbums) {
-        const syncStatus = await getAlbumSyncStatus(album.id);
-        stats.set(album.id, {
-          missingCount: syncStatus.missingCount,
-          newCount: syncStatus.newCount,
-        });
-      }
-      
-      setSyncStats(stats);
-    } catch (error) {
-      console.error("Failed to load sync stats:", error);
-    }
-  };
 
   const loadAlbums = async () => {
     try {
@@ -198,25 +175,9 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
               <h3 className="font-semibold text-gray-900 dark:text-gray-50 truncate">
                 {album.albumName}
               </h3>
-              <div className="flex items-center gap-2 mt-1">
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {album.assetCount} {album.assetCount === 1 ? "photo" : "photos"}
-                </p>
-                {syncStats.has(album.id) && (
-                  <>
-                    {syncStats.get(album.id)!.newCount > 0 && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                        +{syncStats.get(album.id)!.newCount} new
-                      </span>
-                    )}
-                    {syncStats.get(album.id)!.missingCount > 0 && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-                        {syncStats.get(album.id)!.missingCount} missing
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {album.assetCount} {album.assetCount === 1 ? "photo" : "photos"}
+              </p>
               {album.description && (
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-2">
                   {album.description}

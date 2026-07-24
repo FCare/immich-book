@@ -23,7 +23,6 @@ import {
 } from "../utils/pageLayout";
 import type { ImmichConfig } from "../types";
 import { t, type Language } from "../i18n";
-import { syncAlbum } from "../services/albumSync";
 import roboto400 from "@fontsource/roboto/files/roboto-latin-400-normal.woff?url";
 import roboto500 from "@fontsource/roboto/files/roboto-latin-500-normal.woff?url";
 import caveat500 from "@fontsource/caveat/files/caveat-latin-500-normal.woff?url";
@@ -791,12 +790,51 @@ async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
   return defaults;
 }
 
-async function saveAlbumConfig(albumId: string, config: AlbumConfig) {
+async function detectAlbumChanges(
+  albumId: string,
+  currentAssetIds: string[]
+): Promise<{ missingAssets: AssetResponseDto[]; newAssetIds: string[] }> {
   try {
+    const res = await fetch(
+      `/photobooks/${encodeURIComponent(albumId)}/detect-changes`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentAssetIds }),
+      }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        missingAssets: data.missingAssets || [],
+        newAssetIds: data.newAssetIds || [],
+      };
+    }
+  } catch (e) {
+    console.error("Failed to detect album changes:", e);
+  }
+  return { missingAssets: [], newAssetIds: [] };
+}
+
+async function saveAlbumConfig(albumId: string, config: AlbumConfig, assets?: AssetResponseDto[]) {
+  try {
+    const payload: any = { config };
+    
+    // Only include assets snapshot if explicitly provided
+    if (assets && assets.length > 0) {
+      payload.assets = assets.map(a => ({
+        id: a.id,
+        type: a.type,
+        originalFileName: a.originalFileName,
+        fileCreatedAt: a.fileCreatedAt,
+        localDateTime: a.localDateTime,
+      }));
+    }
+    
     await fetch(`/photobooks/${encodeURIComponent(albumId)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config),
+      body: JSON.stringify(payload),
     });
 
     // Also update global config with page and layout settings, used to
@@ -1223,6 +1261,9 @@ function PhotoGridEditor({
   const [manuallyMovedIds, setManuallyMovedIds] = useState<Set<string>>(
     () => new Set(initialConfig.manuallyMovedIds),
   );
+  // Missing photo placeholders - asset IDs that were in the photobook but removed from album
+  const [missingAssetIds, setMissingAssetIds] = useState<Set<string>>(new Set());
+  const [changesDetected, setChangesDetected] = useState(false);
   const [showCover, setShowCover] = useState(initialConfig.showCover);
   const [coverTitle, setCoverTitle] = useState(
     initialConfig.coverTitle || album.albumName,
@@ -1441,26 +1482,62 @@ function PhotoGridEditor({
 
   useEffect(() => {
     loadAlbumAssets();
-
-    // Auto-sync this album when opening it
-    syncAlbum(album.id, immichConfig.baseUrl)
-      .then((result) => {
-        if (result.success) {
-          console.log(`Album synced: ${result.newCount} new, ${result.missingCount} missing`);
-          // TODO Phase 2: Handle missing/new photos in UI
-        } else {
-          console.error(`Album sync failed: ${result.error}`);
-        }
-      })
-      .catch((err) => {
-        console.error("Album sync error:", err);
-      });
+    setChangesDetected(false);  // Reset flag when changing albums
 
     // Clean up old localStorage keys (migration)
     localStorage.removeItem(`immich-book-aspect-ratios-${album.id}`);
     localStorage.removeItem(`immich-book-ordering-${album.id}`);
     localStorage.removeItem(`immich-book-description-positions-${album.id}`);
-  }, [album.id, immichConfig.baseUrl]);
+  }, [album.id]);
+
+  // Detect missing/new photos after assets are loaded
+  useEffect(() => {
+    if (assets.length === 0 || changesDetected) return;
+    
+    console.log(`Detecting changes for ${assets.length} assets...`);
+    
+    detectAlbumChanges(album.id, assets.map(a => a.id))
+      .then(({ missingAssets, newAssetIds }) => {
+        console.log(`Album changes: ${newAssetIds.length} new, ${missingAssets.length} missing`);
+        setChangesDetected(true);
+        
+        if (missingAssets.length > 0) {
+          setMissingAssetIds(new Set(missingAssets.map(a => a.id)));
+          // Inject missing assets as placeholders
+          setAssets(prev => {
+            const combined = [...prev, ...missingAssets];
+            const albumOrder = album.order || "desc";
+            return combined.sort((a, b) => {
+              const timeA = new Date(a.fileCreatedAt).getTime();
+              const timeB = new Date(b.fileCreatedAt).getTime();
+              return albumOrder === "asc" ? timeA - timeB : timeB - timeA;
+            });
+          });
+        } else if (newAssetIds.length > 0) {
+          // First time opening this album - save snapshot for future comparison
+          console.log("First time opening album, saving initial snapshot...");
+          // Use a minimal config placeholder - the real config save happens in the other useEffect
+          fetch(`/photobooks/${encodeURIComponent(album.id)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              config: initialConfig,
+              assets: assets.map(a => ({
+                id: a.id,
+                type: a.type,
+                originalFileName: a.originalFileName,
+                fileCreatedAt: a.fileCreatedAt,
+                localDateTime: a.localDateTime,
+              })),
+            }),
+          });
+        }
+        // TODO Phase 3: handle newAssetIds (new photos panel)
+      })
+      .catch(err => {
+        console.error("Failed to detect album changes:", err);
+      });
+  }, [assets, changesDetected, album.id, initialConfig]);
 
   // Save config to localStorage whenever it changes (with clamped values)
   useEffect(() => {
@@ -1511,6 +1588,7 @@ function PhotoGridEditor({
       backCoverPlainText,
       excludeCoverPhotosFromPages,
     };
+    // Save config (without assets snapshot - that's saved separately after resolving placeholders)
     saveAlbumConfig(album.id, config);
   }, [
     album.id,
@@ -4669,7 +4747,7 @@ function PhotoGridEditor({
             const scaledWidth = displayWidth * scale;
 
             return (
-              <div key={page.pageNumber} className="relative">
+              <div key={page.pageNumber} data-page-number={page.pageNumber} className="relative">
                 {/* Page number and style controls */}
                 {combinePages ? (
                   /* Combined pages mode - show controls above each logical page */
@@ -5018,6 +5096,10 @@ function PhotoGridEditor({
                     }
 
                     const asset = photoBox.asset;
+                    
+                    // Check if this is a missing photo placeholder
+                    const isMissingPhoto = missingAssetIds.has(asset.id);
+                    
                     const imageUrl = `${immichConfig.baseUrl}/assets/${asset.id}/thumbnail?size=preview`;
 
                     const isBeingDragged =
@@ -5176,12 +5258,20 @@ function PhotoGridEditor({
                                     bottom: bottomStripHeight,
                                   }}
                                 >
-                                  <img
-                                    src={imageUrl}
-                                    alt={asset.originalFileName}
-                                    className="object-cover w-full h-full"
-                                    loading="lazy"
-                                  />
+                                  {isMissingPhoto ? (
+                                    <div className="w-full h-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                                      <span className="text-gray-500 dark:text-gray-400 text-sm opacity-50">
+                                        {t(language, "missingPhoto")}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <img
+                                      src={imageUrl}
+                                      alt={asset.originalFileName}
+                                      className="object-cover w-full h-full"
+                                      loading="lazy"
+                                    />
+                                  )}
                                 </div>
                                 {captionInput(0, 0)}
                                 {dateStrip(0, 0)}
@@ -5207,12 +5297,20 @@ function PhotoGridEditor({
                                   bottom: frameInset + bottomStripHeight,
                                 }}
                               >
-                                <img
-                                  src={imageUrl}
-                                  alt={asset.originalFileName}
-                                  className="object-contain w-full h-full"
-                                  loading="lazy"
-                                />
+                                {isMissingPhoto ? (
+                                  <div className="w-full h-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                                    <span className="text-gray-500 dark:text-gray-400 text-sm opacity-50">
+                                      {t(language, "missingPhoto")}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <img
+                                    src={imageUrl}
+                                    alt={asset.originalFileName}
+                                    className="object-contain w-full h-full"
+                                    loading="lazy"
+                                  />
+                                )}
                               </div>
                               {captionInput(frameInset, frameInset * 0.3)}
                               {dateStrip(frameInset, frameInset * 0.3)}
@@ -5301,6 +5399,28 @@ function PhotoGridEditor({
                           >
                             Set as back cover
                           </div>
+                        )}
+
+                        {/* Delete placeholder button - only for missing photos */}
+                        {isMissingPhoto && (
+                          <button
+                            className="absolute top-2 left-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg z-10 flex items-center justify-center text-xs font-bold transition-colors"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              // Remove this asset from missing list and from the layout
+                              setMissingAssetIds(prev => {
+                                const next = new Set(prev);
+                                next.delete(asset.id);
+                                return next;
+                              });
+                              // Remove from assets array so it disappears from the layout
+                              setAssets(prev => prev.filter(a => a.id !== asset.id));
+                            }}
+                            title={t(language, "deletePlaceholder")}
+                          >
+                            ✕
+                          </button>
                         )}
 
                         {/* Customization indicator */}
@@ -6009,6 +6129,81 @@ function PhotoGridEditor({
               >
                 {t(language, "flatten")}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bottom Panel - Pages with Placeholders */}
+      {missingAssetIds.size > 0 && (
+        <div 
+          className="fixed bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 shadow-lg z-30 overflow-y-auto custom-scrollbar"
+          style={{
+            left: sidebarCollapsed ? '64px' : '320px',
+            right: historyCollapsed ? '64px' : '320px',
+            maxHeight: '200px',
+          }}
+        >
+          <div className="p-4">
+            <div className="flex flex-col gap-3">
+              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                {t(language, "pagesWithPlaceholders")}:
+              </span>
+              <div className="flex flex-wrap gap-3">
+                {pages
+                  .filter(page => 
+                    page.photos.some(photo => 
+                      photo.asset && missingAssetIds.has(photo.asset.id)
+                    )
+                  )
+                  .map(page => {
+                    // Get up to 4 photos from this page for thumbnail
+                    const thumbnailPhotos = page.photos.slice(0, 4).filter(p => p.asset);
+                    
+                    return (
+                      <button
+                        key={page.pageNumber}
+                        onClick={() => {
+                          const element = document.querySelector(`[data-page-number="${page.pageNumber}"]`);
+                          element?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }}
+                        className="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      >
+                        <div className="w-20 h-24 bg-gray-200 dark:bg-gray-700 rounded border-2 border-red-400 dark:border-red-600 overflow-hidden relative">
+                          {thumbnailPhotos.length > 0 ? (
+                            <div className={`grid h-full ${thumbnailPhotos.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-0.5`}>
+                              {thumbnailPhotos.map((photo, idx) => {
+                                const isMissing = photo.asset && missingAssetIds.has(photo.asset.id);
+                                return (
+                                  <div key={idx} className="relative bg-gray-300 dark:bg-gray-600">
+                                    {isMissing ? (
+                                      <div className="absolute inset-0 flex items-center justify-center bg-gray-400 dark:bg-gray-600">
+                                        <span className="text-red-500 text-xl font-bold">✕</span>
+                                      </div>
+                                    ) : (
+                                      <img
+                                        src={`${immichConfig.baseUrl}/assets/${photo.asset!.id}/thumbnail?size=preview`}
+                                        alt=""
+                                        className="w-full h-full object-cover"
+                                      />
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-center h-full">
+                              <span className="text-xs text-gray-500 dark:text-gray-400">Empty</span>
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                          Page {page.pageNumber}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
             </div>
           </div>
         </div>

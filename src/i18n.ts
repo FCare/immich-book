@@ -174,6 +174,11 @@ export const translations = {
     
     // Captions
     addCaption: "Ajouter une légende...",
+    
+    // Placeholders
+    pagesWithPlaceholders: "Pages avec photos manquantes",
+    missingPhoto: "Photo manquante",
+    deletePlaceholder: "Supprimer ce placeholder",
   },
   en: {
     // Header
@@ -348,6 +353,11 @@ export const translations = {
     
     // Captions
     addCaption: "Add caption...",
+    
+    // Placeholders
+    pagesWithPlaceholders: "Pages with missing photos",
+    missingPhoto: "Missing photo",
+    deletePlaceholder: "Delete this placeholder",
   },
 };
 
