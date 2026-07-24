@@ -3401,8 +3401,52 @@ function PhotoGridEditor({
           >
             {/* Back Cover (left) */}
             <View style={{ width: coverPageWidth, height: coverPageHeight, position: "relative" }}>
-              {/* TODO: Render back cover content here */}
-              <Text style={{ fontSize: 12, color: "#999" }}>Back Cover</Text>
+              {/* Render back cover content - copy from standalone back cover */}
+              {backCoverLayout === "text-only" && backCoverText && (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    paddingHorizontal: coverPageWidth * 0.1,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: coverPageWidth * 0.3,
+                      height: 1,
+                      backgroundColor: SCRAPBOOK.ink,
+                      opacity: 0.3,
+                      marginBottom: 16,
+                    }}
+                  />
+                  <Text
+                    style={{
+                      fontFamily: "Caveat",
+                      fontWeight: 600,
+                      fontSize: coverPageWidth * 0.09,
+                      color: SCRAPBOOK.ink,
+                      textAlign: "center",
+                    }}
+                  >
+                    {backCoverText}
+                  </Text>
+                  <View
+                    style={{
+                      width: coverPageWidth * 0.3,
+                      height: 1,
+                      backgroundColor: SCRAPBOOK.ink,
+                      opacity: 0.3,
+                      marginTop: 16,
+                    }}
+                  />
+                </View>
+              )}
             </View>
 
             {/* Spine (middle) */}
@@ -3430,8 +3474,7 @@ function PhotoGridEditor({
 
             {/* Front Cover (right) */}
             <View style={{ width: coverPageWidth, height: coverPageHeight, position: "relative" }}>
-              {/* TODO: Render front cover content here */}
-              <Text style={{ fontSize: 12, color: "#999" }}>Front Cover</Text>
+              {renderFrontCoverContent()}
             </View>
           </View>
         </Page>
