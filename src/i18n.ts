@@ -41,6 +41,7 @@ export const translations = {
     spacing: "Espacement",
     filterVideos: "Exclure les vidéos",
     forceTimeline: "Forcer l'ordre chronologique",
+    shufflePageLayout: "Essayer un autre arrangement pour cette page",
     
     // Presentation settings
     showDates: "Afficher les dates",
@@ -207,6 +208,7 @@ export const translations = {
     spacing: "Spacing",
     filterVideos: "Exclude Videos",
     forceTimeline: "Force Timeline Order",
+    shufflePageLayout: "Try another arrangement for this page",
     
     // Presentation settings
     showDates: "Show Dates",

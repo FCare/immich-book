@@ -2212,7 +2212,7 @@ function PhotoGridEditor({
       <div className="inline-flex items-center gap-0.5 px-1.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-sm">
         <button
           onClick={() => handleShuffleLayout(logicalPageNumber)}
-          title="Try another arrangement for this page"
+          title={t(language, "shufflePageLayout")}
           className="w-7 h-7 rounded-full flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/20 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors"
         >
           <svg
