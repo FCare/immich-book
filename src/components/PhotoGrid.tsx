@@ -4878,8 +4878,8 @@ function PhotoGridEditor({
                   <ToggleSwitch
                     checked={separatedCover}
                     onChange={setSeparatedCover}
-                    label="Separated Cover (for Blurb, etc.)"
-                    sublabel="Creates a single page with back cover, spine, and front cover combined"
+                    label={t(language, "separatedCover")}
+                    sublabel={t(language, "separatedCoverHint")}
                   />
                   {separatedCover && (
                     <>
@@ -4888,7 +4888,7 @@ function PhotoGridEditor({
                           htmlFor="spineWidth"
                           className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                         >
-                          Spine Width (mm)
+                          {t(language, "spineWidth")}
                         </label>
                         <input
                           type="number"
@@ -4906,7 +4906,7 @@ function PhotoGridEditor({
                           htmlFor="spineColor"
                           className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                         >
-                          Spine Color
+                          {t(language, "spineColor")}
                         </label>
                         <input
                           type="color"
@@ -4921,7 +4921,7 @@ function PhotoGridEditor({
                           htmlFor="spineTitle"
                           className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                         >
-                          Spine Title
+                          {t(language, "spineTitle")}
                         </label>
                         <input
                           type="text"
