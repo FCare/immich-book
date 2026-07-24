@@ -143,6 +143,9 @@ export const translations = {
     
     // Page navigation
     pages: "pages",
+    
+    // Captions
+    addCaption: "Ajouter une légende...",
   },
   en: {
     // Header
@@ -286,6 +289,9 @@ export const translations = {
     
     // Page navigation
     pages: "pages",
+    
+    // Captions
+    addCaption: "Add caption...",
   },
 };
 

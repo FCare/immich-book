@@ -4634,7 +4634,6 @@ function PhotoGridEditor({
                         ]
                       : [{ key: page.pageNumber, left: 0, width: displayWidth }]
                     ).map((band) => {
-                      if (!pageCaptions.has(band.key)) return null;
                       // Text size is the priority: the chosen font size is
                       // always honored, and the band grows to fit it if
                       // the page margin alone isn't tall enough. Uses the
@@ -4658,11 +4657,16 @@ function PhotoGridEditor({
                           onChange={(e) => {
                             setPageCaptions((prev) => {
                               const next = new Map(prev);
-                              next.set(band.key, e.target.value);
+                              if (e.target.value.trim() === "") {
+                                next.delete(band.key);
+                              } else {
+                                next.set(band.key, e.target.value);
+                              }
                               return next;
                             });
                           }}
-                          className="absolute bg-transparent text-center focus:outline-none focus:bg-white/70 rounded"
+                          placeholder={t(language, "addCaption")}
+                          className="absolute bg-transparent text-center focus:outline-none focus:bg-white/70 dark:focus:bg-gray-800/70 rounded placeholder:text-gray-400 dark:placeholder:text-gray-600"
                           style={{
                             left: `${band.left}px`,
                             ...(captionAtBottom(band.key)
