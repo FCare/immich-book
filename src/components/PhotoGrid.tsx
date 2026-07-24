@@ -22,6 +22,7 @@ import {
   pixelsToMm,
 } from "../utils/pageLayout";
 import type { ImmichConfig } from "../types";
+import { t, type Language } from "../i18n";
 import roboto400 from "@fontsource/roboto/files/roboto-latin-400-normal.woff?url";
 import roboto500 from "@fontsource/roboto/files/roboto-latin-500-normal.woff?url";
 import caveat500 from "@fontsource/caveat/files/caveat-latin-500-normal.woff?url";
@@ -1291,6 +1292,84 @@ function PhotoGridEditor({
   // available together with no separate mode.
   const [swapFirstId, setSwapFirstId] = useState<string | null>(null);
 
+  // Confirmation dialog for click-to-swap
+  const [swapConfirmation, setSwapConfirmation] = useState<{
+    firstId: string;
+    secondId: string;
+  } | null>(null);
+
+  // History of operations for undo functionality
+  type HistoryOperation =
+    | {
+        type: "swap-same-page";
+        pageNumber: number;
+        order: string[];
+        prevOrder: string[];
+        assetIds: [string, string];
+        timestamp: number;
+      }
+    | {
+        type: "swap-text-cards";
+        assetIds: [string, string];
+        prevContents: [string, string];
+        timestamp: number;
+      }
+    | {
+        type: "swap-cross-page";
+        assetIds: [string, string];
+        prevOrder: string[];
+        draggedPage: number;
+        targetPage: number;
+        timestamp: number;
+      }
+    | {
+        type: "shuffle-layout";
+        pageNumber: number;
+        prevVariant: number;
+        newVariant: number;
+        timestamp: number;
+      }
+    | {
+        type: "set-page-count";
+        pageNumber: number;
+        prevCount: number | null;
+        newCount: number | null;
+        timestamp: number;
+      }
+    | {
+        type: "set-text-card-count";
+        pageNumber: number;
+        prevCount: number;
+        newCount: number;
+        timestamp: number;
+      };
+
+  // History - stored in localStorage per album
+  const [history, setHistory] = useState<HistoryOperation[]>(() => {
+    try {
+      const stored = localStorage.getItem(`immich-book-history-${album.id}`);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [historyCollapsed, setHistoryCollapsed] = useState(true);
+  const [showResetConfirmation, setShowResetConfirmation] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem(`immich-book-history-${album.id}`, JSON.stringify(history));
+  }, [history, album.id]);
+
+  // Language preference - stored in localStorage
+  const [language, setLanguage] = useState<Language>(() => {
+    const stored = localStorage.getItem("immich-book-language");
+    return (stored === "fr" || stored === "en" ? stored : "fr") as Language;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("immich-book-language", language);
+  }, [language]);
+
   // Width available to the preview column - pages (especially combined
   // spreads) are scaled down to fit it, rather than relying on horizontal
   // scroll, which left the right-hand page looking cut off/undersized.
@@ -1473,11 +1552,24 @@ function PhotoGridEditor({
   // pattern (e.g. a 3-photo page can be tiled several different ways
   // depending on their formats).
   const handleShuffleLayout = (logicalPageNumber: number) => {
+    const prevVariant = layoutVariants.get(logicalPageNumber) || 0;
+    const newVariant = prevVariant + 1;
     setLayoutVariants((prev) => {
       const next = new Map(prev);
-      next.set(logicalPageNumber, (prev.get(logicalPageNumber) || 0) + 1);
+      next.set(logicalPageNumber, newVariant);
       return next;
     });
+    // Record in history
+    setHistory((prev) => [
+      {
+        type: "shuffle-layout",
+        pageNumber: logicalPageNumber,
+        prevVariant,
+        newVariant,
+        timestamp: Date.now(),
+      },
+      ...prev,
+    ]);
   };
 
   // Force (or, with null, stop forcing) how many photos land on a page
@@ -1485,6 +1577,7 @@ function PhotoGridEditor({
     logicalPageNumber: number,
     count: number | null,
   ) => {
+    const prevCount = pageCounts.get(logicalPageNumber) ?? null;
     setPageCounts((prev) => {
       const next = new Map(prev);
       if (count === null) {
@@ -1494,6 +1587,17 @@ function PhotoGridEditor({
       }
       return next;
     });
+    // Record in history
+    setHistory((prev) => [
+      {
+        type: "set-page-count",
+        pageNumber: logicalPageNumber,
+        prevCount,
+        newCount: count,
+        timestamp: Date.now(),
+      },
+      ...prev,
+    ]);
   };
 
   // Set how many of a page's slots are text cards instead of photos (0-3)
@@ -1501,6 +1605,7 @@ function PhotoGridEditor({
     logicalPageNumber: number,
     count: number,
   ) => {
+    const prevCount = textCardCounts.get(logicalPageNumber) || 0;
     setTextCardCounts((prev) => {
       const next = new Map(prev);
       if (count === 0) {
@@ -1510,6 +1615,105 @@ function PhotoGridEditor({
       }
       return next;
     });
+    // Record in history
+    setHistory((prev) => [
+      {
+        type: "set-text-card-count",
+        pageNumber: logicalPageNumber,
+        prevCount,
+        newCount: count,
+        timestamp: Date.now(),
+      },
+      ...prev,
+    ]);
+  };
+
+  // Undo the last operation from history
+  const handleUndo = () => {
+    if (history.length === 0) return;
+
+    const [lastOp, ...remainingHistory] = history;
+
+    switch (lastOp.type) {
+      case "swap-same-page":
+        setSlotOverrides((prev) =>
+          new Map(prev).set(lastOp.pageNumber, lastOp.prevOrder)
+        );
+        setManuallyMovedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(lastOp.assetIds[0]);
+          next.delete(lastOp.assetIds[1]);
+          return next;
+        });
+        break;
+
+      case "swap-text-cards":
+        setTextCardContents((prev) => {
+          const next = new Map(prev);
+          const [id1, id2] = lastOp.assetIds;
+          const [text1, text2] = lastOp.prevContents;
+          if (text1) next.set(id1, text1);
+          else next.delete(id1);
+          if (text2) next.set(id2, text2);
+          else next.delete(id2);
+          return next;
+        });
+        setManuallyMovedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(lastOp.assetIds[0]);
+          next.delete(lastOp.assetIds[1]);
+          return next;
+        });
+        break;
+
+      case "swap-cross-page":
+        setCustomOrdering(lastOp.prevOrder);
+        setSlotOverrides((prev) => {
+          const next = new Map(prev);
+          next.delete(lastOp.draggedPage);
+          next.delete(lastOp.targetPage);
+          return next;
+        });
+        setManuallyMovedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(lastOp.assetIds[0]);
+          next.delete(lastOp.assetIds[1]);
+          return next;
+        });
+        break;
+
+      case "shuffle-layout":
+        setLayoutVariants((prev) =>
+          new Map(prev).set(lastOp.pageNumber, lastOp.prevVariant)
+        );
+        break;
+
+      case "set-page-count":
+        setPageCounts((prev) => {
+          const next = new Map(prev);
+          if (lastOp.prevCount === null) {
+            next.delete(lastOp.pageNumber);
+          } else {
+            next.set(lastOp.pageNumber, lastOp.prevCount);
+          }
+          return next;
+        });
+        break;
+
+      case "set-text-card-count":
+        setTextCardCounts((prev) => {
+          const next = new Map(prev);
+          if (lastOp.prevCount === 0) {
+            next.delete(lastOp.pageNumber);
+          } else {
+            next.set(lastOp.pageNumber, lastOp.prevCount);
+          }
+          return next;
+        });
+        break;
+    }
+
+    setHistory(remainingHistory);
   };
 
   // Drag & drop for reordering - implemented with pointer events and
@@ -1567,6 +1771,34 @@ function PhotoGridEditor({
     setCustomOrdering(null);
     setSlotOverrides(new Map());
     setManuallyMovedIds(new Set());
+  };
+
+  // Reset ALL modifications
+  const handleResetAll = () => {
+    // Reset ordering
+    setCustomOrdering(null);
+    setSlotOverrides(new Map());
+    setManuallyMovedIds(new Set());
+    
+    // Reset layout variants
+    setLayoutVariants(new Map());
+    
+    // Reset page counts
+    setPageCounts(new Map());
+    
+    // Reset text cards
+    setTextCardCounts(new Map());
+    setTextCardContents(new Map());
+    
+    // Reset captions
+    setPageCaptions(new Map());
+    setCardCaptions(new Map());
+    
+    // Clear history
+    setHistory([]);
+    
+    // Close confirmation dialog
+    setShowResetConfirmation(false);
   };
 
   // Filter assets based on user preferences (default order)
@@ -1720,6 +1952,7 @@ function PhotoGridEditor({
       const order = pages
         .find((p) => p.pageNumber === draggedPage)!
         .photos.map((p) => p.id);
+      const prevOrder = [...order];
       const di = order.indexOf(draggedAssetId);
       const ti = order.indexOf(targetAssetId);
       [order[di], order[ti]] = [order[ti], order[di]];
@@ -1730,15 +1963,27 @@ function PhotoGridEditor({
         next.add(targetAssetId);
         return next;
       });
+      // Record in history
+      setHistory((prev) => [
+        {
+          type: "swap-same-page",
+          pageNumber: draggedPage!,
+          order,
+          prevOrder,
+          assetIds: [draggedAssetId, targetAssetId],
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
     } else if (draggedIsText && targetIsText) {
       // Text cards are page-local slots (their id is tied to a page
       // number), not movable "assets" in the master sequence - so a
       // cross-page swap between two of them exchanges their written
       // content instead of relocating anything.
+      const draggedText = textCardContents.get(draggedAssetId) || "";
+      const targetText = textCardContents.get(targetAssetId) || "";
       setTextCardContents((prev) => {
         const next = new Map(prev);
-        const draggedText = prev.get(draggedAssetId) || "";
-        const targetText = prev.get(targetAssetId) || "";
         if (targetText) next.set(draggedAssetId, targetText);
         else next.delete(draggedAssetId);
         if (draggedText) next.set(targetAssetId, draggedText);
@@ -1751,8 +1996,19 @@ function PhotoGridEditor({
         next.add(targetAssetId);
         return next;
       });
+      // Record in history
+      setHistory((prev) => [
+        {
+          type: "swap-text-cards",
+          assetIds: [draggedAssetId, targetAssetId],
+          prevContents: [draggedText, targetText],
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
     } else if (!draggedIsText && !targetIsText) {
       const currentOrder = filteredAssets.map((a) => a.id);
+      const prevOrder = [...currentOrder];
       const i = currentOrder.indexOf(draggedAssetId);
       const j = currentOrder.indexOf(targetAssetId);
       [currentOrder[i], currentOrder[j]] = [
@@ -1774,6 +2030,18 @@ function PhotoGridEditor({
         next.add(targetAssetId);
         return next;
       });
+      // Record in history
+      setHistory((prev) => [
+        {
+          type: "swap-cross-page",
+          assetIds: [draggedAssetId, targetAssetId],
+          prevOrder,
+          draggedPage: draggedPage!,
+          targetPage: targetPage!,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
     }
     // A text card and a real photo on different pages can't trade
     // places: the text card's slot belongs to its page's layout,
@@ -1809,6 +2077,7 @@ function PhotoGridEditor({
       const targetAssetId = cardUnderPointer(event.clientX, event.clientY);
 
       if (targetAssetId && targetAssetId !== draggedAssetId) {
+        // Drag and drop - swap immediately without confirmation
         performSwap(draggedAssetId, targetAssetId);
         setSwapFirstId(null);
       } else if (targetAssetId === draggedAssetId) {
@@ -1817,8 +2086,11 @@ function PhotoGridEditor({
         } else if (swapFirstId === draggedAssetId) {
           setSwapFirstId(null);
         } else {
-          performSwap(swapFirstId, draggedAssetId);
-          setSwapFirstId(null);
+          // Click-to-swap - show confirmation dialog
+          setSwapConfirmation({
+            firstId: swapFirstId,
+            secondId: draggedAssetId,
+          });
         }
       }
 
@@ -3140,14 +3412,31 @@ function PhotoGridEditor({
   };
 
   const sidebarBrand = (
-    <div
-      className={`flex items-center gap-2 font-bold text-gray-900 dark:text-gray-50 ${sidebarCollapsed ? "justify-center" : ""}`}
+    <button
+      onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+      title={sidebarCollapsed ? t(language, "openPanel") : t(language, "closePanel")}
+      className={`flex items-center gap-2 font-bold text-gray-900 dark:text-gray-50 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors ${sidebarCollapsed ? "justify-center w-9 h-9" : "px-2 py-1.5"}`}
     >
       <span className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs font-extrabold flex-none">
         IB
       </span>
       {!sidebarCollapsed && <span className="text-sm">Immich Book</span>}
-    </div>
+    </button>
+  );
+
+  const sidebarLanguageToggle = (
+    <button
+      onClick={() => setLanguage(language === "fr" ? "en" : "fr")}
+      title="Change language / Changer de langue"
+      className={
+        sidebarCollapsed
+          ? "w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-colors text-xs font-bold"
+          : "flex items-center gap-2 px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 text-xs font-semibold transition-colors"
+      }
+    >
+      {language === "fr" ? "🇫🇷" : "🇬🇧"}
+      {!sidebarCollapsed && (language === "fr" ? " FR" : " EN")}
+    </button>
   );
 
   const sidebarThemeToggle = (
@@ -3188,6 +3477,8 @@ function PhotoGridEditor({
     </button>
   );
 
+
+
   return (
     <div className="flex h-screen overflow-hidden bg-white dark:bg-gray-950">
       <aside
@@ -3199,22 +3490,6 @@ function PhotoGridEditor({
           {sidebarCollapsed ? (
             <div className="flex flex-col items-center gap-3 py-4">
               {sidebarBrand}
-              <button
-                onClick={() => setSidebarCollapsed(false)}
-                title="Ouvrir le volet"
-                className="w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-colors"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="15"
-                  height="15"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </button>
               <div className="w-8 border-t border-gray-200 dark:border-gray-800" />
               <button
                 onClick={onBack}
@@ -3253,7 +3528,10 @@ function PhotoGridEditor({
                   </svg>
                 )}
               </button>
-              <div className="mt-auto">{sidebarThemeToggle}</div>
+              <div className="mt-auto flex flex-col gap-2">
+                {sidebarLanguageToggle}
+                {sidebarThemeToggle}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col gap-6 p-4 min-h-full">
@@ -3261,7 +3539,7 @@ function PhotoGridEditor({
                 {sidebarBrand}
                 <button
                   onClick={() => setSidebarCollapsed(true)}
-                  title="Réduire le volet"
+                  title={t(language, "closePanel")}
                   className="w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300 flex items-center justify-center transition-colors"
                 >
                   <svg
@@ -3316,12 +3594,12 @@ function PhotoGridEditor({
             [
               {
                 key: "page" as const,
-                label: "Page",
+                label: t(language, "tabPage"),
                 icon: <rect x="4" y="3" width="16" height="18" rx="2" />,
               },
               {
                 key: "layout" as const,
-                label: "Layout",
+                label: t(language, "tabLayout"),
                 icon: (
                   <>
                     <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -3331,7 +3609,7 @@ function PhotoGridEditor({
               },
               {
                 key: "presentation" as const,
-                label: "Presentation",
+                label: t(language, "tabPresentation"),
                 icon: (
                   <>
                     <circle cx="12" cy="12" r="9" />
@@ -3341,7 +3619,7 @@ function PhotoGridEditor({
               },
               {
                 key: "cover" as const,
-                label: "Cover",
+                label: t(language, "tabCover"),
                 icon: (
                   <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z" />
                 ),
@@ -3383,32 +3661,14 @@ function PhotoGridEditor({
             {swapFirstId && (
               <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 font-medium">
                 <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
-                Card selected - click another card to swap with it
+                {t(language, "cardSelected")}
                 <button
                   onClick={() => setSwapFirstId(null)}
                   className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full transition-colors font-medium"
                 >
-                  Cancel
+                  {t(language, "cancel")}
                 </button>
               </span>
-            )}
-
-            {(customOrdering !== null ||
-              slotOverrides.size > 0 ||
-              manuallyMovedIds.size > 0) && (
-              <>
-                <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 font-medium ml-2">
-                  <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
-                  Photos reordered
-                </span>
-                <button
-                  onClick={handleResetOrdering}
-                  title="Reset every photo's position and order back to automatic"
-                  className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full transition-colors font-medium"
-                >
-                  Reset order
-                </button>
-              </>
             )}
           </div>
         )}
@@ -3418,7 +3678,7 @@ function PhotoGridEditor({
             <div className="flex flex-col gap-5">
               <div>
                 <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-                  Imprimeur
+                  {t(language, "printer")}
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {PRINTERS.map((printer) => {
@@ -3459,7 +3719,7 @@ function PhotoGridEditor({
                   categories.length > 1 && (
                     <div>
                       <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-                        Catégorie
+                        {t(language, "category")}
                       </span>
                       <div className="flex flex-wrap gap-1.5">
                         {categories.map((category) => (
@@ -3482,7 +3742,7 @@ function PhotoGridEditor({
               })()}
               <div>
                 <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-                  Format
+                  {t(language, "format")}
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {selectedPrinter.formats
@@ -3713,22 +3973,22 @@ function PhotoGridEditor({
                 <ToggleSwitch
                   checked={filterVideos}
                   onChange={setFilterVideos}
-                  label="Exclude Videos"
+                  label={t(language, "filterVideos")}
                 />
                 <ToggleSwitch
                   checked={forceTimeline}
                   onChange={setForceTimeline}
-                  label="Force Timeline Order"
+                  label={t(language, "forceTimeline")}
                 />
                 <ToggleSwitch
                   checked={showDates}
                   onChange={setShowDates}
-                  label="Show Dates"
+                  label={t(language, "showDates")}
                 />
                 <ToggleSwitch
                   checked={showCaptions}
                   onChange={setShowCaptions}
-                  label="Page Captions"
+                  label={t(language, "showCaptions")}
                 />
               </div>
               <div className="flex flex-wrap items-end gap-5">
@@ -3737,7 +3997,7 @@ function PhotoGridEditor({
                     htmlFor="fontSize"
                     className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                   >
-                    Font Size
+                    {t(language, "fontSize")}
                   </label>
                   <select
                     id="fontSize"
@@ -3761,7 +4021,7 @@ function PhotoGridEditor({
               </div>
               <div>
                 <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-                  Card Style
+                  {t(language, "cardStyle")}
                 </span>
                 <div className="flex flex-wrap gap-3">
                   {CARD_STYLES.map((style) => (
@@ -3836,7 +4096,7 @@ function PhotoGridEditor({
               </div>
               <div>
                 <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-                  Background
+                  {t(language, "pageBackground")}
                 </span>
                 <div className="flex flex-col gap-2.5">
                   {PAGE_BACKGROUND_GROUPS.map((group) => (
@@ -3894,7 +4154,7 @@ function PhotoGridEditor({
                       htmlFor="coverTitle"
                       className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                     >
-                      Title
+                      {t(language, "title")}
                     </label>
                     <input
                       type="text"
@@ -3907,7 +4167,7 @@ function PhotoGridEditor({
                   </div>
                   <div>
                     <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-                      Layout
+                      {t(language, "layout")}
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                       {COVER_LAYOUTS.map((layout) => (
@@ -3927,7 +4187,7 @@ function PhotoGridEditor({
                   </div>
                   <div>
                     <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-                      Back cover layout
+                      {t(language, "backCoverLayout")}
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                       {COVER_LAYOUTS.map((layout) => (
@@ -3949,19 +4209,18 @@ function PhotoGridEditor({
                     backCoverLayout === "full-bleed") && (
                     <div>
                       <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-                        Back cover photo
+                        {t(language, "backCoverPhotoLabel")}
                       </span>
                       {backCoverAsset ? (
                         <button
                           onClick={() => setBackCoverNoPhoto(true)}
                           className="px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-red-300 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                         >
-                          Remove photo
+                          {t(language, "removePhoto")}
                         </button>
                       ) : (
                         <p className="text-xs text-gray-400 dark:text-gray-500">
-                          No photo - hover a photo below and click "Set as
-                          back cover" to add one.
+                          {t(language, "noPhotoHover")}
                         </p>
                       )}
                     </div>
@@ -4009,11 +4268,11 @@ function PhotoGridEditor({
                   onClick={handleGenerateCaptions}
                   disabled={isGeneratingCaptions}
                   className="px-4 py-2 rounded-full bg-violet-600 text-white hover:bg-violet-700 disabled:bg-violet-400 dark:disabled:bg-violet-800 disabled:cursor-not-allowed text-sm font-semibold shadow-sm transition-colors"
-                  title="Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)"
+                  title={language === "fr" ? "Génère une légende par page à partir des descriptions Immich des photos de la page (via thebrain)" : "Generates a caption per page from Immich photo descriptions (via thebrain)"}
                 >
                   {isGeneratingCaptions
-                    ? `Génération... ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
-                    : "Générer les légendes"}
+                    ? `${t(language, "generating")} ${captionProgress?.done ?? 0}/${captionProgress?.total ?? 0}`
+                    : t(language, "generateCaptions")}
                 </button>
                 {captionError && (
                   <p className="text-xs text-red-600 dark:text-red-400">
@@ -4028,9 +4287,9 @@ function PhotoGridEditor({
                   {isGeneratingPdf && <PdfSpinner />}
                   {isGeneratingPdf
                     ? pdfProgress
-                      ? `Génération... ${pdfProgress.done}/${pdfProgress.total}`
-                      : "Génération..."
-                    : "Générer le PDF"}
+                      ? `${t(language, "generating")} ${pdfProgress.done}/${pdfProgress.total}`
+                      : t(language, "generating")
+                    : t(language, "generatePdf")}
                 </button>
                 {pdfUrl && !isGeneratingPdf && (
                   <a
@@ -4038,7 +4297,7 @@ function PhotoGridEditor({
                     download={`${sanitizeFileName(album.albumName)}.pdf`}
                     className="px-5 py-2 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-semibold shadow-sm transition-colors text-center"
                   >
-                    Télécharger le PDF
+                    {t(language, "downloadPdf")}
                   </a>
                 )}
               </div>
@@ -4055,7 +4314,7 @@ function PhotoGridEditor({
               {selectedPrinter.url && (
                 <div className="flex flex-col gap-2">
                   <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                    Imprimer ce PDF chez
+                    {t(language, "printWith")}
                   </span>
                   <a
                     href={selectedPrinter.url}
@@ -4079,7 +4338,8 @@ function PhotoGridEditor({
                 </div>
               )}
 
-              <div className="mt-auto pt-2 flex justify-start">
+              <div className="mt-auto pt-2 flex gap-2 justify-start flex-wrap">
+                {sidebarLanguageToggle}
                 {sidebarThemeToggle}
               </div>
             </div>
@@ -4087,26 +4347,7 @@ function PhotoGridEditor({
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto relative">
-        {sidebarCollapsed && (
-          <button
-            onClick={() => setSidebarCollapsed(false)}
-            title="Ouvrir le volet"
-            className="fixed top-4 left-[76px] z-10 w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center shadow-sm transition-colors"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              width="15"
-              height="15"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-            >
-              <path d="M9 18l6-6-6-6" />
-            </svg>
-          </button>
-        )}
-
+      <main className="flex-1 overflow-y-auto custom-scrollbar relative">
       {/* Live Preview - always shown; the generated PDF (if any)
           appears below once ready, rather than replacing this editor. */}
         <div
@@ -4151,7 +4392,7 @@ function PhotoGridEditor({
                 <div className="relative">
                   <div className="text-center mb-2">
                     <span className="inline-block px-3 py-1 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400 text-sm rounded-full font-medium">
-                      Cover
+                      {t(language, "cover")}
                     </span>
                   </div>
                   <div
@@ -4579,7 +4820,7 @@ function PhotoGridEditor({
                           {isReordered && (
                             <div
                               className="absolute top-2 left-2 w-2 h-2 bg-green-500 rounded-full shadow-lg z-10"
-                              title="Card reordered"
+                              title={t(language, "cardReordered")}
                             />
                           )}
 
@@ -4592,9 +4833,9 @@ function PhotoGridEditor({
                                 e.stopPropagation();
                                 handleResetCard(photoBox.id);
                               }}
-                              title="Reset order"
+                              title={t(language, "resetOrder")}
                             >
-                              Reset
+                              {t(language, "resetOrder")}
                             </div>
                           )}
                         </div>
@@ -4802,9 +5043,9 @@ function PhotoGridEditor({
                         {coverAsset?.id === asset.id ? (
                           <div
                             className="absolute top-2 right-2 bg-amber-500 text-white px-2 py-0.5 rounded shadow text-xs font-medium z-10"
-                            title="This is the cover photo"
+                            title={language === "fr" ? "Ceci est la photo de couverture" : "This is the cover photo"}
                           >
-                            ★ Cover
+                            ★ {t(language, "cover")}
                           </div>
                         ) : (
                           <div
@@ -4852,7 +5093,7 @@ function PhotoGridEditor({
                         {isReordered && (
                           <div
                             className="absolute top-2 left-2 w-2 h-2 bg-green-500 rounded-full shadow-lg z-10"
-                            title="Image reordered"
+                            title={t(language, "imageReordered")}
                           />
                         )}
 
@@ -4865,9 +5106,9 @@ function PhotoGridEditor({
                               e.stopPropagation();
                               handleResetCard(asset.id);
                             }}
-                            title="Reset order"
+                            title={t(language, "resetOrder")}
                           >
-                            Reset
+                            {t(language, "resetOrder")}
                           </div>
                         )}
                       </div>
@@ -4920,7 +5161,7 @@ function PhotoGridEditor({
                 <div className="relative">
                   <div className="text-center mb-2">
                     <span className="inline-block px-3 py-1 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400 text-sm rounded-full font-medium">
-                      Back Cover
+                      {t(language, "backCoverLabel")}
                     </span>
                   </div>
                   <div
@@ -5132,6 +5373,242 @@ function PhotoGridEditor({
         </div>
       )}
       </main>
+
+      {/* History Panel - Right Side */}
+      <aside
+        className={`flex-none flex flex-col border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 transition-all duration-200 overflow-hidden ${
+          historyCollapsed ? "w-16" : "w-80"
+        }`}
+      >
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          {historyCollapsed ? (
+            <div className="flex flex-col items-center gap-3 py-4">
+              <button
+                onClick={() => setHistoryCollapsed(false)}
+                title={t(language, "history")}
+                className="w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-colors relative"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                >
+                  <path d="M3 7v6h6M21 17v-6h-6" />
+                  <path d="M20.49 9A9 9 0 0 0 5.64 5.64L3 8m18 8l-2.64 2.36A9 9 0 0 1 3.51 15" />
+                </svg>
+                {history.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                    {history.length}
+                  </span>
+                )}
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 p-4 min-h-full">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
+                  {t(language, "historyTitle")}
+                </h2>
+                <button
+                  onClick={() => setHistoryCollapsed(true)}
+                  title={t(language, "closePanel")}
+                  className="w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300 flex items-center justify-center transition-colors"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                  >
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Reset All button */}
+              {history.length > 0 && (
+                <div>
+                  <button
+                    onClick={() => setShowResetConfirmation(true)}
+                    className="w-full px-4 py-2 rounded-lg border-2 border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                    {t(language, "resetAll")}
+                  </button>
+                </div>
+              )}
+
+              {history.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
+                  {t(language, "noOperations")}
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto -mx-4 px-4 space-y-2">
+              {history.map((op, index) => {
+                const timeAgo = Math.floor((Date.now() - op.timestamp) / 1000);
+                const timeStr =
+                  timeAgo < 60
+                    ? `${timeAgo}${t(language, "timeAgo_seconds")}`
+                    : timeAgo < 3600
+                      ? `${Math.floor(timeAgo / 60)}${t(language, "timeAgo_minutes")}`
+                      : `${Math.floor(timeAgo / 3600)}${t(language, "timeAgo_hours")}`;
+
+                let description = "";
+                switch (op.type) {
+                  case "swap-same-page":
+                    description = `${t(language, "historySwapSamePage")} ${op.pageNumber}`;
+                    break;
+                  case "swap-text-cards":
+                    description = t(language, "historySwapTextCards");
+                    break;
+                  case "swap-cross-page":
+                    description = `${t(language, "historySwapCrossPage")} ${op.draggedPage} ${t(language, "historySwapCrossPageDetail")} ${op.targetPage}`;
+                    break;
+                  case "shuffle-layout":
+                    description = `${t(language, "historyShuffleLayout")} ${op.pageNumber}`;
+                    break;
+                  case "set-page-count":
+                    description = `${t(language, "historySetPageCount")} ${op.pageNumber} ${t(language, "historySetPageCountTo")} ${op.newCount ?? t(language, "historySetPageCountAuto")}`;
+                    break;
+                  case "set-text-card-count":
+                    description = `${t(language, "historySetTextCardCount")} ${op.pageNumber} ${t(language, "historySetPageCountTo")} ${op.newCount}`;
+                    break;
+                }
+
+                return (
+                  <div
+                    key={index}
+                    className={`p-3 rounded-lg border ${
+                      index === 0
+                        ? "border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30"
+                        : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/30"
+                    }`}
+                  >
+                    <div className="text-sm text-gray-900 dark:text-gray-50 font-medium">
+                      {description}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {timeStr}
+                    </div>
+                  </div>
+                );
+              })}
+                </div>
+              )}
+
+              {history.length > 0 && (
+                <div className="mt-auto pt-4 border-t border-gray-200 dark:border-gray-800">
+                  <button
+                    onClick={handleUndo}
+                    className="w-full px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M3 7v6h6M21 17v-6h-6" />
+                      <path d="M20.49 9A9 9 0 0 0 5.64 5.64L3 8m18 8l-2.64 2.36A9 9 0 0 1 3.51 15" />
+                    </svg>
+                    {t(language, "undoLastAction")}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* Swap Confirmation Dialog */}
+      {swapConfirmation && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-800">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-3">
+              {t(language, "swapConfirmTitle")}
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+              {t(language, "swapConfirmMessage")}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setSwapConfirmation(null);
+                  setSwapFirstId(null);
+                }}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium text-sm transition-colors"
+              >
+                {t(language, "cancel")}
+              </button>
+              <button
+                onClick={() => {
+                  if (swapConfirmation) {
+                    performSwap(
+                      swapConfirmation.firstId,
+                      swapConfirmation.secondId
+                    );
+                  }
+                  setSwapConfirmation(null);
+                  setSwapFirstId(null);
+                }}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm transition-colors"
+              >
+                {t(language, "swapConfirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset All Confirmation Dialog */}
+      {showResetConfirmation && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-800">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-3">
+              {t(language, "resetAllConfirmTitle")}
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              {t(language, "resetAllConfirmMessage")}
+            </p>
+            <ul className="text-sm text-gray-600 dark:text-gray-400 mb-6 space-y-1">
+              <li>{t(language, "resetAllConfirmList1")}</li>
+              <li>{t(language, "resetAllConfirmList2")}</li>
+              <li>{t(language, "resetAllConfirmList3")}</li>
+              <li>{t(language, "resetAllConfirmList4")}</li>
+            </ul>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowResetConfirmation(false)}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium text-sm transition-colors"
+              >
+                {t(language, "cancel")}
+              </button>
+              <button
+                onClick={handleResetAll}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium text-sm transition-colors"
+              >
+                {t(language, "resetAll")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
