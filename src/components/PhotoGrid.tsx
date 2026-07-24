@@ -686,6 +686,8 @@ interface AlbumConfig extends GlobalConfig {
   spineColor: string;
   // Text color for the spine title
   spineTextColor: string;
+  // Font size for spine title in points
+  spineTextSize: number;
   // Title on spine (written vertically)
   spineTitle: string;
   // Empty string falls back to the album's own name at render time.
@@ -781,6 +783,7 @@ async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     spineWidth: 10,
     spineColor: "#000000",
     spineTextColor: "#FFFFFF",
+    spineTextSize: 18,
     spineTitle: "",
     coverTitle: "",
     coverAssetId: null,
@@ -1290,6 +1293,7 @@ function PhotoGridEditor({
   const [spineWidth, setSpineWidth] = useState(initialConfig.spineWidth);
   const [spineColor, setSpineColor] = useState(initialConfig.spineColor);
   const [spineTextColor, setSpineTextColor] = useState(initialConfig.spineTextColor);
+  const [spineTextSize, setSpineTextSize] = useState(initialConfig.spineTextSize);
   const [spineTitle, setSpineTitle] = useState(initialConfig.spineTitle || album.albumName);
   const [coverTitle, setCoverTitle] = useState(
     initialConfig.coverTitle || album.albumName,
@@ -1661,6 +1665,7 @@ function PhotoGridEditor({
       spineWidth,
       spineColor,
       spineTextColor,
+      spineTextSize,
       spineTitle,
       coverTitle,
       coverAssetId,
@@ -1701,6 +1706,7 @@ function PhotoGridEditor({
     spineWidth,
     spineColor,
     spineTextColor,
+    spineTextSize,
     spineTitle,
     coverTitle,
     coverAssetId,
@@ -3661,7 +3667,7 @@ function PhotoGridEditor({
               <Text
                 style={{
                   fontFamily: "Caveat",
-                  fontSize: spineWidthPt * 0.7,
+                  fontSize: spineTextSize,
                   color: spineTextColor,
                   transform: "rotate(-90deg)",
                 }}
@@ -5441,6 +5447,25 @@ function PhotoGridEditor({
                       </div>
                       <div>
                         <label
+                          htmlFor="spineTextSize"
+                          className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+                        >
+                          {t(language, "spineTextSize")}
+                        </label>
+                        <input
+                          type="number"
+                          id="spineTextSize"
+                          value={spineTextSize}
+                          onChange={(e) => setSpineTextSize(Number(e.target.value))}
+                          min="8"
+                          max="48"
+                          step="1"
+                          className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-20"
+                        />
+                        <span className="ml-1.5 text-xs text-gray-400 dark:text-gray-500">pt</span>
+                      </div>
+                      <div>
+                        <label
                           htmlFor="spineTitle"
                           className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                         >
@@ -5820,7 +5845,7 @@ function PhotoGridEditor({
                         style={{
                           transform: "rotate(-90deg)",
                           fontFamily: "Caveat",
-                          fontSize: `${Math.max(10, (spineWidthPt * scale) * 0.6)}px`,
+                          fontSize: `${spineTextSize * scale}px`,
                           color: spineTextColor,
                         }}
                       >
