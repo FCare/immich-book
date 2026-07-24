@@ -4489,7 +4489,25 @@ function PhotoGridEditor({
               ) => (
                 <input
                   value={coverTitle}
+                  onFocus={(e) => {
+                    e.target.dataset.initialValue = coverTitle;
+                  }}
                   onChange={(e) => setCoverTitle(e.target.value)}
+                  onBlur={(e) => {
+                    const prevText = e.target.dataset.initialValue || "";
+                    const newText = e.target.value.trim();
+                    if (prevText !== newText) {
+                      setHistory((prev) => [
+                        {
+                          type: "edit-cover-title",
+                          prevText,
+                          newText,
+                          timestamp: Date.now(),
+                        },
+                        ...prev,
+                      ]);
+                    }
+                  }}
                   placeholder={album.albumName}
                   className={`text-center bg-transparent focus:outline-none rounded w-[90%] ${extraClassName}`}
                   style={{
@@ -5313,7 +5331,25 @@ function PhotoGridEditor({
                 <input
                   type="text"
                   value={backCoverText}
+                  onFocus={(e) => {
+                    e.target.dataset.initialValue = backCoverText;
+                  }}
                   onChange={(e) => setBackCoverText(e.target.value)}
+                  onBlur={(e) => {
+                    const prevText = e.target.dataset.initialValue || "";
+                    const newText = e.target.value.trim();
+                    if (prevText !== newText) {
+                      setHistory((prev) => [
+                        {
+                          type: "edit-back-cover-text",
+                          prevText,
+                          newText,
+                          timestamp: Date.now(),
+                        },
+                        ...prev,
+                      ]);
+                    }
+                  }}
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
                   className={`text-center bg-transparent focus:outline-none rounded w-[90%] ${extraClassName}`}
@@ -5402,9 +5438,27 @@ function PhotoGridEditor({
                             <input
                               type="text"
                               value={backCoverText}
+                              onFocus={(e) => {
+                                e.target.dataset.initialValue = backCoverText;
+                              }}
                               onChange={(e) =>
                                 setBackCoverText(e.target.value)
                               }
+                              onBlur={(e) => {
+                                const prevText = e.target.dataset.initialValue || "";
+                                const newText = e.target.value.trim();
+                                if (prevText !== newText) {
+                                  setHistory((prev) => [
+                                    {
+                                      type: "edit-back-cover-text",
+                                      prevText,
+                                      newText,
+                                      timestamp: Date.now(),
+                                    },
+                                    ...prev,
+                                  ]);
+                                }
+                              }}
                               onClick={(e) => e.stopPropagation()}
                               onMouseDown={(e) => e.stopPropagation()}
                               className="absolute text-center bg-transparent focus:outline-none focus:bg-white/40 rounded"
@@ -5463,9 +5517,27 @@ function PhotoGridEditor({
                             <input
                               type="text"
                               value={backCoverText}
+                              onFocus={(e) => {
+                                e.target.dataset.initialValue = backCoverText;
+                              }}
                               onChange={(e) =>
                                 setBackCoverText(e.target.value)
                               }
+                              onBlur={(e) => {
+                                const prevText = e.target.dataset.initialValue || "";
+                                const newText = e.target.value.trim();
+                                if (prevText !== newText) {
+                                  setHistory((prev) => [
+                                    {
+                                      type: "edit-back-cover-text",
+                                      prevText,
+                                      newText,
+                                      timestamp: Date.now(),
+                                    },
+                                    ...prev,
+                                  ]);
+                                }
+                              }}
                               onClick={(e) => e.stopPropagation()}
                               onMouseDown={(e) => e.stopPropagation()}
                               className="absolute text-center bg-transparent focus:outline-none focus:bg-white/70 rounded"
