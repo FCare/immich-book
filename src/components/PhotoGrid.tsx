@@ -1268,6 +1268,7 @@ function PhotoGridEditor({
   // New photos - assets in the album but not in the photobook yet
   const [newAssets, setNewAssets] = useState<AssetResponseDto[]>([]);
   const [selectedNewAsset, setSelectedNewAsset] = useState<AssetResponseDto | null>(null);
+  const [loadedNewAssetIds, setLoadedNewAssetIds] = useState<Set<string>>(new Set());
   const [showCover, setShowCover] = useState(initialConfig.showCover);
   const [coverTitle, setCoverTitle] = useState(
     initialConfig.coverTitle || album.albumName,
@@ -1426,13 +1427,48 @@ function PhotoGridEditor({
         prevText: string;
         newText: string;
         timestamp: number;
+      }
+    | {
+        type: "swap-new-photo";
+        newAsset: AssetResponseDto;
+        replacedAsset: AssetResponseDto;
+        timestamp: number;
+      }
+    | {
+        type: "replace-placeholder";
+        newAsset: AssetResponseDto;
+        placeholderAsset: AssetResponseDto;
+        timestamp: number;
+      }
+    | {
+        type: "insert-new-photo";
+        newAsset: AssetResponseDto;
+        pageNumber: number;
+        prevPageCount: number | null;
+        timestamp: number;
+      }
+    | {
+        type: "delete-placeholder";
+        placeholderAsset: AssetResponseDto;
+        timestamp: number;
       };
 
   // History - stored in localStorage per album
   const [history, setHistory] = useState<HistoryOperation[]>(() => {
     try {
       const stored = localStorage.getItem(`immich-book-history-${album.id}`);
-      return stored ? JSON.parse(stored) : [];
+      if (!stored) return [];
+      
+      const parsed = JSON.parse(stored);
+      // Filter out old-format new-photo operations (migration safety)
+      return parsed.filter((op: any) => {
+        // Remove operations that don't have the new format (missing asset objects)
+        if (op.type === 'swap-new-photo' && !op.newAsset) return false;
+        if (op.type === 'replace-placeholder' && !op.newAsset) return false;
+        if (op.type === 'insert-new-photo' && !op.newAsset) return false;
+        if (op.type === 'delete-placeholder' && !op.placeholderAsset) return false;
+        return true;
+      });
     } catch {
       return [];
     }
@@ -1925,6 +1961,41 @@ function PhotoGridEditor({
       case "edit-back-cover-text":
         setBackCoverText(lastOp.prevText);
         break;
+      
+      case "swap-new-photo":
+        // Undo swap: put back the replaced asset, add new asset to newAssets
+        setAssets(prev => prev.map(a => a.id === lastOp.newAsset.id ? lastOp.replacedAsset : a));
+        setNewAssets(prev => [...prev, lastOp.newAsset]);
+        break;
+      
+      case "replace-placeholder":
+        // Undo replace: restore placeholder, add new asset to newAssets
+        setAssets(prev => prev.map(a => a.id === lastOp.newAsset.id ? lastOp.placeholderAsset : a));
+        setNewAssets(prev => [...prev, lastOp.newAsset]);
+        setMissingAssetIds(prev => new Set([...prev, lastOp.placeholderAsset.id]));
+        break;
+      
+      case "insert-new-photo":
+        // Undo insert: remove the new asset, restore pageCount, add back to newAssets
+        setAssets(prev => prev.filter(a => a.id !== lastOp.newAsset.id));
+        setNewAssets(prev => [...prev, lastOp.newAsset]);
+        // Restore previous pageCount
+        setPageCounts(prev => {
+          const next = new Map(prev);
+          if (lastOp.prevPageCount === null) {
+            next.delete(lastOp.pageNumber);
+          } else {
+            next.set(lastOp.pageNumber, lastOp.prevPageCount);
+          }
+          return next;
+        });
+        break;
+      
+      case "delete-placeholder":
+        // Undo delete: restore the placeholder
+        setAssets(prev => [...prev, lastOp.placeholderAsset]);
+        setMissingAssetIds(prev => new Set([...prev, lastOp.placeholderAsset.id]));
+        break;
     }
 
     setHistory(remainingHistory);
@@ -2043,9 +2114,11 @@ function PhotoGridEditor({
 
   // Filter assets based on user preferences (default order)
   const defaultFilteredAssets = useMemo(() => {
+    // Filter out any undefined assets (safety after undo operations)
+    const validAssets = assets.filter((asset) => asset !== undefined && asset !== null);
     return filterVideos
-      ? assets.filter((asset) => asset.type === "IMAGE")
-      : assets;
+      ? validAssets.filter((asset) => asset.type === "IMAGE")
+      : validAssets;
   }, [assets, filterVideos]);
 
   // Apply custom ordering to filtered assets
@@ -2505,8 +2578,110 @@ function PhotoGridEditor({
             {divider}
             <button
               onClick={() => {
-                // TODO: Handle insert of new photo on this page
-                console.log(`Insert new photo ${selectedNewAsset.id} on page ${logicalPageNumber}`);
+                if (!selectedNewAsset) return;
+                
+                console.log(`INSERT: Adding ${selectedNewAsset.id} to page ${logicalPageNumber} (currently ${assets.length} assets)`);
+                
+                // Find the current page to get its last photo
+                const currentPage = pages.find(p => p.pageNumber === logicalPageNumber);
+                let insertIndex = assets.length; // Default to end
+                
+                if (currentPage && currentPage.photos.length > 0) {
+                  // Get the last non-text photo on this page
+                  const lastPhotoOnPage = [...currentPage.photos].reverse().find(p => p.asset && !p.id.startsWith('text-'));
+                  if (lastPhotoOnPage && lastPhotoOnPage.asset) {
+                    // Find this photo's index in assets
+                    const lastPhotoIndex = assets.findIndex(a => a.id === lastPhotoOnPage.asset!.id);
+                    if (lastPhotoIndex !== -1) {
+                      insertIndex = lastPhotoIndex + 1;
+                      console.log(`Inserting after ${lastPhotoOnPage.asset.id} at index ${insertIndex}`);
+                    }
+                  }
+                }
+                
+                // INSERT: Add new photo at the calculated position
+                const updatedAssets = [
+                  ...assets.slice(0, insertIndex),
+                  selectedNewAsset,
+                  ...assets.slice(insertIndex)
+                ];
+                console.log(`New assets count: ${updatedAssets.length}, inserted at index ${insertIndex}`);
+                
+                // Update assets state
+                setAssets(updatedAssets);
+                
+                // Remove from new assets panel
+                setNewAssets(prev => prev.filter(a => a.id !== selectedNewAsset.id));
+                
+                // ALWAYS increase photo count on this page to make room
+                const prevPageCount = pageCounts.get(logicalPageNumber) ?? null;
+                if (currentPage) {
+                  // Count current non-text photos on the page
+                  const currentPhotoCount = currentPage.photos.filter(p => p.asset && !p.id.startsWith('text-')).length;
+                  const newCount = currentPhotoCount + 1;
+                  console.log(`Increasing page ${logicalPageNumber} count from ${currentPhotoCount} to ${newCount}`);
+                  handleSetPageCount(logicalPageNumber, newCount);
+                }
+                
+                // Add to history with full asset info for undo
+                setHistory(prev => {
+                  console.log(`Adding to history: insert-new-photo`);
+                  return [{
+                    type: "insert-new-photo",
+                    newAsset: selectedNewAsset,
+                    pageNumber: logicalPageNumber,
+                    prevPageCount,
+                    timestamp: Date.now(),
+                  }, ...prev];
+                });
+                
+                // Clear selection
+                const insertedAssetId = selectedNewAsset.id;
+                setSelectedNewAsset(null);
+                
+                // Save snapshot to backend
+                setTimeout(() => {
+                  console.log(`Saving snapshot after insert...`);
+                  const config: AlbumConfig = {
+                    printerId,
+                    pageWidth,
+                    pageHeight,
+                    margin,
+                    combinePages,
+                    spacing,
+                    filterVideos,
+                    forceTimeline,
+                    bleedEnabled,
+                    bleed,
+                    showDates,
+                    showCaptions,
+                    fontSize,
+                    pageBackground,
+                    cardStyle,
+                    customOrdering,
+                    layoutVariants: Object.fromEntries(layoutVariants),
+                    pageCounts: Object.fromEntries(pageCounts),
+                    pageCaptions: Object.fromEntries(pageCaptions),
+                    cardCaptions: Object.fromEntries(cardCaptions),
+                    textCardCounts: Object.fromEntries(textCardCounts),
+                    textCardContents: Object.fromEntries(textCardContents),
+                    slotOverrides: Object.fromEntries(slotOverrides),
+                    manuallyMovedIds: Array.from(manuallyMovedIds),
+                    showCover,
+                    coverTitle,
+                    coverAssetId,
+                    coverLayout,
+                    backCoverAssetId,
+                    backCoverLayout,
+                    backCoverNoPhoto,
+                    backCoverText,
+                    backCoverPlainText,
+                    excludeCoverPhotosFromPages,
+                  };
+                  saveAlbumConfig(album.id, config, updatedAssets);
+                }, 100);
+                
+                console.log(`Inserted new photo ${insertedAssetId}, may appear on page ${logicalPageNumber}`);
               }}
               title={t(language, "addHere")}
               className="px-2 py-1 text-xs font-semibold text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-500/20 rounded transition-colors whitespace-nowrap"
@@ -4606,41 +4781,44 @@ function PhotoGridEditor({
       <main className="flex-1 overflow-y-auto custom-scrollbar relative">
         {/* Top Panel - New Photos */}
         {newAssets.length > 0 && (
-          <div 
-            className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-md z-40 overflow-y-auto custom-scrollbar"
-            style={{ maxHeight: '180px' }}
-          >
-            <div className="p-4">
-              <div className="flex flex-col gap-3">
-                <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                  {t(language, "newPhotosToPlace")}: {newAssets.length}
-                </span>
-                <div className="flex flex-wrap gap-3">
-                  {newAssets.map((asset) => (
-                    <button
-                      key={asset.id}
-                      onClick={() => setSelectedNewAsset(selectedNewAsset?.id === asset.id ? null : asset)}
-                      className={`relative rounded-lg overflow-hidden transition-all ${
-                        selectedNewAsset?.id === asset.id
-                          ? 'ring-4 ring-indigo-500 scale-105'
-                          : 'hover:scale-105 hover:shadow-lg'
-                      }`}
-                    >
-                      <img
-                        src={`${immichConfig.baseUrl}/assets/${asset.id}/thumbnail?size=preview`}
-                        alt={asset.originalFileName}
-                        className="w-20 h-20 object-cover"
-                      />
-                      {selectedNewAsset?.id === asset.id && (
-                        <div className="absolute inset-0 bg-indigo-500/20 flex items-center justify-center">
-                          <svg className="w-8 h-8 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                          </svg>
-                        </div>
-                      )}
-                    </button>
-                  ))}
-                </div>
+          <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-md z-40 p-4">
+            <div className="flex flex-col gap-3">
+              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                {t(language, "newPhotosToPlace")}: {newAssets.length}
+              </span>
+              <div className="flex gap-3 overflow-x-auto custom-scrollbar pb-2">
+                  {newAssets.map((asset) => {
+                    const imageLoaded = loadedNewAssetIds.has(asset.id);
+                    return (
+                      <button
+                        key={asset.id}
+                        onClick={() => setSelectedNewAsset(selectedNewAsset?.id === asset.id ? null : asset)}
+                        className={`relative rounded-lg overflow-hidden transition-all flex-shrink-0 ${
+                          selectedNewAsset?.id === asset.id
+                            ? 'ring-4 ring-indigo-500 scale-105'
+                            : 'hover:scale-105 hover:shadow-lg'
+                        }`}
+                      >
+                        {/* Placeholder with pulse effect */}
+                        {!imageLoaded && (
+                          <div className="w-24 h-24 bg-gray-300 dark:bg-gray-700 animate-pulse" />
+                        )}
+                        <img
+                          src={`${immichConfig.baseUrl}/assets/${asset.id}/thumbnail?size=preview`}
+                          alt={asset.originalFileName}
+                          className={`w-24 h-24 object-cover ${imageLoaded ? 'block' : 'hidden'}`}
+                          onLoad={() => setLoadedNewAssetIds(prev => new Set([...prev, asset.id]))}
+                        />
+                        {selectedNewAsset?.id === asset.id && imageLoaded && (
+                          <div className="absolute inset-0 bg-indigo-500/20 flex items-center justify-center">
+                            <svg className="w-8 h-8 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
               </div>
             </div>
           </div>
@@ -5216,7 +5394,7 @@ function PhotoGridEditor({
                       <div
                         key={photoBox.id}
                         data-reorder-asset-id={asset.id}
-                        className={`absolute group cursor-move ${isBeingDragged ? "opacity-50" : ""} ${isSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2 z-20" : ""}`}
+                        className={`absolute group ${selectedNewAsset ? "cursor-pointer" : "cursor-move"} ${isBeingDragged ? "opacity-50" : ""} ${isSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2 z-20" : ""} ${selectedNewAsset && !isMissingPhoto ? "hover:ring-2 hover:ring-green-400" : ""} ${selectedNewAsset && isMissingPhoto ? "hover:ring-2 hover:ring-blue-400" : ""}`}
                         style={{
                           left: `${toPoints(photoBox.x)}px`,
                           top: `${toPoints(photoBox.y)}px`,
@@ -5224,9 +5402,92 @@ function PhotoGridEditor({
                           height: `${containerHeight}px`,
                           touchAction: "none",
                         }}
-                        onPointerDown={(e) =>
-                          handleReorderPointerDown(asset.id, e)
-                        }
+                        onClick={(e) => {
+                          if (selectedNewAsset) {
+                            e.stopPropagation();
+                            
+                            if (isMissingPhoto) {
+                              // REPLACE: new photo replaces the placeholder
+                              console.log(`REPLACE: ${asset.id} with ${selectedNewAsset.id}`);
+                              const updatedAssets = assets.map(a => a.id === asset.id ? selectedNewAsset : a);
+                              setAssets(updatedAssets);
+                              setNewAssets(prev => prev.filter(a => a.id !== selectedNewAsset.id));
+                              setMissingAssetIds(prev => {
+                                const next = new Set(prev);
+                                next.delete(asset.id);
+                                return next;
+                              });
+                              setHistory(prev => [{
+                                type: "replace-placeholder",
+                                newAsset: selectedNewAsset,
+                                placeholderAsset: asset,
+                                timestamp: Date.now(),
+                              }, ...prev]);
+                              setSelectedNewAsset(null);
+                              
+                              // Save snapshot async
+                              setTimeout(() => {
+                                const config: AlbumConfig = {
+                                  printerId, pageWidth, pageHeight, margin, combinePages, spacing,
+                                  filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
+                                  fontSize, pageBackground, cardStyle, customOrdering,
+                                  layoutVariants: Object.fromEntries(layoutVariants),
+                                  pageCounts: Object.fromEntries(pageCounts),
+                                  pageCaptions: Object.fromEntries(pageCaptions),
+                                  cardCaptions: Object.fromEntries(cardCaptions),
+                                  textCardCounts: Object.fromEntries(textCardCounts),
+                                  textCardContents: Object.fromEntries(textCardContents),
+                                  slotOverrides: Object.fromEntries(slotOverrides),
+                                  manuallyMovedIds: Array.from(manuallyMovedIds),
+                                  showCover, coverTitle, coverAssetId, coverLayout,
+                                  backCoverAssetId, backCoverLayout, backCoverNoPhoto,
+                                  backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
+                                };
+                                saveAlbumConfig(album.id, config, updatedAssets);
+                              }, 100);
+                            } else {
+                              // SWAP: new photo takes this position, this photo goes to newAssets
+                              console.log(`SWAP: ${asset.id} with ${selectedNewAsset.id}`);
+                              const updatedAssets = assets.map(a => a.id === asset.id ? selectedNewAsset : a);
+                              setAssets(updatedAssets);
+                              setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), asset]);
+                              setHistory(prev => [{
+                                type: "swap-new-photo",
+                                newAsset: selectedNewAsset,
+                                replacedAsset: asset,
+                                timestamp: Date.now(),
+                              }, ...prev]);
+                              setSelectedNewAsset(null);
+                              
+                              // Save snapshot async
+                              setTimeout(() => {
+                                const config: AlbumConfig = {
+                                  printerId, pageWidth, pageHeight, margin, combinePages, spacing,
+                                  filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
+                                  fontSize, pageBackground, cardStyle, customOrdering,
+                                  layoutVariants: Object.fromEntries(layoutVariants),
+                                  pageCounts: Object.fromEntries(pageCounts),
+                                  pageCaptions: Object.fromEntries(pageCaptions),
+                                  cardCaptions: Object.fromEntries(cardCaptions),
+                                  textCardCounts: Object.fromEntries(textCardCounts),
+                                  textCardContents: Object.fromEntries(textCardContents),
+                                  slotOverrides: Object.fromEntries(slotOverrides),
+                                  manuallyMovedIds: Array.from(manuallyMovedIds),
+                                  showCover, coverTitle, coverAssetId, coverLayout,
+                                  backCoverAssetId, backCoverLayout, backCoverNoPhoto,
+                                  backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
+                                };
+                                saveAlbumConfig(album.id, config, updatedAssets);
+                              }, 100);
+                            }
+                          }
+                        }}
+                        onPointerDown={(e) => {
+                          // Only allow drag if no new photo is selected
+                          if (!selectedNewAsset) {
+                            handleReorderPointerDown(asset.id, e);
+                          }
+                        }}
                       >
                         {/* Drop indicator - shown on left edge when hovering during drag */}
                         {isDropTarget && reorderDragState && (
@@ -5500,14 +5761,46 @@ function PhotoGridEditor({
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
+                              console.log(`DELETE placeholder: ${asset.id}`);
+                              
                               // Remove this asset from missing list and from the layout
                               setMissingAssetIds(prev => {
                                 const next = new Set(prev);
                                 next.delete(asset.id);
                                 return next;
                               });
+                              
                               // Remove from assets array so it disappears from the layout
-                              setAssets(prev => prev.filter(a => a.id !== asset.id));
+                              const updatedAssets = assets.filter(a => a.id !== asset.id);
+                              setAssets(updatedAssets);
+                              
+                              // Add to history
+                              setHistory(prev => [{
+                                type: "delete-placeholder",
+                                placeholderAsset: asset,
+                                timestamp: Date.now(),
+                              }, ...prev]);
+                              
+                              // Save snapshot async
+                              setTimeout(() => {
+                                const config: AlbumConfig = {
+                                  printerId, pageWidth, pageHeight, margin, combinePages, spacing,
+                                  filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
+                                  fontSize, pageBackground, cardStyle, customOrdering,
+                                  layoutVariants: Object.fromEntries(layoutVariants),
+                                  pageCounts: Object.fromEntries(pageCounts),
+                                  pageCaptions: Object.fromEntries(pageCaptions),
+                                  cardCaptions: Object.fromEntries(cardCaptions),
+                                  textCardCounts: Object.fromEntries(textCardCounts),
+                                  textCardContents: Object.fromEntries(textCardContents),
+                                  slotOverrides: Object.fromEntries(slotOverrides),
+                                  manuallyMovedIds: Array.from(manuallyMovedIds),
+                                  showCover, coverTitle, coverAssetId, coverLayout,
+                                  backCoverAssetId, backCoverLayout, backCoverNoPhoto,
+                                  backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
+                                };
+                                saveAlbumConfig(album.id, config, updatedAssets);
+                              }, 100);
                             }}
                             title={t(language, "deletePlaceholder")}
                           >
@@ -6074,6 +6367,18 @@ function PhotoGridEditor({
                   case "edit-back-cover-text":
                     description = t(language, "historyEditBackCoverText");
                     break;
+                  case "swap-new-photo":
+                    description = t(language, "historySwapNewPhoto");
+                    break;
+                  case "replace-placeholder":
+                    description = t(language, "historyReplacePlaceholder");
+                    break;
+                  case "insert-new-photo":
+                    description = t(language, "historyInsertNewPhoto");
+                    break;
+                  case "delete-placeholder":
+                    description = t(language, "historyDeletePlaceholder");
+                    break;
                 }
 
                 return (
@@ -6265,7 +6570,8 @@ function PhotoGridEditor({
                           {thumbnailPhotos.length > 0 ? (
                             <div className={`grid h-full ${thumbnailPhotos.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-0.5`}>
                               {thumbnailPhotos.map((photo, idx) => {
-                                const isMissing = photo.asset && missingAssetIds.has(photo.asset.id);
+                                if (!photo.asset) return null; // Safety guard
+                                const isMissing = missingAssetIds.has(photo.asset.id);
                                 return (
                                   <div key={idx} className="relative bg-gray-300 dark:bg-gray-600">
                                     {isMissing ? (
@@ -6274,7 +6580,7 @@ function PhotoGridEditor({
                                       </div>
                                     ) : (
                                       <img
-                                        src={`${immichConfig.baseUrl}/assets/${photo.asset!.id}/thumbnail?size=preview`}
+                                        src={`${immichConfig.baseUrl}/assets/${photo.asset.id}/thumbnail?size=preview`}
                                         alt=""
                                         className="w-full h-full object-cover"
                                       />
