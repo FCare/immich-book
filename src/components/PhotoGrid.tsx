@@ -4044,19 +4044,53 @@ function PhotoGridEditor({
               {sidebarBrand}
               <div className="w-8 border-t border-gray-200 dark:border-gray-800" />
               <button
-                onClick={onBack}
-                title="Retour aux albums"
-                className="w-9 h-9 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-colors"
+                onClick={() => {
+                  setIsDetectingChanges(true);
+                  fetch(`/photobooks/${encodeURIComponent(album.id)}/detect-changes`, {
+                    method: 'POST',
+                  })
+                    .then(res => res.json())
+                    .then(({ missingAssets, newAssetIds }) => {
+                      console.log(`Manual sync: ${newAssetIds.length} new, ${missingAssets.length} missing`);
+                      
+                      // Update missing assets
+                      setMissingAssetIds(new Set(missingAssets.map((a: AssetResponseDto) => a.id)));
+                      
+                      // Handle new photos
+                      if (newAssetIds.length > 0) {
+                        const newPhotos = assets.filter(a => newAssetIds.includes(a.id));
+                        setNewAssets(prev => {
+                          // Merge with existing newAssets, avoiding duplicates
+                          const existing = new Set(prev.map(a => a.id));
+                          const toAdd = newPhotos.filter(a => !existing.has(a.id));
+                          return [...prev, ...toAdd];
+                        });
+                        // Remove from main assets
+                        setAssets(prev => prev.filter(a => !newAssetIds.includes(a.id)));
+                        console.log(`${newPhotos.length} new photos added to panel`);
+                      }
+                      
+                      setChangesDetected(missingAssets.length > 0 || newAssetIds.length > 0);
+                    })
+                    .catch(err => {
+                      console.error('Sync failed:', err);
+                    })
+                    .finally(() => {
+                      setIsDetectingChanges(false);
+                    });
+                }}
+                disabled={isDetectingChanges}
+                title="Sync with Immich"
+                className="w-9 h-9 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <svg
-                  viewBox="0 0 24 24"
-                  width="15"
-                  height="15"
+                  className={`w-4 h-4 ${isDetectingChanges ? 'animate-spin' : ''}`}
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2.4"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
                 >
-                  <path d="M15 18l-6-6 6-6" />
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </button>
               <button
