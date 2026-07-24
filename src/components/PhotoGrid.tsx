@@ -5567,8 +5567,29 @@ function PhotoGridEditor({
                         height: `${displayHeight * scale}px`,
                       }}
                     >
+                      {backCoverImageUrl && backCoverLayout === "full-bleed" && (
+                        <img
+                          src={backCoverImageUrl}
+                          alt="Back cover"
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                      )}
+                      {backCoverImageUrl && backCoverLayout === "photo-title" && (
+                        <img
+                          src={backCoverImageUrl}
+                          alt="Back cover"
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                      )}
                       <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="text-gray-400 text-xs">Back Cover</span>
+                        {backCoverLayout === "text-only" && backCoverText && (
+                          <span className="text-gray-700 dark:text-gray-300 text-sm font-semibold" style={{ fontFamily: "Caveat" }}>
+                            {backCoverText}
+                          </span>
+                        )}
+                        {!backCoverImageUrl && !backCoverText && (
+                          <span className="text-gray-400 text-xs">{t(language, "backCover")}</span>
+                        )}
                       </div>
                     </div>
 
@@ -5601,7 +5622,7 @@ function PhotoGridEditor({
                         height: `${displayHeight * scale}px`,
                       }}
                     >
-                      {coverImageUrl && coverLayout === "full-bleed" && (
+                      {coverImageUrl && (coverLayout === "full-bleed" || coverLayout === "photo-title") && (
                         <img
                           src={coverImageUrl}
                           alt="Front cover"
@@ -5613,6 +5634,9 @@ function PhotoGridEditor({
                           <span className="text-gray-700 dark:text-gray-300 text-sm font-semibold" style={{ fontFamily: "Caveat" }}>
                             {coverTitle || album.albumName}
                           </span>
+                        )}
+                        {!coverImageUrl && coverLayout !== "text-only" && (
+                          <span className="text-gray-400 text-xs">{t(language, "frontCover")}</span>
                         )}
                       </div>
                     </div>
