@@ -5582,40 +5582,6 @@ function PhotoGridEditor({
                       )}
                     </div>
                   )}
-                  <div>
-                    <label
-                      htmlFor="backCoverText"
-                      className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
-                    >
-                      {t(language, "backCoverText")}
-                    </label>
-                    <input
-                      type="text"
-                      id="backCoverText"
-                      value={backCoverText}
-                      onFocus={(e) => {
-                        e.target.dataset.initialValue = backCoverText;
-                      }}
-                      onChange={(e) => setBackCoverText(e.target.value)}
-                      onBlur={(e) => {
-                        const prevText = e.target.dataset.initialValue || "";
-                        const newText = e.target.value.trim();
-                        if (prevText !== newText) {
-                          setHistory((prev) => [
-                            {
-                              type: "edit-back-cover-text",
-                              prevText,
-                              newText,
-                              timestamp: Date.now(),
-                            },
-                            ...prev,
-                          ]);
-                        }
-                      }}
-                      placeholder={t(language, "backCoverTextPlaceholder")}
-                      className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
-                    />
-                  </div>
                   {backCoverLayout === "photo-title" && (
                     <ToggleSwitch
                       checked={backCoverPlainText}
