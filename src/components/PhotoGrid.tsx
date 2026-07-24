@@ -1542,10 +1542,11 @@ function PhotoGridEditor({
     detectAlbumChanges(album.id, assets.map(a => a.id))
       .then(({ missingAssets, newAssetIds }) => {
         console.log(`Album changes: ${newAssetIds.length} new, ${missingAssets.length} missing`);
-        setChangesDetected(true);
         setIsDetectingChanges(false); // Detection complete
         
         if (missingAssets.length > 0) {
+          // There are missing photos - this is a real change
+          setChangesDetected(true);
           setMissingAssetIds(new Set(missingAssets.map(a => a.id)));
           // Inject missing assets as placeholders
           setAssets(prev => {
@@ -1557,10 +1558,15 @@ function PhotoGridEditor({
               return albumOrder === "asc" ? timeA - timeB : timeB - timeA;
             });
           });
-        } else if (newAssetIds.length > 0) {
-          // First time opening this album - save snapshot for future comparison
+        }
+        
+        // Check if this is first time (all assets are "new" = no snapshot exists yet)
+        const isFirstTime = newAssetIds.length > 0 && newAssetIds.length === assets.length && missingAssets.length === 0;
+        
+        if (isFirstTime) {
+          // First time opening this album - save snapshot but keep photos in normal layout
           console.log("First time opening album, saving initial snapshot...");
-          // Use a minimal config placeholder - the real config save happens in the other useEffect
+          setChangesDetected(false); // No real changes, just initializing
           fetch(`/photobooks/${encodeURIComponent(album.id)}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -1575,10 +1581,9 @@ function PhotoGridEditor({
               })),
             }),
           });
-        }
-        
-        // Handle new photos - extract them from assets and keep them separate
-        if (newAssetIds.length > 0) {
+        } else if (newAssetIds.length > 0) {
+          // Real new photos added to the album
+          setChangesDetected(true);
           const newPhotos = assets.filter(a => newAssetIds.includes(a.id));
           setNewAssets(newPhotos);
           // Remove new photos from the main assets array (they stay in newAssets panel until placed)
