@@ -1743,9 +1743,36 @@ function PhotoGridEditor({
         return albumOrder === "asc" ? timeA - timeB : timeB - timeA;
       });
       setAssets(sorted);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error loading album:", err);
-      setError((err as Error).message || "Failed to load album assets");
+      
+      // Check if album was deleted from Immich (404 or similar errors)
+      const isAlbumDeleted = 
+        err?.status === 404 || 
+        err?.statusCode === 404 ||
+        err?.message?.includes('not found') ||
+        err?.message?.includes('404');
+      
+      if (isAlbumDeleted) {
+        console.log(`Album ${album.id} no longer exists in Immich, deleting photobook...`);
+        
+        // Delete the photobook from backend
+        fetch(`/photobooks/${encodeURIComponent(album.id)}`, {
+          method: 'DELETE',
+        })
+          .then(() => {
+            console.log('Photobook deleted successfully');
+          })
+          .catch(deleteErr => {
+            console.error('Failed to delete photobook:', deleteErr);
+          })
+          .finally(() => {
+            // Navigate back to albums list
+            onBack();
+          });
+      } else {
+        setError((err as Error).message || "Failed to load album assets");
+      }
     } finally {
       setIsLoading(false);
     }
