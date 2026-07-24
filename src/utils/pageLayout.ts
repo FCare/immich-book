@@ -118,8 +118,8 @@ interface SplitConfig {
 
 // Bento: fewer, larger tiles for a clean magazine feel.
 const BENTO_CONFIG: SplitConfig = {
-  minCount: 3,
-  maxCount: 6,
+  minCount: 2,
+  maxCount: 4,
   ratioMin: 0.25,
   ratioMax: 0.75,
 };
