@@ -1342,6 +1342,51 @@ function PhotoGridEditor({
         prevCount: number;
         newCount: number;
         timestamp: number;
+      }
+    | {
+        type: "edit-page-caption";
+        pageNumber: number;
+        prevText: string;
+        newText: string;
+        timestamp: number;
+      }
+    | {
+        type: "edit-card-caption";
+        assetId: string;
+        prevText: string;
+        newText: string;
+        timestamp: number;
+      }
+    | {
+        type: "edit-text-card";
+        cardId: string;
+        prevText: string;
+        newText: string;
+        timestamp: number;
+      }
+    | {
+        type: "set-cover";
+        prevAssetId: string | null;
+        newAssetId: string | null;
+        timestamp: number;
+      }
+    | {
+        type: "set-back-cover";
+        prevAssetId: string | null;
+        newAssetId: string | null;
+        timestamp: number;
+      }
+    | {
+        type: "edit-cover-title";
+        prevText: string;
+        newText: string;
+        timestamp: number;
+      }
+    | {
+        type: "edit-back-cover-text";
+        prevText: string;
+        newText: string;
+        timestamp: number;
       };
 
   // History - stored in localStorage per album
@@ -1726,6 +1771,58 @@ function PhotoGridEditor({
           }
           return next;
         });
+        break;
+
+      case "edit-page-caption":
+        setPageCaptions((prev) => {
+          const next = new Map(prev);
+          if (lastOp.prevText) {
+            next.set(lastOp.pageNumber, lastOp.prevText);
+          } else {
+            next.delete(lastOp.pageNumber);
+          }
+          return next;
+        });
+        break;
+
+      case "edit-card-caption":
+        setCardCaptions((prev) => {
+          const next = new Map(prev);
+          if (lastOp.prevText) {
+            next.set(lastOp.assetId, lastOp.prevText);
+          } else {
+            next.delete(lastOp.assetId);
+          }
+          return next;
+        });
+        break;
+
+      case "edit-text-card":
+        setTextCardContents((prev) => {
+          const next = new Map(prev);
+          if (lastOp.prevText) {
+            next.set(lastOp.cardId, lastOp.prevText);
+          } else {
+            next.delete(lastOp.cardId);
+          }
+          return next;
+        });
+        break;
+
+      case "set-cover":
+        setCoverAssetId(lastOp.prevAssetId);
+        break;
+
+      case "set-back-cover":
+        setBackCoverAssetId(lastOp.prevAssetId);
+        break;
+
+      case "edit-cover-title":
+        setCoverTitle(lastOp.prevText);
+        break;
+
+      case "edit-back-cover-text":
+        setBackCoverText(lastOp.prevText);
         break;
     }
 
@@ -4244,7 +4341,25 @@ function PhotoGridEditor({
                       type="text"
                       id="coverTitle"
                       value={coverTitle}
+                      onFocus={(e) => {
+                        e.target.dataset.initialValue = coverTitle;
+                      }}
                       onChange={(e) => setCoverTitle(e.target.value)}
+                      onBlur={(e) => {
+                        const prevText = e.target.dataset.initialValue || "";
+                        const newText = e.target.value.trim();
+                        if (prevText !== newText) {
+                          setHistory((prev) => [
+                            {
+                              type: "edit-cover-title",
+                              prevText,
+                              newText,
+                              timestamp: Date.now(),
+                            },
+                            ...prev,
+                          ]);
+                        }
+                      }}
                       placeholder={album.albumName}
                       className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
                     />
@@ -4320,7 +4435,25 @@ function PhotoGridEditor({
                       type="text"
                       id="backCoverText"
                       value={backCoverText}
+                      onFocus={(e) => {
+                        e.target.dataset.initialValue = backCoverText;
+                      }}
                       onChange={(e) => setBackCoverText(e.target.value)}
+                      onBlur={(e) => {
+                        const prevText = e.target.dataset.initialValue || "";
+                        const newText = e.target.value.trim();
+                        if (prevText !== newText) {
+                          setHistory((prev) => [
+                            {
+                              type: "edit-back-cover-text",
+                              prevText,
+                              newText,
+                              timestamp: Date.now(),
+                            },
+                            ...prev,
+                          ]);
+                        }
+                      }}
                       placeholder={t(language, "backCoverTextPlaceholder")}
                       className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
                     />
@@ -4734,6 +4867,9 @@ function PhotoGridEditor({
                           key={band.key}
                           type="text"
                           value={pageCaptions.get(band.key) || ""}
+                          onFocus={(e) => {
+                            e.target.dataset.initialValue = pageCaptions.get(band.key) || "";
+                          }}
                           onChange={(e) => {
                             setPageCaptions((prev) => {
                               const next = new Map(prev);
@@ -4744,6 +4880,22 @@ function PhotoGridEditor({
                               }
                               return next;
                             });
+                          }}
+                          onBlur={(e) => {
+                            const prevText = e.target.dataset.initialValue || "";
+                            const newText = e.target.value.trim();
+                            if (prevText !== newText) {
+                              setHistory((prev) => [
+                                {
+                                  type: "edit-page-caption",
+                                  pageNumber: band.key,
+                                  prevText,
+                                  newText,
+                                  timestamp: Date.now(),
+                                },
+                                ...prev,
+                              ]);
+                            }
                           }}
                           placeholder={t(language, "addCaption")}
                           className="absolute bg-transparent text-center focus:outline-none focus:bg-white/70 dark:focus:bg-gray-800/70 rounded placeholder:text-gray-400 dark:placeholder:text-gray-600"
@@ -4823,6 +4975,9 @@ function PhotoGridEditor({
                                   )}px`;
                                 }}
                                 value={textCardContents.get(photoBox.id) || ""}
+                                onFocus={(e) => {
+                                  e.target.dataset.initialValue = textCardContents.get(photoBox.id) || "";
+                                }}
                                 onChange={(e) => {
                                   setTextCardContents((prev) => {
                                     const next = new Map(prev);
@@ -4833,6 +4988,22 @@ function PhotoGridEditor({
                                     }
                                     return next;
                                   });
+                                }}
+                                onBlur={(e) => {
+                                  const prevText = e.target.dataset.initialValue || "";
+                                  const newText = e.target.value.trim();
+                                  if (prevText !== newText) {
+                                    setHistory((prev) => [
+                                      {
+                                        type: "edit-text-card",
+                                        cardId: photoBox.id,
+                                        prevText,
+                                        newText,
+                                        timestamp: Date.now(),
+                                      },
+                                      ...prev,
+                                    ]);
+                                  }
                                 }}
                                 onClick={(e) => e.stopPropagation()}
                                 onMouseDown={(e) => e.stopPropagation()}
@@ -4970,6 +5141,9 @@ function PhotoGridEditor({
                             <input
                               type="text"
                               value={cardCaption}
+                              onFocus={(e) => {
+                                e.target.dataset.initialValue = cardCaption;
+                              }}
                               onChange={(e) => {
                                 setCardCaptions((prev) => {
                                   const next = new Map(prev);
@@ -4980,6 +5154,22 @@ function PhotoGridEditor({
                                   }
                                   return next;
                                 });
+                              }}
+                              onBlur={(e) => {
+                                const prevText = e.target.dataset.initialValue || "";
+                                const newText = e.target.value.trim();
+                                if (prevText !== newText) {
+                                  setHistory((prev) => [
+                                    {
+                                      type: "edit-card-caption",
+                                      assetId: asset.id,
+                                      prevText,
+                                      newText,
+                                      timestamp: Date.now(),
+                                    },
+                                    ...prev,
+                                  ]);
+                                }
                               }}
                               onClick={(e) => e.stopPropagation()}
                               onMouseDown={(e) => e.stopPropagation()}
@@ -5124,7 +5314,17 @@ function PhotoGridEditor({
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
+                              const prevAssetId = coverAssetId;
                               setCoverAssetId(asset.id);
+                              setHistory((prev) => [
+                                {
+                                  type: "set-cover",
+                                  prevAssetId,
+                                  newAssetId: asset.id,
+                                  timestamp: Date.now(),
+                                },
+                                ...prev,
+                              ]);
                             }}
                             title="Set as cover photo"
                           >
@@ -5151,8 +5351,18 @@ function PhotoGridEditor({
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
+                              const prevAssetId = backCoverAssetId;
                               setBackCoverAssetId(asset.id);
                               setBackCoverNoPhoto(false);
+                              setHistory((prev) => [
+                                {
+                                  type: "set-back-cover",
+                                  prevAssetId,
+                                  newAssetId: asset.id,
+                                  timestamp: Date.now(),
+                                },
+                                ...prev,
+                              ]);
                             }}
                             title="Set as back cover photo"
                           >
@@ -5643,6 +5853,27 @@ function PhotoGridEditor({
                     break;
                   case "set-text-card-count":
                     description = `${t(language, "historySetTextCardCount")} ${op.pageNumber} ${t(language, "historySetPageCountTo")} ${op.newCount}`;
+                    break;
+                  case "edit-page-caption":
+                    description = `${t(language, "historyEditPageCaption")} ${op.pageNumber}`;
+                    break;
+                  case "edit-card-caption":
+                    description = t(language, "historyEditCardCaption");
+                    break;
+                  case "edit-text-card":
+                    description = t(language, "historyEditTextCard");
+                    break;
+                  case "set-cover":
+                    description = t(language, "historySetCover");
+                    break;
+                  case "set-back-cover":
+                    description = t(language, "historySetBackCover");
+                    break;
+                  case "edit-cover-title":
+                    description = t(language, "historyEditCoverTitle");
+                    break;
+                  case "edit-back-cover-text":
+                    description = t(language, "historyEditBackCoverText");
                     break;
                 }
 
