@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   getAlbumInfo,
+  getTimeBuckets,
+  getTimeBucket,
   type AlbumResponseDto,
   type AssetResponseDto,
 } from "@immich/sdk";
@@ -1404,9 +1406,46 @@ function PhotoGridEditor({
     try {
       setIsLoading(true);
       setError(null);
-      const albumData = await getAlbumInfo({ id: album.id });
-      // Sort assets by creation date ascending
-      const sorted = albumData.assets.sort((a, b) => {
+      
+      // Step 1: Get all time buckets for this album
+      const timebuckets = await getTimeBuckets({
+        albumId: album.id,
+      });
+      
+      if (!timebuckets || timebuckets.length === 0) {
+        setError("Album has no assets");
+        return;
+      }
+      
+      // Step 2: Load assets from each time bucket
+      const allAssets: AssetResponseDto[] = [];
+      for (const bucket of timebuckets) {
+        const bucketData = await getTimeBucket({
+          albumId: album.id,
+          timeBucket: bucket.timeBucket,
+        });
+        
+        // The API returns columnar format: { id: [...], duration: [...], ... }
+        // We need to convert it to row format: [{ id, duration, ... }, ...]
+        if (bucketData && Array.isArray(bucketData.id)) {
+          const numAssets = bucketData.id.length;
+          for (let i = 0; i < numAssets; i++) {
+            const asset: any = {};
+            for (const key in bucketData) {
+              asset[key] = bucketData[key][i];
+            }
+            allAssets.push(asset as AssetResponseDto);
+          }
+        }
+      }
+      
+      if (allAssets.length === 0) {
+        setError("Album has no assets");
+        return;
+      }
+      
+      // Step 3: Sort assets by creation date ascending
+      const sorted = allAssets.sort((a, b) => {
         return (
           new Date(a.fileCreatedAt).getTime() -
           new Date(b.fileCreatedAt).getTime()
@@ -1414,6 +1453,7 @@ function PhotoGridEditor({
       });
       setAssets(sorted);
     } catch (err) {
+      console.error("Error loading album:", err);
       setError((err as Error).message || "Failed to load album assets");
     } finally {
       setIsLoading(false);
