@@ -22,14 +22,20 @@ export const translations = {
     printer: "Imprimeur",
     category: "Catégorie",
     format: "Format",
+    width: "Largeur",
+    height: "Hauteur",
     pageWidth: "Largeur",
     pageHeight: "Hauteur",
     margin: "Marge",
-    combinePages: "Afficher les doubles pages",
+    combinePages: "Combiner les pages",
     combinePagesHint: "Montrer les pages côte à côte, dans l'éditeur et le PDF",
     combinePagesHintPrinter: "attend une page physique par page de PDF",
     bleed: "Fond perdu",
     bleedEnabled: "Activer le fond perdu",
+    bleedHint: "Bordure supplémentaire remplie avec le fond de page, pour la production d'impression - rognée après l'impression",
+    bleedRequired: "requiert",
+    bleedNotRequired: "n'attend pas de fond perdu sur ce fichier",
+    bleedUnit: "mm de fond perdu",
     
     // Layout settings
     spacing: "Espacement",
@@ -45,6 +51,10 @@ export const translations = {
     
     // Cover settings
     showCover: "Afficher la couverture",
+    includeCoverPage: "Inclure la page de couverture",
+    includeCoverPageHint: "Certains services d'impression génèrent leur propre couverture et ne veulent pas de couverture dans le PDF soumis",
+    leaveCoverPhotosOut: "Laisser les photos de couverture en dehors des pages intérieures",
+    leaveCoverPhotosOutHint: "Sinon, les photos de couverture avant/arrière s'impriment également à l'intérieur du livre",
     coverLayout: "Mise en page de la couverture",
     title: "Titre",
     coverTitle: "Titre de la couverture",
@@ -53,6 +63,7 @@ export const translations = {
     backCover: "Quatrième de couverture",
     backCoverPhoto: "Photo de la quatrième",
     backCoverText: "Texte de la quatrième",
+    backCoverTextPlaceholder: "Note de fin facultative",
     backCoverLayout: "Mise en page de la quatrième",
     backCoverPhotoLabel: "Photo de la quatrième",
     removePhoto: "Retirer la photo",
@@ -60,6 +71,9 @@ export const translations = {
     noCoverPhoto: "Pas de photo de couverture",
     excludeCoverPhotos: "Exclure les photos de couverture des pages",
     excludeCoverPhotosHint: "Certains imprimeurs génèrent leur propre couverture et ne veulent pas de couverture dans le PDF soumis",
+    plainBackCoverText: "Texte simple au dos de la couverture",
+    plainBackCoverTextHint: "Pas de carte derrière le texte - s'applique uniquement lorsque la quatrième de couverture n'a pas de photo",
+    coverHint: "La couverture utilise le même fond de page que le reste du livre. Survolez une photo ci-dessous et cliquez sur « Définir comme couverture » ou « Définir comme quatrième de couverture » pour choisir les images avant et arrière - par défaut, ce sont la première et la dernière photo du livre.",
     cardReordered: "Carte réorganisée",
     imageReordered: "Image réorganisée",
     
@@ -69,6 +83,7 @@ export const translations = {
     downloadPdf: "Télécharger le PDF",
     printWith: "Imprimer ce PDF chez",
     generateCaptions: "Générer les légendes",
+    flatten: "Mettre à plat",
     history: "Historique",
     undoLastAction: "Annuler la dernière action",
     
@@ -110,7 +125,7 @@ export const translations = {
     cardStyleClean: "Épuré",
     
     // Cover layouts
-    coverLayoutPhotoTitle: "Photo et titre",
+    coverLayoutPhotoTitle: "Photo & Titre",
     coverLayoutFullBleed: "Photo pleine page",
     coverLayoutTextOnly: "Texte uniquement",
     
@@ -126,6 +141,9 @@ export const translations = {
     // Sidebar
     openPanel: "Ouvrir le volet",
     closePanel: "Fermer le volet",
+    albums: "Albums",
+    dark: "Sombre",
+    light: "Clair",
     
     // Reordering
     photosReordered: "photos réorganisées",
@@ -138,6 +156,8 @@ export const translations = {
     resetAllConfirmList2: "• Toutes les modifications de mise en page",
     resetAllConfirmList3: "• Toutes les cartes texte",
     resetAllConfirmList4: "• Tout l'historique des opérations",
+    flattenConfirmTitle: "Confirmer la mise à plat",
+    flattenConfirmMessage: "Êtes-vous sûr de vouloir mettre à plat l'état actuel ? Cet état deviendra la nouvelle référence et tout l'historique sera effacé.",
     modifications: "modifications",
     showHistory: "Afficher l'historique",
     
@@ -168,14 +188,20 @@ export const translations = {
     printer: "Printer",
     category: "Category",
     format: "Format",
+    width: "Width",
+    height: "Height",
     pageWidth: "Width",
     pageHeight: "Height",
     margin: "Margin",
-    combinePages: "Show spreads",
+    combinePages: "Combine Pages",
     combinePagesHint: "Show spreads side by side, in the editor and the PDF",
     combinePagesHintPrinter: "expects one physical page per PDF page",
     bleed: "Bleed",
     bleedEnabled: "Enable bleed",
+    bleedHint: "Extra border filled with the page background, for print production - trimmed off after printing",
+    bleedRequired: "requires",
+    bleedNotRequired: "doesn't expect bleed on this file",
+    bleedUnit: "mm of bleed",
     
     // Layout settings
     spacing: "Spacing",
@@ -191,6 +217,10 @@ export const translations = {
     
     // Cover settings
     showCover: "Show Cover",
+    includeCoverPage: "Include cover page",
+    includeCoverPageHint: "Some print services generate their own cover and don't want one in the submitted PDF",
+    leaveCoverPhotosOut: "Leave cover photos out of the interior pages",
+    leaveCoverPhotosOutHint: "Otherwise the front/back cover photos also print again inside the book",
     coverLayout: "Cover Layout",
     title: "Title",
     coverTitle: "Cover Title",
@@ -198,7 +228,8 @@ export const translations = {
     layout: "Layout",
     backCover: "Back Cover",
     backCoverPhoto: "Back Cover Photo",
-    backCoverText: "Back Cover Text",
+    backCoverText: "Back cover text",
+    backCoverTextPlaceholder: "Optional closing note",
     backCoverLayout: "Back Cover Layout",
     backCoverPhotoLabel: "Back cover photo",
     removePhoto: "Remove photo",
@@ -206,6 +237,9 @@ export const translations = {
     noCoverPhoto: "No cover photo",
     excludeCoverPhotos: "Exclude cover photos from pages",
     excludeCoverPhotosHint: "Some print services generate their own cover and don't want one in the submitted PDF",
+    plainBackCoverText: "Plain back cover text",
+    plainBackCoverTextHint: "No card behind the text - only applies when the back cover has no photo",
+    coverHint: "The cover uses the same page background as the rest of the book. Hover a photo below and click \"Set as cover\" or \"Set as back cover\" to choose the front and back cover images - they default to the book's first and last photo.",
     cardReordered: "Card reordered",
     imageReordered: "Image reordered",
     
@@ -215,6 +249,7 @@ export const translations = {
     downloadPdf: "Download PDF",
     printWith: "Print this PDF with",
     generateCaptions: "Generate Captions",
+    flatten: "Flatten",
     history: "History",
     undoLastAction: "Undo Last Action",
     
@@ -272,6 +307,9 @@ export const translations = {
     // Sidebar
     openPanel: "Open panel",
     closePanel: "Close panel",
+    albums: "Albums",
+    dark: "Dark",
+    light: "Light",
     
     // Reordering
     photosReordered: "photos reordered",
@@ -284,6 +322,8 @@ export const translations = {
     resetAllConfirmList2: "• All layout modifications",
     resetAllConfirmList3: "• All text cards",
     resetAllConfirmList4: "• Complete operation history",
+    flattenConfirmTitle: "Confirm Flatten",
+    flattenConfirmMessage: "Are you sure you want to flatten the current state? This state will become the new baseline and all history will be cleared.",
     modifications: "modifications",
     showHistory: "Show history",
     

@@ -627,10 +627,10 @@ interface GlobalConfig {
 
 type CoverLayout = "photo-title" | "full-bleed" | "text-only";
 
-const COVER_LAYOUTS: { value: CoverLayout; label: string }[] = [
-  { value: "photo-title", label: "Photo & Title" },
-  { value: "full-bleed", label: "Full-bleed Photo" },
-  { value: "text-only", label: "Text Only" },
+const COVER_LAYOUTS: { value: CoverLayout; labelKey: keyof typeof translations.en }[] = [
+  { value: "photo-title", labelKey: "coverLayoutPhotoTitle" },
+  { value: "full-bleed", labelKey: "coverLayoutFullBleed" },
+  { value: "text-only", labelKey: "coverLayoutTextOnly" },
 ];
 
 // How interior-page cards (photo and text) are mounted: "scrapbook" is
@@ -1355,10 +1355,24 @@ function PhotoGridEditor({
   });
   const [historyCollapsed, setHistoryCollapsed] = useState(true);
   const [showResetConfirmation, setShowResetConfirmation] = useState(false);
+  const [showFlattenConfirmation, setShowFlattenConfirmation] = useState(false);
 
   useEffect(() => {
     localStorage.setItem(`immich-book-history-${album.id}`, JSON.stringify(history));
   }, [history, album.id]);
+
+  // Flattened reference state - the baseline for Reset All
+  const [flattenedState, setFlattenedState] = useState<{
+    customOrdering: string[] | null;
+    slotOverrides: Record<number, string[]>;
+    manuallyMovedIds: string[];
+    layoutVariants: Record<number, number>;
+    pageCounts: Record<number, number>;
+    textCardCounts: Record<number, number>;
+    textCardContents: Record<string, string>;
+    pageCaptions: Record<number, string>;
+    cardCaptions: Record<string, string>;
+  } | null>(null);
 
   // Language preference - stored in localStorage
   const [language, setLanguage] = useState<Language>(() => {
@@ -1774,28 +1788,54 @@ function PhotoGridEditor({
   };
 
   // Reset ALL modifications
-  const handleResetAll = () => {
-    // Reset ordering
-    setCustomOrdering(null);
-    setSlotOverrides(new Map());
+  const handleFlatten = () => {
+    // Capture current state as the new baseline
+    setFlattenedState({
+      customOrdering,
+      slotOverrides: Object.fromEntries(slotOverrides),
+      manuallyMovedIds: Array.from(manuallyMovedIds),
+      layoutVariants: Object.fromEntries(layoutVariants),
+      pageCounts: Object.fromEntries(pageCounts),
+      textCardCounts: Object.fromEntries(textCardCounts),
+      textCardContents: Object.fromEntries(textCardContents),
+      pageCaptions: Object.fromEntries(pageCaptions),
+      cardCaptions: Object.fromEntries(cardCaptions),
+    });
+    
+    // Clear history AND manuallyMovedIds since this is now the new baseline
+    setHistory([]);
     setManuallyMovedIds(new Set());
     
-    // Reset layout variants
-    setLayoutVariants(new Map());
+    // Close confirmation dialog
+    setShowFlattenConfirmation(false);
+  };
+
+  const handleResetAll = () => {
+    if (flattenedState) {
+      // Reset to flattened state
+      setCustomOrdering(flattenedState.customOrdering);
+      setSlotOverrides(new Map(Object.entries(flattenedState.slotOverrides).map(([k, v]) => [Number(k), v])));
+      setLayoutVariants(new Map(Object.entries(flattenedState.layoutVariants).map(([k, v]) => [Number(k), v])));
+      setPageCounts(new Map(Object.entries(flattenedState.pageCounts).map(([k, v]) => [Number(k), v])));
+      setTextCardCounts(new Map(Object.entries(flattenedState.textCardCounts).map(([k, v]) => [Number(k), v])));
+      setTextCardContents(new Map(Object.entries(flattenedState.textCardContents)));
+      setPageCaptions(new Map(Object.entries(flattenedState.pageCaptions).map(([k, v]) => [Number(k), v])));
+      setCardCaptions(new Map(Object.entries(flattenedState.cardCaptions)));
+    } else {
+      // Reset to initial empty state
+      setCustomOrdering(null);
+      setSlotOverrides(new Map());
+      setLayoutVariants(new Map());
+      setPageCounts(new Map());
+      setTextCardCounts(new Map());
+      setTextCardContents(new Map());
+      setPageCaptions(new Map());
+      setCardCaptions(new Map());
+    }
     
-    // Reset page counts
-    setPageCounts(new Map());
-    
-    // Reset text cards
-    setTextCardCounts(new Map());
-    setTextCardContents(new Map());
-    
-    // Reset captions
-    setPageCaptions(new Map());
-    setCardCaptions(new Map());
-    
-    // Clear history
+    // Clear history and manuallyMovedIds (remove green dots)
     setHistory([]);
+    setManuallyMovedIds(new Set());
     
     // Close confirmation dialog
     setShowResetConfirmation(false);
@@ -3473,7 +3513,7 @@ function PhotoGridEditor({
           <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
         </svg>
       )}
-      {!sidebarCollapsed && (darkMode ? "Dark" : "Light")}
+      {!sidebarCollapsed && (darkMode ? t(language, "dark") : t(language, "light"))}
     </button>
   );
 
@@ -3612,7 +3652,7 @@ function PhotoGridEditor({
                   >
                     <path d="M15 18l-6-6 6-6" />
                   </svg>
-                  Albums
+                  {t(language, "albums")}
                 </button>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
                   {album.albumName}
@@ -3818,7 +3858,7 @@ function PhotoGridEditor({
                     htmlFor="pageWidth"
                     className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                   >
-                    Width
+                    {t(language, "width")}
                   </label>
                   <div className="flex items-center gap-1.5">
                     <input
@@ -3851,7 +3891,7 @@ function PhotoGridEditor({
                     htmlFor="pageHeight"
                     className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                   >
-                    Height
+                    {t(language, "height")}
                   </label>
                   <div className="flex items-center gap-1.5">
                     <input
@@ -3884,11 +3924,11 @@ function PhotoGridEditor({
                 checked={combinePages}
                 onChange={setCombinePages}
                 disabled={selectedPrinter.constrained}
-                label="Combine Pages"
+                label={t(language, "combinePages")}
                 sublabel={
                   selectedPrinter.constrained
-                    ? `${selectedPrinter.label} attend une page physique par page de PDF`
-                    : "Show spreads side by side, in the editor and the PDF"
+                    ? `${selectedPrinter.label} ${t(language, "combinePagesHintPrinter")}`
+                    : t(language, "combinePagesHint")
                 }
               />
             </div>
@@ -3902,7 +3942,7 @@ function PhotoGridEditor({
                   htmlFor="margin"
                   className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                 >
-                  Margin
+                  {t(language, "margin")}
                 </label>
                 <div className="flex items-center gap-1.5">
                   <input
@@ -3934,7 +3974,7 @@ function PhotoGridEditor({
                   htmlFor="spacing"
                   className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                 >
-                  Spacing
+                  {t(language, "spacing")}
                 </label>
                 <div className="flex items-center gap-1.5">
                   <input
@@ -3962,20 +4002,20 @@ function PhotoGridEditor({
                 </div>
               </div>
               </div>
-              <div>
-                <ToggleSwitch
-                  checked={bleedEnabled}
-                  onChange={setBleedEnabled}
-                  disabled={selectedPrinter.constrained}
-                  label="Bleed"
-                  sublabel={
-                    selectedPrinter.constrained
-                      ? selectedPrinter.bleedMm !== null
-                        ? `${selectedPrinter.label} requiert ${selectedPrinter.bleedMm}mm de fond perdu`
-                        : `${selectedPrinter.label} n'attend pas de fond perdu sur ce fichier`
-                      : "Extra border filled with the page background, for print production - trimmed off after printing"
-                  }
-                />
+                <div>
+                  <ToggleSwitch
+                    checked={bleedEnabled}
+                    onChange={setBleedEnabled}
+                    disabled={selectedPrinter.constrained}
+                    label={t(language, "bleed")}
+                    sublabel={
+                      selectedPrinter.constrained
+                        ? selectedPrinter.bleedMm !== null
+                          ? `${selectedPrinter.label} ${t(language, "bleedRequired")} ${selectedPrinter.bleedMm}${t(language, "bleedUnit")}`
+                          : `${selectedPrinter.label} ${t(language, "bleedNotRequired")}`
+                        : t(language, "bleedHint")
+                    }
+                  />
                 {bleedEnabled && (
                   <div className="mt-3 flex items-center gap-1.5">
                     <input
@@ -4180,16 +4220,16 @@ function PhotoGridEditor({
               <ToggleSwitch
                 checked={showCover}
                 onChange={setShowCover}
-                label="Include cover page"
-                sublabel="Some print services generate their own cover and don't want one in the submitted PDF"
+                label={t(language, "includeCoverPage")}
+                sublabel={t(language, "includeCoverPageHint")}
               />
               {showCover && (
                 <>
                   <ToggleSwitch
                     checked={excludeCoverPhotosFromPages}
                     onChange={setExcludeCoverPhotosFromPages}
-                    label="Leave cover photos out of the interior pages"
-                    sublabel="Otherwise the front/back cover photos also print again inside the book"
+                    label={t(language, "leaveCoverPhotosOut")}
+                    sublabel={t(language, "leaveCoverPhotosOutHint")}
                   />
                   <div>
                     <label
@@ -4222,7 +4262,7 @@ function PhotoGridEditor({
                               : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600"
                           }`}
                         >
-                          {layout.label}
+                          {t(language, layout.labelKey)}
                         </button>
                       ))}
                     </div>
@@ -4242,7 +4282,7 @@ function PhotoGridEditor({
                               : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600"
                           }`}
                         >
-                          {layout.label}
+                          {t(language, layout.labelKey)}
                         </button>
                       ))}
                     </div>
@@ -4272,14 +4312,14 @@ function PhotoGridEditor({
                       htmlFor="backCoverText"
                       className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
                     >
-                      Back cover text
+                      {t(language, "backCoverText")}
                     </label>
                     <input
                       type="text"
                       id="backCoverText"
                       value={backCoverText}
                       onChange={(e) => setBackCoverText(e.target.value)}
-                      placeholder="Optional closing note"
+                      placeholder={t(language, "backCoverTextPlaceholder")}
                       className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
                     />
                   </div>
@@ -4287,16 +4327,12 @@ function PhotoGridEditor({
                     <ToggleSwitch
                       checked={backCoverPlainText}
                       onChange={setBackCoverPlainText}
-                      label="Plain back cover text"
-                      sublabel="No card behind the text - only applies when the back cover has no photo"
+                      label={t(language, "plainBackCoverText")}
+                      sublabel={t(language, "plainBackCoverTextHint")}
                     />
                   )}
                   <p className="text-xs text-gray-400 dark:text-gray-500">
-                    The cover uses the same page background as the rest of
-                    the book. Hover a photo below and click "Set as cover"
-                    or "Set as back cover" to choose the front and back
-                    cover images - they default to the book's first and
-                    last photo.
+                    {t(language, "coverHint")}
                   </p>
                 </>
               )}
@@ -4583,7 +4619,7 @@ function PhotoGridEditor({
                       style={{ width: `${scaledWidth / 2}px` }}
                     >
                       <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm rounded-full font-medium">
-                        Page {page.pageNumber * 2 - 1} of {totalLogicalPages}
+                        {t(language, "pageOf")} {page.pageNumber * 2 - 1} {t(language, "of")} {totalLogicalPages}
                       </span>
                       {renderStyleSwitcher(page.pageNumber * 2 - 1)}
                     </div>
@@ -4595,7 +4631,7 @@ function PhotoGridEditor({
                         style={{ width: `${scaledWidth / 2}px` }}
                       >
                         <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm rounded-full font-medium">
-                          Page {page.pageNumber * 2} of {totalLogicalPages}
+                          {t(language, "pageOf")} {page.pageNumber * 2} {t(language, "of")} {totalLogicalPages}
                         </span>
                         {renderStyleSwitcher(page.pageNumber * 2)}
                       </div>
@@ -4605,7 +4641,7 @@ function PhotoGridEditor({
                   /* Single page mode - center everything */
                   <div className="text-center mb-2 flex flex-wrap items-center justify-center gap-2">
                     <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm rounded-full font-medium">
-                      Page {page.pageNumber} of {totalLogicalPages}
+                      {t(language, "pageOf")} {page.pageNumber} {t(language, "of")} {totalLogicalPages}
                     </span>
                     {renderStyleSwitcher(page.pageNumber)}
                   </div>
@@ -4870,20 +4906,7 @@ function PhotoGridEditor({
                             />
                           )}
 
-                          {/* Reset button - shown on hover for reordered cards */}
-                          {isReordered && (
-                            <div
-                              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded shadow-lg text-xs font-medium"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                handleResetCard(photoBox.id);
-                              }}
-                              title={t(language, "resetOrder")}
-                            >
-                              {t(language, "resetOrder")}
-                            </div>
-                          )}
+
                         </div>
                       );
                     }
@@ -5143,20 +5166,7 @@ function PhotoGridEditor({
                           />
                         )}
 
-                        {/* Reset button - shown on hover for reordered images */}
-                        {isReordered && (
-                          <div
-                            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded shadow-lg text-xs font-medium"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleResetCard(asset.id);
-                            }}
-                            title={t(language, "resetOrder")}
-                          >
-                            {t(language, "resetOrder")}
-                          </div>
-                        )}
+
                       </div>
                     );
                   })}
@@ -5451,6 +5461,79 @@ function PhotoGridEditor({
                   </span>
                 )}
               </button>
+              
+              <div className="w-8 border-t border-gray-200 dark:border-gray-800" />
+              
+              {/* Reset All button (collapsed) */}
+              {history.length > 0 && (
+                <button
+                  onClick={() => setShowResetConfirmation(true)}
+                  title={t(language, "resetAll")}
+                  className="w-9 h-9 rounded-lg border-2 border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center transition-colors"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="15"
+                    height="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                </button>
+              )}
+              
+              {/* Flatten button (collapsed) */}
+              {(customOrdering !== null ||
+                slotOverrides.size > 0 ||
+                manuallyMovedIds.size > 0 ||
+                layoutVariants.size > 0 ||
+                pageCounts.size > 0 ||
+                textCardCounts.size > 0 ||
+                textCardContents.size > 0 ||
+                pageCaptions.size > 0 ||
+                cardCaptions.size > 0) && (
+                <button
+                  onClick={() => setShowFlattenConfirmation(true)}
+                  title={t(language, "flatten")}
+                  className="w-9 h-9 rounded-lg border-2 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 flex items-center justify-center transition-colors"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="15"
+                    height="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M7 10v12M21 10v12M5 4h16v6H5zM3 4h2M3 22h18" />
+                  </svg>
+                </button>
+              )}
+              
+              <div className="mt-auto flex flex-col gap-3">
+                {/* Undo button (collapsed) */}
+                {history.length > 0 && (
+                  <button
+                    onClick={handleUndo}
+                    title={t(language, "undoLastAction")}
+                    className="w-9 h-9 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center transition-colors"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M3 7v6h6M21 17v-6h-6" />
+                      <path d="M20.49 9A9 9 0 0 0 5.64 5.64L3 8m18 8l-2.64 2.36A9 9 0 0 1 3.51 15" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col gap-4 p-4 min-h-full">
@@ -5476,12 +5559,38 @@ function PhotoGridEditor({
                 </button>
               </div>
 
-              {/* Reset All button */}
-              {history.length > 0 && (
-                <div>
+              {/* Reset All and Flatten buttons */}
+              {(customOrdering !== null ||
+                slotOverrides.size > 0 ||
+                manuallyMovedIds.size > 0 ||
+                layoutVariants.size > 0 ||
+                pageCounts.size > 0 ||
+                textCardCounts.size > 0 ||
+                textCardContents.size > 0 ||
+                pageCaptions.size > 0 ||
+                cardCaptions.size > 0) && (
+                <div className="flex flex-col gap-2">
+                  {history.length > 0 && (
+                    <button
+                      onClick={() => setShowResetConfirmation(true)}
+                      className="w-full px-4 py-2 rounded-lg border-2 border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        width="16"
+                        height="16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                      {t(language, "resetAll")}
+                    </button>
+                  )}
                   <button
-                    onClick={() => setShowResetConfirmation(true)}
-                    className="w-full px-4 py-2 rounded-lg border-2 border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                    onClick={() => setShowFlattenConfirmation(true)}
+                    className="w-full px-4 py-2 rounded-lg border-2 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
                   >
                     <svg
                       viewBox="0 0 24 24"
@@ -5491,9 +5600,9 @@ function PhotoGridEditor({
                       stroke="currentColor"
                       strokeWidth="2"
                     >
-                      <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      <path d="M7 10v12M21 10v12M5 4h16v6H5zM3 4h2M3 22h18" />
                     </svg>
-                    {t(language, "resetAll")}
+                    {t(language, "flatten")}
                   </button>
                 </div>
               )}
@@ -5623,6 +5732,7 @@ function PhotoGridEditor({
       )}
 
       {/* Reset All Confirmation Dialog */}
+      {/* Reset All Confirmation Dialog */}
       {showResetConfirmation && (
         <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-800">
@@ -5650,6 +5760,34 @@ function PhotoGridEditor({
                 className="flex-1 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium text-sm transition-colors"
               >
                 {t(language, "resetAll")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Flatten Confirmation Dialog */}
+      {showFlattenConfirmation && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-800">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-3">
+              {t(language, "flattenConfirmTitle")}
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+              {t(language, "flattenConfirmMessage")}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowFlattenConfirmation(false)}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium text-sm transition-colors"
+              >
+                {t(language, "cancel")}
+              </button>
+              <button
+                onClick={handleFlatten}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-sm transition-colors"
+              >
+                {t(language, "flatten")}
               </button>
             </div>
           </div>
