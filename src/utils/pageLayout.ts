@@ -88,6 +88,21 @@ function seededRandom(seed: string): number {
 }
 
 function naturalAspectRatio(asset: AssetResponseDto): number {
+  // Every asset in this app comes from Immich's timeline bucket API
+  // (getTimeBuckets/getTimeBucket - see loadAlbumAssets in PhotoGrid.tsx),
+  // whose rows carry a `ratio` field (width/height, already corrected for
+  // EXIF rotation) - confirmed against real data (a 922x2000 portrait
+  // photo reports ratio: 0.461). That response is columnar
+  // (TimeBucketAssetResponseDto), a different shape than AssetResponseDto
+  // that `ratio` gets cast into, so it isn't part of AssetResponseDto's
+  // own declared type - read as an untyped extra property instead.
+  const ratio = (asset as { ratio?: number }).ratio;
+  if (typeof ratio === "number" && ratio > 0) {
+    return ratio;
+  }
+  // Fallback for an asset that somehow doesn't carry `ratio` (e.g. one
+  // fetched via getAssetInfo() instead, which types exifInfo but was
+  // never observed populated for a bucket-sourced asset).
   const width = asset.exifInfo?.exifImageWidth || 1;
   const height = asset.exifInfo?.exifImageHeight || 1;
   // Orientations 6 and 8 are the two 90-degree rotations - either way the
