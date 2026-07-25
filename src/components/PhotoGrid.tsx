@@ -1538,14 +1538,19 @@ function PhotoGridEditor({
   const [previewWidth, setPreviewWidth] = useState(0);
 
   useEffect(() => {
-    const el = previewContainerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      setPreviewWidth(entries[0].contentRect.width);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+    const updateWidth = () => {
+      const sidebarWidth = sidebarCollapsed ? 64 : 320; // w-16 : w-80
+      const historyWidth = historyCollapsed ? 64 : 320; // w-16 : w-80
+      const padding = 128; // px-16 on both sides + extra margin
+      const safetyMargin = 100; // Extra safety to prevent overflow
+      const availableWidth = window.innerWidth - sidebarWidth - historyWidth - padding - safetyMargin;
+      setPreviewWidth(Math.max(400, availableWidth)); // Minimum 400px
+    };
+    
+    updateWidth();
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
+  }, [sidebarCollapsed, historyCollapsed]);
 
   useEffect(() => {
     loadAlbumAssets();
@@ -5761,12 +5766,12 @@ function PhotoGridEditor({
         )}
         
         {/* Scrollable content area - only this area scrolls, not the panels */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="flex-1 overflow-y-auto custom-scrollbar overflow-x-hidden">
           {/* Live Preview - always shown; the generated PDF (if any)
               appears below once ready, rather than replacing this editor. */}
           <div
             ref={previewContainerRef}
-            className="space-y-8 pb-8 px-4 sm:px-0 pt-6"
+            className="space-y-8 pb-8 px-4 sm:px-16 pt-6 max-w-full"
           >
           {showCover && separatedCover &&
             (() => {
