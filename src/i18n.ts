@@ -290,7 +290,7 @@ export const translations = {
     generatePdf: "Generate PDF",
     generating: "Generating...",
     downloadPdf: "Download PDF",
-    printWith: "Print this PDF with",
+    printWith: "Print this photo book with",
     generateCaptions: "Generate Captions",
     flatten: "Flatten",
     history: "History",
