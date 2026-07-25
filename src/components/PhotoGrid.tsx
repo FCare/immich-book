@@ -644,7 +644,6 @@ function PhotoGridEditor({
   const [pageWidth, setPageWidth] = useState(initialConfig.pageWidth);
   const [pageHeight, setPageHeight] = useState(initialConfig.pageHeight);
   const [margin, setMargin] = useState(initialConfig.margin);
-  const [combinePages, setCombinePages] = useState(initialConfig.combinePages);
 
   // Layout settings
   const [spacing, setSpacing] = useState(initialConfig.spacing);
@@ -695,7 +694,6 @@ function PhotoGridEditor({
       setFormatCategory(firstFormat.category);
     }
     if (printer.constrained) {
-      setCombinePages(false);
       if (printer.bleedMm !== null) {
         setBleedEnabled(true);
         setBleed(mmToPixels(printer.bleedMm));
@@ -909,6 +907,7 @@ function PhotoGridEditor({
   const [coverTitle, setCoverTitle] = useState(
     initialConfig.coverTitle || album.albumName,
   );
+  const [coverTextSize, setCoverTextSize] = useState(initialConfig.coverTextSize);
   const [coverAssetId, setCoverAssetId] = useState<string | null>(
     initialConfig.coverAssetId,
   );
@@ -927,12 +926,10 @@ function PhotoGridEditor({
   const [backCoverFrameSize, setBackCoverFrameSize] = useState<FrameSize | null>(
     initialConfig.backCoverFrameSize,
   );
-  const [backCoverNoPhoto, setBackCoverNoPhoto] = useState(
-    initialConfig.backCoverNoPhoto,
-  );
   const [backCoverText, setBackCoverText] = useState(
     initialConfig.backCoverText,
   );
+  const [backCoverTextSize, setBackCoverTextSize] = useState(initialConfig.backCoverTextSize);
   const [backCoverPlainText, setBackCoverPlainText] = useState(
     initialConfig.backCoverPlainText,
   );
@@ -1167,7 +1164,6 @@ function PhotoGridEditor({
       pageWidth,
       pageHeight,
       margin,
-      combinePages,
       spacing,
       filterVideos: false, // Never filter videos - simpler UX
       forceTimeline,
@@ -1198,14 +1194,15 @@ function PhotoGridEditor({
       spineTextSize,
       spineTitle,
       coverTitle,
+      coverTextSize,
       coverAssetId,
       coverLayout,
       coverFrameSize,
       backCoverAssetId,
       backCoverLayout,
       backCoverFrameSize,
-      backCoverNoPhoto,
       backCoverText,
+      backCoverTextSize,
       backCoverPlainText,
       excludeCoverPhotosFromPages: true, // Always true - simpler UX
     };
@@ -1217,7 +1214,6 @@ function PhotoGridEditor({
     pageWidth,
     pageHeight,
     margin,
-    combinePages,
     spacing,
     filterVideos,
     forceTimeline,
@@ -1244,14 +1240,15 @@ function PhotoGridEditor({
     spineTextSize,
     spineTitle,
     coverTitle,
+    coverTextSize,
     coverAssetId,
     coverLayout,
     coverFrameSize,
     backCoverAssetId,
     backCoverLayout,
     backCoverFrameSize,
-    backCoverNoPhoto,
     backCoverText,
+    backCoverTextSize,
     backCoverPlainText,
     excludeCoverPhotosFromPages,
     textCardCounts,
@@ -1384,7 +1381,6 @@ function PhotoGridEditor({
         pageHeight: validPageHeight,
         margin: layoutMargin,
         spacing: validSpacing,
-        combinePages,
         forceTimeline,
         layoutVariants: new Map(layoutVariants).set(
           logicalPageNumber,
@@ -1582,7 +1578,6 @@ function PhotoGridEditor({
       setAssets,
       setNewAssets,
       setMissingAssetIds,
-      setBackCoverNoPhoto,
       setFlattenedState,
       setShowFlattenConfirmation,
       setShowResetConfirmation,
@@ -1631,17 +1626,15 @@ function PhotoGridEditor({
   }, [filteredAssets, coverAssetId]);
 
   // Back cover photo - explicit pick if the user made one, otherwise the
-  // book's last photo in its current order, unless backCoverNoPhoto was
-  // explicitly set (a text-only or empty back cover). Independent of the
-  // front cover photo.
+  // book's last photo in its current order. Independent of the front
+  // cover photo.
   const backCoverAsset = useMemo(() => {
-    if (backCoverNoPhoto) return null;
     if (backCoverAssetId) {
       const picked = filteredAssets.find((a) => a.id === backCoverAssetId);
       if (picked) return picked;
     }
     return filteredAssets[filteredAssets.length - 1] ?? null;
-  }, [filteredAssets, backCoverAssetId, backCoverNoPhoto]);
+  }, [filteredAssets, backCoverAssetId]);
 
   // Interior pages leave out the cover/back-cover photos when the user
   // opts in - otherwise each one prints twice (once on its cover, again
@@ -1787,7 +1780,6 @@ function PhotoGridEditor({
       pageHeight: validPageHeight,
       margin: layoutMargin,
       spacing: validSpacing,
-      combinePages,
       forceTimeline,
       layoutVariants,
       pageCounts,
@@ -1802,7 +1794,6 @@ function PhotoGridEditor({
     validSpacing,
     validPageWidth,
     validPageHeight,
-    combinePages,
     forceTimeline,
     layoutVariants,
     pageCounts,
@@ -1876,7 +1867,6 @@ function PhotoGridEditor({
       if (!backCoverAsset) return;
       const prevAssetId = backCoverAsset.id;
       setBackCoverAssetId(photoAsset.id);
-      setBackCoverNoPhoto(false);
       setHistory((prev) => [
         {
           type: "set-back-cover",
@@ -2111,7 +2101,6 @@ function PhotoGridEditor({
           prev.map((a) => (a.id === oldBackCover.id ? newAsset : a)),
         );
         setBackCoverAssetId(newAsset.id);
-        setBackCoverNoPhoto(false);
         setNewAssets((prev) => [
           ...prev.filter((a) => a.id !== newAsset.id),
           oldBackCover,
@@ -2150,7 +2139,7 @@ function PhotoGridEditor({
         ]);
         setTimeout(() => {
           const config: AlbumConfig = {
-            printerId, pageWidth, pageHeight, margin, combinePages, spacing,
+            printerId, pageWidth, pageHeight, margin, spacing,
             filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
             fontSize, pageBackground, cardStyle, customOrdering,
             layoutVariants: Object.fromEntries(layoutVariants),
@@ -2165,7 +2154,7 @@ function PhotoGridEditor({
             slotOverrides: Object.fromEntries(slotOverrides),
             manuallyMovedIds: Array.from(manuallyMovedIds),
             showCover, coverTitle, coverAssetId, coverLayout,
-            backCoverAssetId, backCoverLayout, backCoverNoPhoto,
+            backCoverAssetId, backCoverLayout,
             backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
           };
           saveAlbumConfig(album.id, config, updatedAssets);
@@ -2193,7 +2182,7 @@ function PhotoGridEditor({
         ]);
         setTimeout(() => {
           const config: AlbumConfig = {
-            printerId, pageWidth, pageHeight, margin, combinePages, spacing,
+            printerId, pageWidth, pageHeight, margin, spacing,
             filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
             fontSize, pageBackground, cardStyle, customOrdering,
             layoutVariants: Object.fromEntries(layoutVariants),
@@ -2208,7 +2197,7 @@ function PhotoGridEditor({
             slotOverrides: Object.fromEntries(slotOverrides),
             manuallyMovedIds: Array.from(manuallyMovedIds),
             showCover, coverTitle, coverAssetId, coverLayout,
-            backCoverAssetId, backCoverLayout, backCoverNoPhoto,
+            backCoverAssetId, backCoverLayout,
             backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
           };
           saveAlbumConfig(album.id, config, updatedAssets);
@@ -2519,38 +2508,8 @@ function PhotoGridEditor({
     };
   }, [frameResizeState]);
 
-  // Group page photos by logical page number - matches the numbering
-  // already used for pageCaptions/the "Page X of Y" UI: in combined mode
-  // each physical (spread) page holds two logical pages side by side,
-  // split at the horizontal midpoint.
-  const logicalPages = useMemo(() => {
-    const result: { number: number; photos: (typeof pages)[0]["photos"] }[] =
-      [];
-    for (const page of pages) {
-      if (!combinePages) {
-        result.push({ number: page.pageNumber, photos: page.photos });
-        continue;
-      }
-      const half = page.width / 2;
-      const rightPhotos = page.photos.filter((p) => p.x >= half);
-      result.push({
-        number: page.pageNumber * 2 - 1,
-        photos: page.photos.filter((p) => p.x < half),
-      });
-      if (rightPhotos.length > 0) {
-        result.push({ number: page.pageNumber * 2, photos: rightPhotos });
-      }
-    }
-    return result;
-  }, [pages, combinePages]);
-
-  // Determine pageLayout based on combinePages setting
-  const pageLayout: "singlePage" | "twoPageLeft" = combinePages
-    ? "singlePage"
-    : "twoPageLeft";
-
   // Calculate total logical pages for display purposes
-  const totalLogicalPages = combinePages ? pages.length * 2 : pages.length;
+  const totalLogicalPages = pages.length;
 
   // Floating pill toolbar for per-page layout controls - shuffle the
   // bento arrangement, force a photo count, or swap some slots for text
@@ -2752,7 +2711,6 @@ function PhotoGridEditor({
                     pageWidth,
                     pageHeight,
                     margin,
-                    combinePages,
                     spacing,
                     filterVideos,
                     forceTimeline,
@@ -2783,7 +2741,6 @@ function PhotoGridEditor({
                     backCoverAssetId,
                     backCoverLayout,
                     backCoverFrameSize,
-                    backCoverNoPhoto,
                     backCoverText,
                     backCoverPlainText,
                     excludeCoverPhotosFromPages,
@@ -2941,12 +2898,13 @@ function PhotoGridEditor({
         backCoverLayout,
         backCoverFrameSize,
         backCoverText,
+        backCoverTextSize,
         backCoverPlainText,
         fontSize,
         coverLayout,
         coverFrameSize,
         coverTitle,
-        pageLayout,
+        coverTextSize,
         showCover,
         pageBackground,
         spineColor,
@@ -2954,7 +2912,6 @@ function PhotoGridEditor({
         spineTextColor,
         spineTitle,
         pages,
-        combinePages,
         showCaptions,
         pageCaptions,
         cardStyle,
@@ -3504,8 +3461,6 @@ function PhotoGridEditor({
               setPageHeight={setPageHeight}
               isPageWidthValid={isPageWidthValid}
               isPageHeightValid={isPageHeightValid}
-              combinePages={combinePages}
-              setCombinePages={setCombinePages}
             />
           )}
 
@@ -3565,16 +3520,18 @@ function PhotoGridEditor({
               setSpineTitle={setSpineTitle}
               coverTitle={coverTitle}
               setCoverTitle={setCoverTitle}
+              coverTextSize={coverTextSize}
+              setCoverTextSize={setCoverTextSize}
               setHistory={setHistory}
               coverLayout={coverLayout}
               setCoverLayout={setCoverLayout}
               backCoverLayout={backCoverLayout}
               setBackCoverLayout={setBackCoverLayout}
               backCoverAsset={backCoverAsset}
-              backCoverNoPhoto={backCoverNoPhoto}
-              setBackCoverNoPhoto={setBackCoverNoPhoto}
               backCoverPlainText={backCoverPlainText}
               setBackCoverPlainText={setBackCoverPlainText}
+              backCoverTextSize={backCoverTextSize}
+              setBackCoverTextSize={setBackCoverTextSize}
             />
           )}
         </div>
@@ -3752,6 +3709,7 @@ function PhotoGridEditor({
               backCoverLayout={backCoverLayout}
               backCoverText={backCoverText}
               setBackCoverText={setBackCoverText}
+              backCoverTextSize={backCoverTextSize}
               setHistory={setHistory}
               language={language}
               spineColor={spineColor}
@@ -3762,6 +3720,7 @@ function PhotoGridEditor({
               coverLayout={coverLayout}
               coverTitle={coverTitle}
               setCoverTitle={setCoverTitle}
+              coverTextSize={coverTextSize}
             />
           )}
 
@@ -3781,6 +3740,7 @@ function PhotoGridEditor({
               swapFirstId={swapFirstId}
               coverTitle={coverTitle}
               setCoverTitle={setCoverTitle}
+              coverTextSize={coverTextSize}
               setHistory={setHistory}
               album={album}
               language={language}
@@ -3805,54 +3765,15 @@ function PhotoGridEditor({
               previewWidth > 0
                 ? Math.min(1, previewWidth / (displayWidth + bleedPreviewPt * 2))
                 : 1;
-            const scaledWidth = displayWidth * scale;
-
             return (
               <div key={page.pageNumber} data-page-number={page.pageNumber} className="relative">
                 {/* Page number and style controls */}
-                {combinePages ? (
-                  /* Combined pages mode - show controls above each logical page */
-                  <div
-                    className="mb-2 flex"
-                    style={{
-                      width: `${scaledWidth}px`,
-                      marginLeft: "auto",
-                      marginRight: "auto",
-                    }}
-                  >
-                    {/* Left page controls */}
-                    <div
-                      className="flex flex-wrap items-center justify-center gap-2"
-                      style={{ width: `${scaledWidth / 2}px` }}
-                    >
-                      <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm rounded-full font-medium">
-                        {t(language, "pageOf")} {page.pageNumber * 2 - 1} {t(language, "of")} {totalLogicalPages}
-                      </span>
-                      {renderStyleSwitcher(page.pageNumber * 2 - 1)}
-                    </div>
-
-                    {/* Right page controls (only if it exists) */}
-                    {page.pageNumber * 2 <= totalLogicalPages && (
-                      <div
-                        className="flex flex-wrap items-center justify-center gap-2"
-                        style={{ width: `${scaledWidth / 2}px` }}
-                      >
-                        <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm rounded-full font-medium">
-                          {t(language, "pageOf")} {page.pageNumber * 2} {t(language, "of")} {totalLogicalPages}
-                        </span>
-                        {renderStyleSwitcher(page.pageNumber * 2)}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  /* Single page mode - center everything */
-                  <div className="text-center mb-2 flex flex-wrap items-center justify-center gap-2">
-                    <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm rounded-full font-medium">
-                      {t(language, "pageOf")} {page.pageNumber} {t(language, "of")} {totalLogicalPages}
-                    </span>
-                    {renderStyleSwitcher(page.pageNumber)}
-                  </div>
-                )}
+                <div className="text-center mb-2 flex flex-wrap items-center justify-center gap-2">
+                  <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm rounded-full font-medium">
+                    {t(language, "pageOf")} {page.pageNumber} {t(language, "of")} {totalLogicalPages}
+                  </span>
+                  {renderStyleSwitcher(page.pageNumber)}
+                </div>
 
                 {/* Page container - laid out at its true (unscaled) size,
                     then shrunk to fit the preview column with CSS `zoom`
@@ -3894,31 +3815,9 @@ function PhotoGridEditor({
                         height: displayHeight,
                       }}
                     >
-                  {/* Page break indicator for combined pages */}
-                  {combinePages && (
-                    <div
-                      className="absolute top-0 bottom-0 border-l border-dashed border-gray-300 z-10 pointer-events-none"
-                      style={{ left: `${displayWidth / 2}px` }}
-                    />
-                  )}
-
-                  {/* Page caption(s) - editable, alternating margin band */}
+                  {/* Page caption - editable margin band */}
                   {showCaptions &&
-                    (combinePages
-                      ? [
-                          {
-                            key: page.pageNumber * 2 - 1,
-                            left: 0,
-                            width: displayWidth / 2,
-                          },
-                          {
-                            key: page.pageNumber * 2,
-                            left: displayWidth / 2,
-                            width: displayWidth / 2,
-                          },
-                        ]
-                      : [{ key: page.pageNumber, left: 0, width: displayWidth }]
-                    ).map((band) => {
+                    [{ key: page.pageNumber, left: 0, width: displayWidth }].map((band) => {
                       // Text size is the priority: the chosen font size is
                       // always honored, and the band grows to fit it if
                       // the page margin alone isn't tall enough. Uses the
@@ -4511,7 +4410,7 @@ function PhotoGridEditor({
                               // Save snapshot async
                               setTimeout(() => {
                                 const config: AlbumConfig = {
-                                  printerId, pageWidth, pageHeight, margin, combinePages, spacing,
+                                  printerId, pageWidth, pageHeight, margin, spacing,
                                   filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
                                   fontSize, pageBackground, cardStyle, customOrdering,
                                   layoutVariants: Object.fromEntries(layoutVariants),
@@ -4526,7 +4425,7 @@ function PhotoGridEditor({
                                   slotOverrides: Object.fromEntries(slotOverrides),
                                   manuallyMovedIds: Array.from(manuallyMovedIds),
                                   showCover, coverTitle, coverAssetId, coverLayout,
-                                  backCoverAssetId, backCoverLayout, backCoverNoPhoto,
+                                  backCoverAssetId, backCoverLayout,
                                   backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
                                 };
                                 saveAlbumConfig(album.id, config, updatedAssets);
@@ -4704,7 +4603,7 @@ function PhotoGridEditor({
               backCoverLayout={backCoverLayout}
               immichConfig={immichConfig}
               backCoverPlainText={backCoverPlainText}
-              fontSize={fontSize}
+              backCoverTextSize={backCoverTextSize}
             />
           )}
         </div>

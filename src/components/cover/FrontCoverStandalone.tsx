@@ -35,6 +35,7 @@ export interface FrontCoverStandaloneProps {
   swapFirstId: string | null;
   coverTitle: string;
   setCoverTitle: (title: string) => void;
+  coverTextSize: number;
   setHistory: Dispatch<SetStateAction<HistoryOperation[]>>;
   album: AlbumResponseDto;
   language: Language;
@@ -62,6 +63,7 @@ export function FrontCoverStandalone({
   swapFirstId,
   coverTitle,
   setCoverTitle,
+  coverTextSize,
   setHistory,
   album,
   language,
@@ -171,7 +173,7 @@ export function FrontCoverStandalone({
                 opacity: 0.3,
               }}
             />
-            {titleInput(displayWidth * 0.09, SCRAPBOOK.ink)}
+            {titleInput(coverTextSize, SCRAPBOOK.ink)}
             <div
               style={{
                 width: "30%",
@@ -267,7 +269,7 @@ export function FrontCoverStandalone({
                 style={{ height: "20%" }}
               >
                 {titleInput(
-                  displayWidth * 0.055,
+                  coverTextSize,
                   SCRAPBOOK.ink,
                   "focus:bg-white/60",
                 )}
@@ -305,7 +307,7 @@ export function FrontCoverStandalone({
                   "linear-gradient(to top, rgba(0,0,0,0.55), transparent)",
               }}
             >
-              {titleInput(displayWidth * 0.06, "#FFFFFF")}
+              {titleInput(coverTextSize, "#FFFFFF")}
             </div>
           </>
         )}

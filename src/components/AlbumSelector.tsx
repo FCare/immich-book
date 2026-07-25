@@ -48,6 +48,7 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
       if (!res.ok) {
         throw new Error(`Server responded with ${res.status}`);
       }
+      localStorage.removeItem(`immich-book-history-${albumToReset.id}`);
       setAlbumToReset(null);
     } catch (err) {
       console.error("Failed to reset photobook:", err);

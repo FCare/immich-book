@@ -1,7 +1,6 @@
 import { t, type Language } from "../../i18n";
 import { mmToPixels, pixelsToMm } from "../../utils/pageLayout";
 import { PRINTERS, type Printer } from "../PhotoGrid";
-import { ToggleSwitch } from "../ToggleSwitch";
 
 export interface SidebarPageSettingsProps {
   language: Language;
@@ -16,8 +15,6 @@ export interface SidebarPageSettingsProps {
   setPageHeight: (px: number) => void;
   isPageWidthValid: boolean;
   isPageHeightValid: boolean;
-  combinePages: boolean;
-  setCombinePages: (next: boolean) => void;
 }
 
 export function SidebarPageSettings({
@@ -33,8 +30,6 @@ export function SidebarPageSettings({
   setPageHeight,
   isPageWidthValid,
   isPageHeightValid,
-  combinePages,
-  setCombinePages,
 }: SidebarPageSettingsProps) {
   return (
     <div className="flex flex-col gap-5">
@@ -200,17 +195,6 @@ export function SidebarPageSettings({
           </div>
         </div>
       </div>
-      <ToggleSwitch
-        checked={combinePages}
-        onChange={setCombinePages}
-        disabled={selectedPrinter.constrained}
-        label={t(language, "combinePages")}
-        sublabel={
-          selectedPrinter.constrained
-            ? `${selectedPrinter.label} ${t(language, "combinePagesHintPrinter")}`
-            : t(language, "combinePagesHint")
-        }
-      />
     </div>
   );
 }

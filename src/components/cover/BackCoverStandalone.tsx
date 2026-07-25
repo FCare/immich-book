@@ -44,7 +44,7 @@ export interface BackCoverStandaloneProps {
   backCoverLayout: CoverLayout;
   immichConfig: ImmichConfig;
   backCoverPlainText: boolean;
-  fontSize: number;
+  backCoverTextSize: number;
 }
 
 export function BackCoverStandalone({
@@ -69,7 +69,7 @@ export function BackCoverStandalone({
   backCoverLayout,
   immichConfig,
   backCoverPlainText,
-  fontSize,
+  backCoverTextSize,
 }: BackCoverStandaloneProps) {
   const displayWidth = toPoints(validPageWidth);
   const displayHeight = toPoints(validPageHeight);
@@ -185,7 +185,7 @@ export function BackCoverStandalone({
                 opacity: 0.3,
               }}
             />
-            {backCoverTextInput(displayWidth * 0.09, SCRAPBOOK.ink)}
+            {backCoverTextInput(backCoverTextSize, SCRAPBOOK.ink)}
             <div
               style={{
                 width: "30%",
@@ -245,7 +245,7 @@ export function BackCoverStandalone({
                     height: displayHeight,
                     fontFamily: "Caveat",
                     fontWeight: 500,
-                    fontSize: `${fontSize * 1.9}px`,
+                    fontSize: `${backCoverTextSize}px`,
                     color: SCRAPBOOK.ink,
                   }}
                 />
@@ -261,7 +261,7 @@ export function BackCoverStandalone({
             const cardTop = (displayHeight - cardHeight) / 2;
             const cardLeft = (displayWidth - cardWidth) / 2;
             const frameInset = Math.max(4, cardWidth * 0.045);
-            const captionStripHeight = fontSize * 1.4;
+            const captionStripHeight = backCoverTextSize * 1.4;
             return (
               <div
                 className="absolute"
@@ -330,7 +330,7 @@ export function BackCoverStandalone({
                       : cardHeight,
                     fontFamily: "Caveat",
                     fontWeight: 500,
-                    fontSize: `${imageUrl ? fontSize * 1.3 : fontSize * 1.5}px`,
+                    fontSize: `${backCoverTextSize}px`,
                     color: SCRAPBOOK.ink,
                   }}
                 />
@@ -382,7 +382,7 @@ export function BackCoverStandalone({
                   }}
                 >
                   {backCoverTextInput(
-                    displayWidth * 0.06,
+                    backCoverTextSize,
                     "#FFFFFF",
                   )}
                 </div>

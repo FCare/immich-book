@@ -23,16 +23,18 @@ export interface SidebarCoverSettingsProps {
   setSpineTitle: (s: string) => void;
   coverTitle: string;
   setCoverTitle: (s: string) => void;
+  coverTextSize: number;
+  setCoverTextSize: (n: number) => void;
   setHistory: Dispatch<SetStateAction<HistoryOperation[]>>;
   coverLayout: CoverLayout;
   setCoverLayout: (layout: CoverLayout) => void;
   backCoverLayout: CoverLayout;
   setBackCoverLayout: (layout: CoverLayout) => void;
   backCoverAsset: AssetResponseDto | null;
-  backCoverNoPhoto: boolean;
-  setBackCoverNoPhoto: (next: boolean) => void;
   backCoverPlainText: boolean;
   setBackCoverPlainText: (next: boolean) => void;
+  backCoverTextSize: number;
+  setBackCoverTextSize: (n: number) => void;
 }
 
 export function SidebarCoverSettings({
@@ -52,16 +54,18 @@ export function SidebarCoverSettings({
   setSpineTitle,
   coverTitle,
   setCoverTitle,
+  coverTextSize,
+  setCoverTextSize,
   setHistory,
   coverLayout,
   setCoverLayout,
   backCoverLayout,
   setBackCoverLayout,
   backCoverAsset,
-  backCoverNoPhoto,
-  setBackCoverNoPhoto,
   backCoverPlainText,
   setBackCoverPlainText,
+  backCoverTextSize,
+  setBackCoverTextSize,
 }: SidebarCoverSettingsProps) {
   return (
     <div className="flex flex-col gap-5">
@@ -213,6 +217,25 @@ export function SidebarCoverSettings({
         </div>
       </div>
       <div>
+        <label
+          htmlFor="coverTextSize"
+          className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+        >
+          {t(language, "coverTextSize")}
+        </label>
+        <input
+          type="number"
+          id="coverTextSize"
+          value={coverTextSize}
+          onChange={(e) => setCoverTextSize(Number(e.target.value))}
+          min="8"
+          max="96"
+          step="1"
+          className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-20"
+        />
+        <span className="ml-1.5 text-xs text-gray-400 dark:text-gray-500">pt</span>
+      </div>
+      <div>
         <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
           {t(language, "backCoverLayout")}
         </span>
@@ -232,57 +255,37 @@ export function SidebarCoverSettings({
           ))}
         </div>
       </div>
+      <div>
+        <label
+          htmlFor="backCoverTextSize"
+          className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2"
+        >
+          {t(language, "backCoverTextSize")}
+        </label>
+        <input
+          type="number"
+          id="backCoverTextSize"
+          value={backCoverTextSize}
+          onChange={(e) => setBackCoverTextSize(Number(e.target.value))}
+          min="8"
+          max="96"
+          step="1"
+          className="px-2.5 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-20"
+        />
+        <span className="ml-1.5 text-xs text-gray-400 dark:text-gray-500">pt</span>
+      </div>
       {(backCoverLayout === "photo-title" ||
-        backCoverLayout === "full-bleed") && (
-        <div>
-          <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-            {t(language, "backCoverPhotoLabel")}
-          </span>
-          {backCoverAsset ? (
-            backCoverNoPhoto ? (
-              <button
-                onClick={() => {
-                  console.log(`[RESTORE] Restauration de la photo de 4ème de couverture : ${backCoverAsset.originalFileName} (ID: ${backCoverAsset.id})`);
-                  setBackCoverNoPhoto(false);
-                  setHistory((prev) => [
-                    {
-                      type: "restore-back-cover-photo",
-                      timestamp: Date.now(),
-                    },
-                    ...prev,
-                  ]);
-                }}
-                className="px-3 py-1.5 rounded-full text-xs font-semibold border border-green-200 dark:border-green-700 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
-              >
-                {t(language, "restorePhoto")}
-              </button>
-            ) : (
-              <button
-                onClick={() => {
-                  console.log(`[REMOVE] Retrait de la photo de 4ème de couverture : ${backCoverAsset.originalFileName} (ID: ${backCoverAsset.id})`);
-                  setBackCoverNoPhoto(true);
-                  setHistory((prev) => [
-                    {
-                      type: "remove-back-cover-photo",
-                      assetId: backCoverAsset.id,
-                      assetName: backCoverAsset.originalFileName,
-                      timestamp: Date.now(),
-                    },
-                    ...prev,
-                  ]);
-                }}
-                className="px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-red-300 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-              >
-                {t(language, "removePhoto")}
-              </button>
-            )
-          ) : (
+        backCoverLayout === "full-bleed") &&
+        !backCoverAsset && (
+          <div>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+              {t(language, "backCoverPhotoLabel")}
+            </span>
             <p className="text-xs text-gray-400 dark:text-gray-500">
               {t(language, "noPhotoHover")}
             </p>
-          )}
-        </div>
-      )}
+          </div>
+        )}
       {backCoverLayout === "photo-title" && (
         <ToggleSwitch
           checked={backCoverPlainText}

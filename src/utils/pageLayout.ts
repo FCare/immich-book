@@ -68,7 +68,6 @@ export interface LayoutOptions {
   pageHeight: number; // in pixels
   margin: number; // in pixels
   spacing: number; // in pixels
-  combinePages?: boolean; // combine two pages into one PDF page
   forceTimeline?: boolean; // preserve chronological order instead of grouping by aspect ratio
   // Bumping a page's variant reshuffles its bento arrangement (same
   // photos, different split pattern) without changing anything else -
@@ -665,58 +664,6 @@ export function calculatePageLayout(
 
     index += Math.max(1, result.consumed);
     pageNumber++;
-  }
-
-  // Combine pages if requested
-  if (options.combinePages) {
-    const combinedPages: Page[] = [];
-    for (let i = 0; i < pages.length; i += 2) {
-      const leftPage = pages[i];
-      const rightPage = pages[i + 1];
-
-      if (rightPage) {
-        // Combine two pages side-by-side
-        const combinedPage: Page = {
-          pageNumber: Math.floor(i / 2) + 1,
-          photos: [
-            // Left page photos - keep as is
-            ...leftPage.photos,
-            // Right page photos - shift horizontally by page width
-            ...rightPage.photos.map((photo) => ({
-              ...photo,
-              x: photo.x + pageDimensions.width,
-            })),
-          ],
-          width: pageDimensions.width * 2,
-          height: pageDimensions.height,
-          splits: [
-            ...leftPage.splits,
-            ...rightPage.splits.map((split) => ({
-              ...split,
-              rect: { ...split.rect, x: split.rect.x + pageDimensions.width },
-            })),
-          ],
-        };
-        combinedPages.push(combinedPage);
-      } else {
-        // Odd number of pages - last page stays single
-        combinedPages.push({
-          ...leftPage,
-          pageNumber: Math.floor(i / 2) + 1,
-          width: pageDimensions.width * 2, // Keep same width for consistency
-        });
-      }
-    }
-    if (combinedPages.length % 2 !== 0) {
-      combinedPages.push(
-        blankPage(
-          combinedPages.length + 1,
-          pageDimensions.width * 2,
-          pageDimensions.height,
-        ),
-      );
-    }
-    return combinedPages;
   }
 
   if (pages.length % 2 !== 0) {

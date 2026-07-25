@@ -212,7 +212,6 @@ export interface UseEditHistoryParams {
   setAssets: Dispatch<SetStateAction<AssetResponseDto[]>>;
   setNewAssets: Dispatch<SetStateAction<AssetResponseDto[]>>;
   setMissingAssetIds: Dispatch<SetStateAction<Set<string>>>;
-  setBackCoverNoPhoto: Dispatch<SetStateAction<boolean>>;
   setFlattenedState: Dispatch<SetStateAction<FlattenedState | null>>;
   setShowFlattenConfirmation: Dispatch<SetStateAction<boolean>>;
   setShowResetConfirmation: Dispatch<SetStateAction<boolean>>;
@@ -259,7 +258,6 @@ export function useEditHistory(params: UseEditHistoryParams) {
     setAssets,
     setNewAssets,
     setMissingAssetIds,
-    setBackCoverNoPhoto,
     setFlattenedState,
     setShowFlattenConfirmation,
     setShowResetConfirmation,
@@ -498,18 +496,6 @@ export function useEditHistory(params: UseEditHistoryParams) {
             return next;
           });
         }
-        break;
-
-      case "remove-back-cover-photo":
-        // Undo remove: restore the photo
-        console.log(`[UNDO] Restauration de la photo de 4ème de couverture : ${lastOp.assetName} (ID: ${lastOp.assetId})`);
-        setBackCoverNoPhoto(false);
-        break;
-
-      case "restore-back-cover-photo":
-        // Undo restore: hide the photo again
-        console.log(`[UNDO] Retrait de la photo de 4ème de couverture`);
-        setBackCoverNoPhoto(true);
         break;
     }
 

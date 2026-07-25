@@ -264,11 +264,12 @@ export interface BuildPdfDocumentParams {
   separatedCover: boolean;
   backCoverLayout: CoverLayout;
   backCoverText: string;
+  backCoverTextSize: number;
   backCoverPlainText: boolean;
   fontSize: number;
   coverLayout: CoverLayout;
   coverTitle: string;
-  pageLayout: "singlePage" | "twoPageLeft";
+  coverTextSize: number;
   showCover: boolean;
   pageBackground: PageBackground;
   spineColor: string;
@@ -276,7 +277,6 @@ export interface BuildPdfDocumentParams {
   spineTextColor: string;
   spineTitle: string;
   pages: LayoutPage[];
-  combinePages: boolean;
   showCaptions: boolean;
   pageCaptions: Map<number, string>;
   cardStyle: CardStyle;
@@ -315,11 +315,12 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
     separatedCover,
     backCoverLayout,
     backCoverText,
+    backCoverTextSize,
     backCoverPlainText,
     fontSize,
     coverLayout,
     coverTitle,
-    pageLayout,
+    coverTextSize,
     showCover,
     pageBackground,
     spineColor,
@@ -327,7 +328,6 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
     spineTextColor,
     spineTitle,
     pages,
-    combinePages,
     showCaptions,
     pageCaptions,
     cardStyle,
@@ -403,7 +403,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               style={{
                 fontFamily: "Caveat",
                 fontWeight: 600,
-                fontSize: coverPageWidth * 0.09,
+                fontSize: backCoverTextSize,
                 color: SCRAPBOOK.ink,
                 textAlign: "center",
               }}
@@ -446,7 +446,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                     style={{
                       fontFamily: "Caveat",
                       fontWeight: 500,
-                      fontSize: fontSize * 1.9,
+                      fontSize: backCoverTextSize,
                       color: SCRAPBOOK.ink,
                       textAlign: "center",
                     }}
@@ -462,7 +462,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             const cardTop = (coverPageHeight - cardHeight) / 2;
             const cardLeft = (coverPageWidth - cardWidth) / 2;
             const frameInset = Math.max(4, cardWidth * 0.045);
-            const captionStripHeight = backCoverText ? fontSize * 1.3 * 1.6 : 0;
+            const captionStripHeight = backCoverText ? backCoverTextSize * 1.6 : 0;
 
             return (
               <View
@@ -531,7 +531,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                       style={{
                         fontFamily: "Caveat",
                         fontWeight: 500,
-                        fontSize: fontSize * 1.3,
+                        fontSize: backCoverTextSize,
                         color: SCRAPBOOK.ink,
                         textAlign: "center",
                       }}
@@ -604,7 +604,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                   style={{
                     fontFamily: "Caveat",
                     fontWeight: 600,
-                    fontSize: coverPageWidth * 0.06,
+                    fontSize: backCoverTextSize,
                     color: "#FFFFFF",
                     textAlign: "center",
                   }}
@@ -649,7 +649,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             style={{
               fontFamily: "Caveat",
               fontWeight: 600,
-              fontSize: coverPageWidth * 0.09,
+              fontSize: coverTextSize,
               color: SCRAPBOOK.ink,
               textAlign: "center",
             }}
@@ -719,7 +719,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 style={{
                   fontFamily: "Caveat",
                   fontWeight: 600,
-                  fontSize: coverPageWidth * 0.055,
+                  fontSize: coverTextSize,
                   color: SCRAPBOOK.ink,
                   textAlign: "center",
                 }}
@@ -790,7 +790,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               style={{
                 fontFamily: "Caveat",
                 fontWeight: 600,
-                fontSize: coverPageWidth * 0.06,
+                fontSize: coverTextSize,
                 color: "#FFFFFF",
                 textAlign: "center",
               }}
@@ -814,7 +814,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
   const includeInteriorPages = pdfType === "full" || pdfType === "interior";
 
   return (
-  <Document pageLayout={pageLayout}>
+  <Document pageLayout="twoPageLeft">
     {includeFrontCover && (
       <Page
         size={{ width: coverBleedWidth, height: coverBleedHeight }}
@@ -865,7 +865,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               style={{
                 fontFamily: "Caveat",
                 fontWeight: 600,
-                fontSize: coverPageWidth * 0.09,
+                fontSize: coverTextSize,
                 color: SCRAPBOOK.ink,
                 textAlign: "center",
               }}
@@ -932,7 +932,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                   style={{
                     fontFamily: "Caveat",
                     fontWeight: 600,
-                    fontSize: coverPageWidth * 0.055,
+                    fontSize: coverTextSize,
                     color: SCRAPBOOK.ink,
                     textAlign: "center",
                   }}
@@ -1006,7 +1006,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 style={{
                   fontFamily: "Caveat",
                   fontWeight: 600,
-                  fontSize: coverPageWidth * 0.06,
+                  fontSize: coverTextSize,
                   color: "#FFFFFF",
                   textAlign: "center",
                 }}
@@ -1131,38 +1131,9 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             }}
           >
 
-          {/* Page break indicator for combined pages */}
-          {combinePages && (
-            <View
-              style={{
-                position: "absolute",
-                left: pageWidth / 2,
-                top: 0,
-                bottom: 0,
-                width: 1,
-                borderLeft: "1 dashed #D1D5DB",
-              }}
-            />
-          )}
-
-          {/* Page caption(s) - alternating margin band, one per
-              logical page (two side by side when combined) */}
+          {/* Page caption - one alternating margin band per logical page */}
           {showCaptions &&
-            (combinePages
-              ? [
-                  {
-                    key: pageData.pageNumber * 2 - 1,
-                    left: 0,
-                    width: pageWidth / 2,
-                  },
-                  {
-                    key: pageData.pageNumber * 2,
-                    left: pageWidth / 2,
-                    width: pageWidth / 2,
-                  },
-                ]
-              : [{ key: pageData.pageNumber, left: 0, width: pageWidth }]
-            ).map((band) => {
+            [{ key: pageData.pageNumber, left: 0, width: pageWidth }].map((band) => {
               const caption = pageCaptions.get(band.key);
               if (!caption) return null;
               // Text size is the priority: the chosen font size is
@@ -1624,7 +1595,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               style={{
                 fontFamily: "Caveat",
                 fontWeight: 600,
-                fontSize: coverPageWidth * 0.09,
+                fontSize: backCoverTextSize,
                 color: SCRAPBOOK.ink,
                 textAlign: "center",
               }}
@@ -1670,7 +1641,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                     style={{
                       fontFamily: "Caveat",
                       fontWeight: 500,
-                      fontSize: fontSize * 1.9,
+                      fontSize: backCoverTextSize,
                       color: SCRAPBOOK.ink,
                       textAlign: "center",
                     }}
@@ -1690,7 +1661,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             const cardLeft = (coverPageWidth - cardWidth) / 2;
             const frameInset = Math.max(4, cardWidth * 0.045);
             const captionStripHeight = backCoverText
-              ? fontSize * 1.3 * 1.6
+              ? backCoverTextSize * 1.6
               : 0;
             return (
               <View
@@ -1756,9 +1727,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                         style={{
                           fontFamily: "Caveat",
                           fontWeight: 500,
-                          fontSize: backCoverImageBlob
-                            ? fontSize * 1.3
-                            : fontSize * 1.5,
+                          fontSize: backCoverTextSize,
                           color: SCRAPBOOK.ink,
                           textAlign: "center",
                         }}
@@ -1833,7 +1802,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                     style={{
                       fontFamily: "Caveat",
                       fontWeight: 600,
-                      fontSize: coverPageWidth * 0.06,
+                      fontSize: backCoverTextSize,
                       color: "#FFFFFF",
                       textAlign: "center",
                     }}

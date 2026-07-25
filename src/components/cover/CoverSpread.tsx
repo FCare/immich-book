@@ -41,6 +41,7 @@ export interface CoverSpreadProps {
   backCoverLayout: CoverLayout;
   backCoverText: string;
   setBackCoverText: (text: string) => void;
+  backCoverTextSize: number;
   setHistory: Dispatch<SetStateAction<HistoryOperation[]>>;
   language: Language;
   spineColor: string;
@@ -51,6 +52,7 @@ export interface CoverSpreadProps {
   coverLayout: CoverLayout;
   coverTitle: string;
   setCoverTitle: (title: string) => void;
+  coverTextSize: number;
 }
 
 export function CoverSpread({
@@ -76,6 +78,7 @@ export function CoverSpread({
   backCoverLayout,
   backCoverText,
   setBackCoverText,
+  backCoverTextSize,
   setHistory,
   language,
   spineColor,
@@ -86,6 +89,7 @@ export function CoverSpread({
   coverLayout,
   coverTitle,
   setCoverTitle,
+  coverTextSize,
 }: CoverSpreadProps) {
   const displayWidth = toPoints(validPageWidth);
   const displayHeight = toPoints(validPageHeight);
@@ -175,7 +179,7 @@ export function CoverSpread({
                 style={{
                   fontFamily: "Caveat",
                   fontWeight: 600,
-                  fontSize: `${14 * scale}px`,
+                  fontSize: `${backCoverTextSize * scale}px`,
                 }}
               />
             </div>
@@ -283,7 +287,7 @@ export function CoverSpread({
                       height: `${backCoverImageUrl ? captionStripHeight : cardHeight}px`,
                       fontFamily: "Caveat",
                       fontWeight: 500,
-                      fontSize: `${(backCoverImageUrl ? captionStripHeight : cardHeight) * 0.4}px`,
+                      fontSize: `${backCoverTextSize * scale}px`,
                       color: SCRAPBOOK.ink,
                     }}
                   />
@@ -337,7 +341,7 @@ export function CoverSpread({
                   style={{
                     fontFamily: "Caveat",
                     fontWeight: 600,
-                    fontSize: `${(displayWidth * scale) * 0.06}px`,
+                    fontSize: `${backCoverTextSize * scale}px`,
                   }}
                 />
               </div>
@@ -423,7 +427,7 @@ export function CoverSpread({
                 style={{
                   fontFamily: "Caveat",
                   fontWeight: 600,
-                  fontSize: `${14 * scale}px`,
+                  fontSize: `${coverTextSize * scale}px`,
                 }}
               />
             </div>
@@ -526,7 +530,7 @@ export function CoverSpread({
                     style={{
                       fontFamily: "Caveat",
                       fontWeight: 600,
-                      fontSize: `${(displayWidth * scale) * 0.055}px`,
+                      fontSize: `${coverTextSize * scale}px`,
                       color: SCRAPBOOK.ink,
                     }}
                   />
@@ -579,7 +583,7 @@ export function CoverSpread({
                   style={{
                     fontFamily: "Caveat",
                     fontWeight: 600,
-                    fontSize: `${(displayWidth * scale) * 0.06}px`,
+                    fontSize: `${coverTextSize * scale}px`,
                   }}
                 />
               </div>

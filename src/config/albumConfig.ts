@@ -53,7 +53,6 @@ export interface GlobalConfig {
   pageWidth: number;
   pageHeight: number;
   margin: number;
-  combinePages: boolean;
 
   // Layout settings
   spacing: number;
@@ -131,6 +130,8 @@ export interface AlbumConfig extends GlobalConfig {
   spineTitle: string;
   // Empty string falls back to the album's own name at render time.
   coverTitle: string;
+  // Font size for the front cover title, in points.
+  coverTextSize: number;
   // Which photo to use on the cover - null falls back to the first photo
   // in the book's current order.
   coverAssetId: string | null;
@@ -140,7 +141,7 @@ export interface AlbumConfig extends GlobalConfig {
   coverFrameSize: FrameSize | null;
   // Which photo to use on the back cover - independent of the front
   // cover photo. Null falls back to the last photo in the book's
-  // current order (unless backCoverNoPhoto is set).
+  // current order.
   backCoverAssetId: string | null;
   // Same layout choices as the front cover. Defaults to "photo-title" to
   // match the back cover's original (pre-layout-picker) fixed look.
@@ -148,12 +149,10 @@ export interface AlbumConfig extends GlobalConfig {
   // Manual size for the back cover's "photo-title" card - see
   // BackCoverStandalone.tsx. null uses the built-in default size.
   backCoverFrameSize: FrameSize | null;
-  // Explicit "no photo" - overrides the fallback-to-last-photo default
-  // so a text-only (or empty) back cover is reachable, not just
-  // "haven't picked one yet".
-  backCoverNoPhoto: boolean;
   // Optional short text shown on the back cover card, below its photo.
   backCoverText: string;
+  // Font size for the back cover text, in points.
+  backCoverTextSize: number;
   // When there's no back cover photo, whether the text mounts on a
   // white card (matching the rest of the scrapbook) or sits directly
   // on the page background with no card at all.
@@ -169,7 +168,6 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   pageWidth: 2515,
   pageHeight: 3260,
   margin: 118,
-  combinePages: false,
   spacing: 20,
   filterVideos: true,
   forceTimeline: false,
@@ -234,14 +232,15 @@ export async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     spineTextSize: 18,
     spineTitle: "",
     coverTitle: "",
+    coverTextSize: 32,
     coverAssetId: null,
     coverLayout: "photo-title",
     coverFrameSize: null,
     backCoverAssetId: null,
     backCoverLayout: "photo-title",
     backCoverFrameSize: null,
-    backCoverNoPhoto: false,
     backCoverText: "",
+    backCoverTextSize: 20,
     backCoverPlainText: false,
     excludeCoverPhotosFromPages: true,
   };
@@ -313,7 +312,6 @@ export async function saveAlbumConfig(albumId: string, config: AlbumConfig, asse
       pageWidth: config.pageWidth,
       pageHeight: config.pageHeight,
       margin: config.margin,
-      combinePages: config.combinePages,
       spacing: config.spacing,
       filterVideos: config.filterVideos,
       forceTimeline: config.forceTimeline,
