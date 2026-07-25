@@ -13,6 +13,7 @@ import {
   calculatePageLayout,
   mmToPixels,
   pixelsToMm,
+  type Page,
 } from "../utils/pageLayout";
 import type { ImmichConfig } from "../types";
 import { t, type Language } from "../i18n";
@@ -793,6 +794,36 @@ function PhotoGridEditor({
   // ensureFocalPoints can dedupe concurrent calls without waiting for a
   // re-render.
   const focalPointFetchesInFlight = useRef<Set<string>>(new Set());
+  // Manual bento split-boundary drags, keyed by SplitInfo.path - see the
+  // boundary drag effect below.
+  const [boundaryOverrides, setBoundaryOverrides] = useState<
+    Map<string, number>
+  >(() => new Map(Object.entries(initialConfig.boundaryOverrides)));
+  // The boundary currently being dragged, if any - a live React state
+  // (unlike the crop-pan drag) because moving one boundary must reflow
+  // every affected cell's rect, not just one image's CSS position.
+  const [boundaryDragState, setBoundaryDragState] = useState<{
+    path: string;
+    pageNumber: number;
+    axis: "vertical" | "horizontal";
+    rect: { x: number; y: number; width: number; height: number };
+    startX: number;
+    startY: number;
+    startFraction: number;
+    scale: number;
+    // The override value in effect before this drag began, for the
+    // history entry - undefined if this boundary had never been
+    // dragged before (the auto-computed fraction was in effect).
+    prevFraction: number | undefined;
+  } | null>(null);
+  // Live fraction for the boundary currently being dragged, merged into
+  // the layout computation below - separate from `boundaryOverrides`
+  // (the persisted map) so a drag-in-progress doesn't autosave every
+  // frame, only once committed on release.
+  const [liveBoundaryFraction, setLiveBoundaryFraction] = useState<{
+    path: string;
+    fraction: number;
+  } | null>(null);
   const [textCardCounts, setTextCardCounts] = useState<Map<number, number>>(
     () =>
       new Map(
@@ -1109,6 +1140,7 @@ function PhotoGridEditor({
       pageCaptions: Object.fromEntries(pageCaptions),
       cardCaptions: Object.fromEntries(cardCaptions),
       focalPoints: Object.fromEntries(focalPoints),
+      boundaryOverrides: Object.fromEntries(boundaryOverrides),
       textCardCounts: Object.fromEntries(textCardCounts),
       textCardContents: Object.fromEntries(textCardContents),
       slotOverrides: Object.fromEntries(slotOverrides),
@@ -1155,6 +1187,7 @@ function PhotoGridEditor({
     pageCaptions,
     cardCaptions,
     focalPoints,
+    boundaryOverrides,
     showCover,
     separatedCover,
     spineWidth,
@@ -1269,14 +1302,62 @@ function PhotoGridEditor({
     }
   };
 
-  // Reroll a page's bento arrangement - same photos, different split
-  // pattern (e.g. a 3-photo page can be tiled several different ways
-  // depending on their formats).
+  // Reroll a page's bento arrangement - same photos (the photo COUNT
+  // seed in pageLayout.ts is deliberately independent of `variant`, so
+  // this never changes how many photos are on the page), different
+  // split pattern. Tries several candidate variants and keeps the first
+  // one whose resulting tile shapes actually differ from the current
+  // layout, rather than trusting a single random jump to land somewhere
+  // different - with few photos on a page there are only a handful of
+  // genuinely distinct tilings, so two variant numbers can coincidentally
+  // produce the same one.
   const handleShuffleLayout = (logicalPageNumber: number) => {
     const prevVariant = layoutVariants.get(logicalPageNumber) || 0;
-    // Generate a more random variant to get significantly different layouts
-    // Use a large random jump instead of just +1
-    const newVariant = prevVariant + Math.floor(Math.random() * 100) + 10;
+
+    const shapeSignature = (page: Page | undefined) =>
+      page
+        ? page.photos
+            .map((b) => `${Math.round(b.width)}x${Math.round(b.height)}`)
+            .join(",")
+        : null;
+    const prevSignature = shapeSignature(
+      pages.find((p) => p.pageNumber === logicalPageNumber),
+    );
+
+    const MAX_ATTEMPTS = 30;
+    let newVariant = prevVariant;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const candidateVariant =
+        prevVariant + Math.floor(Math.random() * 100) + 10 + attempt;
+      const candidatePages = calculatePageLayout(interiorAssets, {
+        pageWidth: validPageWidth,
+        pageHeight: validPageHeight,
+        margin: layoutMargin,
+        spacing: validSpacing,
+        combinePages,
+        forceTimeline,
+        layoutVariants: new Map(layoutVariants).set(
+          logicalPageNumber,
+          candidateVariant,
+        ),
+        pageCounts,
+        textCardCounts,
+        slotOverrides,
+      });
+      newVariant = candidateVariant;
+      const candidateSignature = shapeSignature(
+        candidatePages.find((p) => p.pageNumber === logicalPageNumber),
+      );
+      // A signature of null means the page itself has vanished (e.g. no
+      // photos left) - can't compare shapes, just accept and stop. A
+      // single-photo page only ever has one possible shape, so this
+      // will exhaust MAX_ATTEMPTS and fall back to the last try, which
+      // is fine (nothing else *could* look different).
+      if (candidateSignature === null || candidateSignature !== prevSignature) {
+        break;
+      }
+    }
+
     setLayoutVariants((prev) => {
       const next = new Map(prev);
       next.set(logicalPageNumber, newVariant);
@@ -1440,6 +1521,7 @@ function PhotoGridEditor({
       setPageCaptions,
       setCardCaptions,
       setFocalPoints,
+      setBoundaryOverrides,
       setCoverAssetId,
       setBackCoverAssetId,
       setCoverTitle,
@@ -1625,6 +1707,17 @@ function PhotoGridEditor({
       )
     : validMargin;
 
+  // Merges in the boundary drag currently in progress (if any) so the
+  // page reflows live as the user drags - kept separate from
+  // `boundaryOverrides` itself so a drag-in-progress doesn't autosave on
+  // every frame, only once committed on release.
+  const effectiveBoundaryOverrides = useMemo(() => {
+    if (!liveBoundaryFraction) return boundaryOverrides;
+    const next = new Map(boundaryOverrides);
+    next.set(liveBoundaryFraction.path, liveBoundaryFraction.fraction);
+    return next;
+  }, [boundaryOverrides, liveBoundaryFraction]);
+
   const pages = useMemo(() => {
     return calculatePageLayout(interiorAssets, {
       pageWidth: validPageWidth,
@@ -1637,6 +1730,7 @@ function PhotoGridEditor({
       pageCounts,
       textCardCounts,
       slotOverrides,
+      boundaryOverrides: effectiveBoundaryOverrides,
     });
   }, [
     interiorAssets,
@@ -1650,6 +1744,7 @@ function PhotoGridEditor({
     pageCounts,
     textCardCounts,
     slotOverrides,
+    effectiveBoundaryOverrides,
   ]);
 
   // Swaps two cards outright, wherever they are: same page swaps their
@@ -1998,6 +2093,7 @@ function PhotoGridEditor({
             pageCaptions: Object.fromEntries(pageCaptions),
             cardCaptions: Object.fromEntries(cardCaptions),
             focalPoints: Object.fromEntries(focalPoints),
+            boundaryOverrides: Object.fromEntries(boundaryOverrides),
             textCardCounts: Object.fromEntries(textCardCounts),
             textCardContents: Object.fromEntries(textCardContents),
             slotOverrides: Object.fromEntries(slotOverrides),
@@ -2039,6 +2135,7 @@ function PhotoGridEditor({
             pageCaptions: Object.fromEntries(pageCaptions),
             cardCaptions: Object.fromEntries(cardCaptions),
             focalPoints: Object.fromEntries(focalPoints),
+            boundaryOverrides: Object.fromEntries(boundaryOverrides),
             textCardCounts: Object.fromEntries(textCardCounts),
             textCardContents: Object.fromEntries(textCardContents),
             slotOverrides: Object.fromEntries(slotOverrides),
@@ -2154,6 +2251,102 @@ function PhotoGridEditor({
       window.removeEventListener("pointerup", handlePointerUp);
     };
   }, [reorderDragState, pages, filteredAssets, swapFirstId, newAssets]);
+
+  // Dragging a bento split boundary - unlike the crop-pan drag above,
+  // this needs a real per-frame React state update (liveBoundaryFraction)
+  // because moving one boundary reflows every cell on its side of the
+  // split, not just one image's CSS position. Throttled to one update
+  // per animation frame regardless of how often pointermove fires.
+  useEffect(() => {
+    if (!boundaryDragState) return;
+    const { path, pageNumber, axis, rect, startX, startY, startFraction, scale } =
+      boundaryDragState;
+
+    const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+    // ~6pt on screen, converted to the same raw (300dpi) unit space
+    // rect.x/width are in.
+    const SNAP_THRESHOLD_RAW = 6 * (300 / 72);
+
+    // Other same-axis boundaries on this page to magnet-snap against -
+    // captured once at drag start (not re-read live), since descendants
+    // of the boundary being dragged shift as a direct consequence of the
+    // drag itself and shouldn't be snap targets for their own ancestor.
+    const page = pages.find((p) => p.pageNumber === pageNumber);
+    const otherLinesRaw = (page?.splits ?? [])
+      .filter(
+        (s) => s.axis === axis && s.path !== path && !s.path.startsWith(path),
+      )
+      .map((s) => {
+        const origin = axis === "vertical" ? s.rect.x : s.rect.y;
+        const length = axis === "vertical" ? s.rect.width : s.rect.height;
+        return origin + length * s.fraction;
+      });
+
+    const rectOrigin = axis === "vertical" ? rect.x : rect.y;
+    const rectLength = axis === "vertical" ? rect.width : rect.height;
+    const axisLengthPt = toPoints(rectLength);
+
+    let finalFraction = startFraction;
+    let rafId: number | null = null;
+    let pendingEvent: PointerEvent | null = null;
+
+    const applyPendingMove = () => {
+      rafId = null;
+      if (!pendingEvent) return;
+      const dxScreen = pendingEvent.clientX - startX;
+      const dyScreen = pendingEvent.clientY - startY;
+      const deltaPt = (axis === "vertical" ? dxScreen : dyScreen) / scale;
+      const fractionDelta = axisLengthPt > 0 ? deltaPt / axisLengthPt : 0;
+      let fraction = clamp01(startFraction + fractionDelta);
+
+      const lineRaw = rectOrigin + rectLength * fraction;
+      for (const otherRaw of otherLinesRaw) {
+        if (Math.abs(lineRaw - otherRaw) < SNAP_THRESHOLD_RAW) {
+          fraction = clamp01((otherRaw - rectOrigin) / rectLength);
+          break;
+        }
+      }
+
+      finalFraction = fraction;
+      setLiveBoundaryFraction({ path, fraction });
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      pendingEvent = event;
+      if (rafId === null) {
+        rafId = requestAnimationFrame(applyPendingMove);
+      }
+    };
+
+    const handlePointerUp = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      setBoundaryOverrides((prev) => {
+        const next = new Map(prev);
+        next.set(path, finalFraction);
+        return next;
+      });
+      setHistory((prev) => [
+        {
+          type: "drag-split-boundary",
+          path,
+          prevFraction: boundaryDragState.prevFraction,
+          newFraction: finalFraction,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
+      setLiveBoundaryFraction(null);
+      setBoundaryDragState(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [boundaryDragState]);
 
   // Group page photos by logical page number - matches the numbering
   // already used for pageCaptions/the "Page X of Y" UI: in combined mode
@@ -2402,6 +2595,7 @@ function PhotoGridEditor({
                     pageCaptions: Object.fromEntries(pageCaptions),
                     cardCaptions: Object.fromEntries(cardCaptions),
                     focalPoints: Object.fromEntries(focalPoints),
+                    boundaryOverrides: Object.fromEntries(boundaryOverrides),
                     textCardCounts: Object.fromEntries(textCardCounts),
                     textCardContents: Object.fromEntries(textCardContents),
                     slotOverrides: Object.fromEntries(slotOverrides),
@@ -4113,6 +4307,7 @@ function PhotoGridEditor({
                                   pageCaptions: Object.fromEntries(pageCaptions),
                                   cardCaptions: Object.fromEntries(cardCaptions),
                                   focalPoints: Object.fromEntries(focalPoints),
+                                  boundaryOverrides: Object.fromEntries(boundaryOverrides),
                                   textCardCounts: Object.fromEntries(textCardCounts),
                                   textCardContents: Object.fromEntries(textCardContents),
                                   slotOverrides: Object.fromEntries(slotOverrides),
@@ -4139,6 +4334,73 @@ function PhotoGridEditor({
                         )}
 
 
+                      </div>
+                    );
+                  })}
+
+                  {/* Draggable bento split boundaries - invisible hit-
+                      target strips; click, drag, release to resize a
+                      page's photo tiling (same photos, different
+                      shapes) instead of accepting the auto layout.
+                      Magnet-snaps to other boundaries on the same page
+                      while dragging (see the boundaryDragState effect). */}
+                  {page.splits.map((split) => {
+                    const isVertical = split.axis === "vertical";
+                    const lineOffset = isVertical
+                      ? split.rect.x + split.rect.width * split.fraction
+                      : split.rect.y + split.rect.height * split.fraction;
+                    const HANDLE_HIT_PT = 12;
+                    const isDraggingThis =
+                      boundaryDragState?.path === split.path;
+                    return (
+                      <div
+                        key={split.path}
+                        onPointerDown={(e) => {
+                          if (e.button !== 0) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setBoundaryDragState({
+                            path: split.path,
+                            pageNumber: page.pageNumber,
+                            axis: split.axis,
+                            rect: split.rect,
+                            startX: e.clientX,
+                            startY: e.clientY,
+                            startFraction: split.fraction,
+                            scale,
+                            prevFraction: boundaryOverrides.get(split.path),
+                          });
+                        }}
+                        className={`absolute z-20 group ${isVertical ? "cursor-col-resize" : "cursor-row-resize"}`}
+                        style={
+                          isVertical
+                            ? {
+                                left: `${toPoints(lineOffset) - HANDLE_HIT_PT / 2}px`,
+                                top: `${toPoints(split.rect.y)}px`,
+                                width: `${HANDLE_HIT_PT}px`,
+                                height: `${toPoints(split.rect.height)}px`,
+                                touchAction: "none",
+                              }
+                            : {
+                                top: `${toPoints(lineOffset) - HANDLE_HIT_PT / 2}px`,
+                                left: `${toPoints(split.rect.x)}px`,
+                                height: `${HANDLE_HIT_PT}px`,
+                                width: `${toPoints(split.rect.width)}px`,
+                                touchAction: "none",
+                              }
+                        }
+                      >
+                        <div
+                          className={`absolute bg-indigo-500 transition-opacity ${
+                            isDraggingThis
+                              ? "opacity-100"
+                              : "opacity-0 group-hover:opacity-70"
+                          } ${
+                            isVertical
+                              ? "left-1/2 top-0 bottom-0 w-0.5 -translate-x-1/2"
+                              : "top-1/2 left-0 right-0 h-0.5 -translate-y-1/2"
+                          }`}
+                        />
                       </div>
                     );
                   })}

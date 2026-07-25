@@ -137,6 +137,17 @@ export type HistoryOperation =
       prevPoint: FocalPoint | null;
       newPoint: FocalPoint;
       timestamp: number;
+    }
+  | {
+      // Manual bento split-boundary drag - see SplitInfo in
+      // pageLayout.ts. prevFraction is undefined when this boundary had
+      // never been dragged before (the auto-computed fraction was in
+      // effect).
+      type: "drag-split-boundary";
+      path: string;
+      prevFraction: number | undefined;
+      newFraction: number;
+      timestamp: number;
     };
 
 // Baseline snapshot captured by "flatten" - everything a Reset All
@@ -166,6 +177,7 @@ export interface UseEditHistoryParams {
   setPageCaptions: Dispatch<SetStateAction<Map<number, string>>>;
   setCardCaptions: Dispatch<SetStateAction<Map<string, string>>>;
   setFocalPoints: Dispatch<SetStateAction<Map<string, FocalPoint | null>>>;
+  setBoundaryOverrides: Dispatch<SetStateAction<Map<string, number>>>;
   setCoverAssetId: Dispatch<SetStateAction<string | null>>;
   setBackCoverAssetId: Dispatch<SetStateAction<string | null>>;
   setCoverTitle: Dispatch<SetStateAction<string>>;
@@ -209,6 +221,7 @@ export function useEditHistory(params: UseEditHistoryParams) {
     setPageCaptions,
     setCardCaptions,
     setFocalPoints,
+    setBoundaryOverrides,
     setCoverAssetId,
     setBackCoverAssetId,
     setCoverTitle,
@@ -344,6 +357,18 @@ export function useEditHistory(params: UseEditHistoryParams) {
         setFocalPoints((prev) => {
           const next = new Map(prev);
           next.set(lastOp.assetId, lastOp.prevPoint);
+          return next;
+        });
+        break;
+
+      case "drag-split-boundary":
+        setBoundaryOverrides((prev) => {
+          const next = new Map(prev);
+          if (lastOp.prevFraction === undefined) {
+            next.delete(lastOp.path);
+          } else {
+            next.set(lastOp.path, lastOp.prevFraction);
+          }
           return next;
         });
         break;
@@ -620,6 +645,18 @@ export function useEditHistory(params: UseEditHistoryParams) {
           setFocalPoints((prev) => {
             const next = new Map(prev);
             next.set(op.assetId, op.prevPoint);
+            return next;
+          });
+          break;
+
+        case "drag-split-boundary":
+          setBoundaryOverrides((prev) => {
+            const next = new Map(prev);
+            if (op.prevFraction === undefined) {
+              next.delete(op.path);
+            } else {
+              next.set(op.path, op.prevFraction);
+            }
             return next;
           });
           break;

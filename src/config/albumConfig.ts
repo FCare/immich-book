@@ -80,6 +80,10 @@ export interface AlbumConfig extends GlobalConfig {
   // (see ensureFocalPoints in PhotoGrid.tsx) and cached here so it's only
   // computed once per photo, not on every reload.
   focalPoints: Record<string, FocalPoint | null>;
+  // Manual bento split-boundary drag, keyed by SplitInfo.path (see
+  // pageLayout.ts) - the fraction the user dragged that boundary to,
+  // overriding the auto-computed one.
+  boundaryOverrides: Record<string, number>;
   // How many photo slots on a page are turned into text cards (0-3),
   // keyed by logical page number.
   textCardCounts: Record<number, number>;
@@ -198,6 +202,7 @@ export async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     pageCaptions: {},
     cardCaptions: {},
     focalPoints: {},
+    boundaryOverrides: {},
     textCardCounts: {},
     textCardContents: {},
     slotOverrides: {},

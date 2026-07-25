@@ -12,6 +12,21 @@ export interface PhotoBox {
   height: number;
 }
 
+// One draggable boundary between two sibling cells of the bento split
+// tree. `path` is the same tree-position string splitRect already seeds
+// its randomness with (e.g. "bento-3-v0" -> children "...A"/"...B") - a
+// stable identifier for this exact split node, used both to look up a
+// manual fraction override and to store one when the user drags it.
+// `rect` is the parent rect being split (before the split is applied),
+// so the UI can derive the line's on-page position/length and convert a
+// pixel drag into a new fraction without needing anything else.
+export interface SplitInfo {
+  path: string;
+  axis: "vertical" | "horizontal";
+  rect: Rect;
+  fraction: number;
+}
+
 // A text card has no natural photo shape to match, so it gets a fixed,
 // readable-for-text default (slightly wide, like an index card).
 const TEXT_CARD_ASPECT_RATIO = 1.2;
@@ -32,6 +47,9 @@ export interface Page {
   photos: PhotoBox[];
   width: number;
   height: number;
+  // Every draggable boundary in this page's bento split tree - see
+  // SplitInfo.
+  splits: SplitInfo[];
 }
 
 // Convert millimeters to pixels (assuming 300 DPI)
@@ -73,6 +91,12 @@ export interface LayoutOptions {
   // object-fit:contain in the UI layer. Must be a permutation of the
   // page's natural card ids, in natural slot order, or it's ignored.
   slotOverrides?: Map<number, string[]>;
+  // Manual override of a bento split's position, keyed by SplitInfo.path
+  // (stable across re-layouts as long as the same photos land on the
+  // same side of that split) - lets a user drag a boundary between two
+  // cells instead of accepting the auto-computed fraction. The axis
+  // itself is never overridden, only where the line sits along it.
+  boundaryOverrides?: Map<string, number>;
 }
 
 // Deterministic pseudo-random number in [0, 1) from a string seed - stable
@@ -85,6 +109,20 @@ function seededRandom(seed: string): number {
     hash |= 0;
   }
   return (((hash % 10000) + 10000) % 10000) / 10000;
+}
+
+// seededRandom's hash has weak avalanche behavior on short, nearly-
+// identical strings - confirmed empirically: seeding it directly with
+// "count-bento-1", "count-bento-2", ... produced long runs of the exact
+// same output for many pages in a row (e.g. every page 1-9, then every
+// page 10-19). Mixing the page number through a cheap integer hash first
+// (Knuth's multiplicative constant + an xorshift) spreads consecutive
+// page numbers far enough apart that seededRandom's own weakness no
+// longer produces visible streaks.
+function scramblePageNumber(n: number): number {
+  let x = Math.imul(n, 2654435761);
+  x ^= x >>> 13;
+  return x >>> 0;
 }
 
 function naturalAspectRatio(asset: AssetResponseDto): number {
@@ -186,13 +224,23 @@ function splitFitError(
 // cells, a group of portraits gets tall ones - instead of a shape picked
 // independently of the content. Zero wasted space, and (thanks to
 // clampFraction) never a degenerate cell.
+//
+// `fractionOverrides`, keyed by the same `path` this function seeds its
+// own randomness with, lets a user-dragged boundary (see SplitInfo) pin
+// one split node's fraction instead of the auto-computed one - the axis
+// itself is left alone (still whichever the aspect-ratio-fit math
+// picks), only *where* the line sits along it is overridden. Every split
+// node visited is also recorded into `splits` (mutated in place) so the
+// caller can render a draggable handle for each one.
 function splitRect(
   rect: Rect,
   items: LayoutItem[],
   spacing: number,
   config: SplitConfig,
   path: string,
-  forceTimeline: boolean = false,
+  forceTimeline: boolean,
+  fractionOverrides: Map<string, number> | undefined,
+  splits: SplitInfo[],
 ): PhotoBox[] {
   if (items.length === 1) {
     return [{ id: items[0].id, asset: items[0].asset, ...rect }];
@@ -245,7 +293,23 @@ function splitRect(
   const hError = splitFitError(rect, spacing, false, hFraction, r1, r2);
   const jitter = (seededRandom(path + "-axis") - 0.5) * 0.15; // avoid rigid ties
   const splitVertically = vError + jitter <= hError;
-  const fraction = splitVertically ? vFraction : hFraction;
+  const autoFraction = splitVertically ? vFraction : hFraction;
+  const override = fractionOverrides?.get(path);
+  const fraction =
+    override !== undefined
+      ? clampFraction(
+          override,
+          splitVertically ? rect.width : rect.height,
+          spacing,
+        )
+      : autoFraction;
+
+  splits.push({
+    path,
+    axis: splitVertically ? "vertical" : "horizontal",
+    rect,
+    fraction,
+  });
 
   // Absolute final guard, on top of clampFraction: never emit a
   // zero/negative-size rect, no matter how extreme the inputs are.
@@ -272,8 +336,8 @@ function splitRect(
   }
 
   return [
-    ...splitRect(firstRect, firstItems, spacing, config, path + "A", forceTimeline),
-    ...splitRect(secondRect, secondItems, spacing, config, path + "B", forceTimeline),
+    ...splitRect(firstRect, firstItems, spacing, config, path + "A", forceTimeline, fractionOverrides, splits),
+    ...splitRect(secondRect, secondItems, spacing, config, path + "B", forceTimeline, fractionOverrides, splits),
   ];
 }
 
@@ -450,13 +514,19 @@ function layoutBentoPage(
   forcedCount: number | undefined,
   textCardCount: number,
   forceTimeline: boolean,
-): { photos: PhotoBox[]; consumed: number } {
+  fractionOverrides: Map<string, number> | undefined,
+): { photos: PhotoBox[]; consumed: number; splits: SplitInfo[] } {
   const seedBase = `bento-${pageNumber}-v${variant}`;
   let totalSlots: number;
   if (forcedCount !== undefined) {
     totalSlots = Math.max(1, forcedCount);
   } else {
-    const seed = seededRandom(`count-${seedBase}`);
+    // Deliberately independent of `variant` - the "shuffle" (reroll)
+    // button only bumps `variant` to get a different split/tiling of the
+    // same photos; it must never change how many photos land on the
+    // page, so this seed can't include it the way `seedBase` (used for
+    // the actual split below) does.
+    const seed = seededRandom(`count-bento-${scramblePageNumber(pageNumber)}`);
     totalSlots =
       BENTO_CONFIG.minCount +
       Math.floor(seed * (BENTO_CONFIG.maxCount - BENTO_CONFIG.minCount + 1));
@@ -481,8 +551,18 @@ function layoutBentoPage(
     })),
   ];
 
-  const photos = splitRect(contentRect, items, spacing, BENTO_CONFIG, seedBase, forceTimeline);
-  return { photos: equalizeNearMatchingRows(photos, spacing), consumed };
+  const splits: SplitInfo[] = [];
+  const photos = splitRect(
+    contentRect,
+    items,
+    spacing,
+    BENTO_CONFIG,
+    seedBase,
+    forceTimeline,
+    fractionOverrides,
+    splits,
+  );
+  return { photos: equalizeNearMatchingRows(photos, spacing), consumed, splits };
 }
 
 /**
@@ -505,6 +585,7 @@ export function calculatePageLayout(
     pageCounts,
     textCardCounts,
     slotOverrides,
+    boundaryOverrides,
   } = options;
 
   const pageDimensions = { width: pageWidth, height: pageHeight };
@@ -534,6 +615,7 @@ export function calculatePageLayout(
       forcedCount,
       textCardCount,
       forceTimeline || false,
+      boundaryOverrides,
     );
 
     // A manual slot override wins outright over the auto-computed
@@ -559,6 +641,7 @@ export function calculatePageLayout(
       photos,
       width: pageDimensions.width,
       height: pageDimensions.height,
+      splits: result.splits,
     });
 
     index += Math.max(1, result.consumed);
@@ -587,6 +670,13 @@ export function calculatePageLayout(
           ],
           width: pageDimensions.width * 2,
           height: pageDimensions.height,
+          splits: [
+            ...leftPage.splits,
+            ...rightPage.splits.map((split) => ({
+              ...split,
+              rect: { ...split.rect, x: split.rect.x + pageDimensions.width },
+            })),
+          ],
         };
         combinedPages.push(combinedPage);
       } else {
@@ -621,5 +711,5 @@ export function calculatePageLayout(
 // most print binderies require it, since a book is printed and bound in
 // sheets rather than single leaves.
 function blankPage(pageNumber: number, width: number, height: number): Page {
-  return { pageNumber, photos: [], width, height };
+  return { pageNumber, photos: [], width, height, splits: [] };
 }

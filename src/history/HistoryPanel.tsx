@@ -351,6 +351,9 @@ export function HistoryPanel({
                     case "pan-focal-point":
                       description = t(language, "historyPanFocalPoint");
                       break;
+                    case "drag-split-boundary":
+                      description = t(language, "historyDragSplitBoundary");
+                      break;
                   }
 
                   return (
