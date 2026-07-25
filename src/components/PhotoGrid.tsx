@@ -6,16 +6,7 @@ import {
   type AlbumResponseDto,
   type AssetResponseDto,
 } from "@immich/sdk";
-import {
-  pdf,
-  Document,
-  Page,
-  Image,
-  View,
-  Text,
-  StyleSheet,
-  Font,
-} from "@react-pdf/renderer";
+import { pdf, Font } from "@react-pdf/renderer";
 import {
   calculatePageLayout,
   mmToPixels,
@@ -23,6 +14,26 @@ import {
 } from "../utils/pageLayout";
 import type { ImmichConfig } from "../types";
 import { t, type Language } from "../i18n";
+import {
+  type PageBackground,
+  type CardStyle,
+  type CoverLayout,
+  type AlbumConfig,
+  loadAlbumConfig,
+  detectAlbumChanges,
+  saveAlbumConfig,
+} from "../config/albumConfig";
+import { buildPdfDocument } from "../pdf/buildPdfDocument";
+import {
+  type HistoryOperation,
+  type FlattenedState,
+  useEditHistory,
+} from "../history/editHistory";
+import {
+  HistoryPanel,
+  ResetAllConfirmDialog,
+  FlattenConfirmDialog,
+} from "../history/HistoryPanel";
 import roboto400 from "@fontsource/roboto/files/roboto-latin-400-normal.woff?url";
 import roboto500 from "@fontsource/roboto/files/roboto-latin-500-normal.woff?url";
 import caveat500 from "@fontsource/caveat/files/caveat-latin-500-normal.woff?url";
@@ -47,7 +58,7 @@ Font.register({
 // Scrapbook styling tokens: each photo is mounted like a polaroid, mildly
 // askew, held down by a scrap of washi tape - a deliberate alternative to a
 // flat, uncropped photo grid.
-const SCRAPBOOK = {
+export const SCRAPBOOK = {
   mat: "#FFFEFC",
   ink: "#2B3A4A",
   shadow: "rgba(38, 41, 46, 0.24)",
@@ -61,24 +72,7 @@ const SCRAPBOOK = {
 // all, so it's free to pick as a no-op default.
 type BackgroundTexture = "none" | "blob" | "dots" | "lines" | "grid" | "speckle";
 
-type PageBackground =
-  | "white"
-  | "kraft"
-  | "cream"
-  | "sage"
-  | "dusk-blue"
-  | "blush"
-  | "charcoal"
-  | "dots"
-  | "sage-dots"
-  | "blue-dots"
-  | "blush-dots"
-  | "notebook"
-  | "kraft-lines"
-  | "graph"
-  | "confetti";
-
-const PAGE_BACKGROUNDS: Record<
+export const PAGE_BACKGROUNDS: Record<
   PageBackground,
   { label: string; base: string; texture: BackgroundTexture; accent: string }
 > = {
@@ -127,7 +121,7 @@ const PAGE_BACKGROUND_GROUPS: { label: string; keys: PageBackground[] }[] = [
 // Organic blob positions (fraction of page width/height) shared by every
 // "blob"-textured background, so they all read as the same paper grain at
 // a different color rather than unrelated patterns.
-const PAGE_BACKGROUND_BLOBS = [
+export const PAGE_BACKGROUND_BLOBS = [
   { cx: 0.18, cy: 0.22, r: 0.32, opacity: 0.12 },
   { cx: 0.82, cy: 0.7, r: 0.36, opacity: 0.14 },
   { cx: 0.55, cy: 0.12, r: 0.24, opacity: 0.08 },
@@ -141,7 +135,7 @@ const CONFETTI_COLORS = [...SCRAPBOOK.tape, SCRAPBOOK.ink];
 // Precomputed scatter for the "confetti" texture - deterministic (not
 // Math.random()) so it's stable across re-renders and identical between
 // the web CSS version and the PDF Svg version.
-const PAGE_BACKGROUND_SPECKLES = Array.from({ length: 50 }, (_, i) => ({
+export const PAGE_BACKGROUND_SPECKLES = Array.from({ length: 50 }, (_, i) => ({
   x: seededRandom("speckle-x", i),
   y: seededRandom("speckle-y", i),
   r: 2 + seededRandom("speckle-r", i) * 3,
@@ -194,190 +188,6 @@ function pageBackgroundCss(bg: PageBackground): React.CSSProperties {
   }
 }
 
-// PDF equivalent of pageBackgroundCss - react-pdf has no CSS
-// background-image or repeating-pattern primitive, so the same preset is
-// painted as an explicit Svg layer behind the page content instead. Dots
-// use a coarser spacing than the web CSS version to keep the per-page
-// element count reasonable across a whole book.
-// Deliberately built with plain <View> (backgroundColor + borderRadius
-// for circles) rather than <Svg>/<Rect>/<Circle>: react-pdf appears to
-// run vector (Svg) drawing through a different path than regular
-// View/Text content, and in testing that made a textured background
-// paint over everything else on the page - including captions -
-// regardless of where it sat in the JSX tree. A page-doubling bug
-// (content "overflowing" its Svg box) was also traced to the same Svg
-// usage. Plain Views share the exact same layout/paint pipeline as the
-// rest of the page, which sidesteps both issues.
-function PdfPageBackground({
-  background,
-  width,
-  height,
-}: {
-  background: PageBackground;
-  width: number;
-  height: number;
-}) {
-  const preset = PAGE_BACKGROUNDS[background];
-  if (preset.texture === "none") return null;
-
-  const dotSpacing = 26;
-  const lineSpacing = 30;
-
-  const circle = (
-    key: string | number,
-    cx: number,
-    cy: number,
-    r: number,
-    color: string,
-    opacity: number,
-  ) => (
-    <View
-      key={key}
-      style={{
-        position: "absolute",
-        left: cx - r,
-        top: cy - r,
-        width: r * 2,
-        height: r * 2,
-        borderRadius: r,
-        backgroundColor: color,
-        opacity,
-      }}
-    />
-  );
-
-  // Approximates the web version's soft radial-gradient blob (full color
-  // fading to transparent at the edge) with concentric rings of
-  // increasing opacity toward the center - a single flat circle (the
-  // PDF's only other option, since Svg gradients are avoided here) reads
-  // as a hard, flat disc instead of a soft paper-grain blob.
-  const softBlob = (
-    keyPrefix: string | number,
-    cx: number,
-    cy: number,
-    r: number,
-    color: string,
-    opacity: number,
-  ) => {
-    const rings = 5;
-    return Array.from({ length: rings }, (_, i) => {
-      const t = (i + 1) / rings;
-      return circle(
-        `${keyPrefix}-${i}`,
-        cx,
-        cy,
-        r * t,
-        color,
-        (opacity / rings) * (1.6 - t),
-      );
-    });
-  };
-
-  return (
-    <View
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width,
-        height,
-        backgroundColor: preset.base,
-        overflow: "hidden",
-      }}
-    >
-      {preset.texture === "blob" &&
-        PAGE_BACKGROUND_BLOBS.map((b, i) => {
-          const cx = b.cx * width;
-          const cy = b.cy * height;
-          const maxR = Math.min(cx, width - cx, cy, height - cy);
-          const r = Math.max(
-            0,
-            Math.min(b.r * Math.max(width, height), maxR),
-          );
-          return softBlob(i, cx, cy, r, preset.accent, b.opacity);
-        })}
-      {preset.texture === "dots" &&
-        Array.from({ length: Math.ceil(height / dotSpacing) }).flatMap(
-          (_, row) =>
-            Array.from({ length: Math.ceil(width / dotSpacing) }).map(
-              (_, col) =>
-                circle(
-                  `${row}-${col}`,
-                  dotSpacing / 2 + col * dotSpacing,
-                  dotSpacing / 2 + row * dotSpacing,
-                  0.7,
-                  preset.accent,
-                  0.35,
-                ),
-            ),
-        )}
-      {preset.texture === "lines" &&
-        Array.from({ length: Math.ceil(height / lineSpacing) }).map(
-          (_, row) => (
-            <View
-              key={row}
-              style={{
-                position: "absolute",
-                left: 0,
-                top: row * lineSpacing,
-                width,
-                height: 0.75,
-                backgroundColor: preset.accent,
-                opacity: 0.5,
-              }}
-            />
-          ),
-        )}
-      {preset.texture === "grid" && (
-        <>
-          {Array.from({ length: Math.ceil(height / lineSpacing) }).map(
-            (_, row) => (
-              <View
-                key={`h${row}`}
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  top: row * lineSpacing,
-                  width,
-                  height: 0.6,
-                  backgroundColor: preset.accent,
-                  opacity: 0.5,
-                }}
-              />
-            ),
-          )}
-          {Array.from({ length: Math.ceil(width / lineSpacing) }).map(
-            (_, col) => (
-              <View
-                key={`v${col}`}
-                style={{
-                  position: "absolute",
-                  left: col * lineSpacing,
-                  top: 0,
-                  width: 0.6,
-                  height,
-                  backgroundColor: preset.accent,
-                  opacity: 0.5,
-                }}
-              />
-            ),
-          )}
-        </>
-      )}
-      {preset.texture === "speckle" &&
-        PAGE_BACKGROUND_SPECKLES.map((sp, i) => {
-          const cx = sp.x * width;
-          const cy = sp.y * height;
-          const r = Math.max(
-            0,
-            Math.min(sp.r, cx, width - cx, cy, height - cy),
-          );
-          return circle(i, cx, cy, r, sp.color, 0.55);
-        })}
-    </View>
-  );
-}
-
 // Deterministic pseudo-random number in [0, 1) from a string id - stable
 // across re-renders (unlike Math.random()), so a photo's tilt doesn't jitter
 // every time unrelated state changes.
@@ -391,43 +201,13 @@ function seededRandom(id: string, salt: number): number {
   return (((hash % 1000) + 1000) % 1000) / 1000;
 }
 
-// Plain Blob-backed photo image for the PDF, anchored at (top, left)
-// within its cell.
-function PdfPhotoImage({
-  src,
-  containerWidth,
-  containerHeight,
-  top,
-  left,
-}: {
-  src: Blob | undefined;
-  containerWidth: number;
-  containerHeight: number;
-  top: number;
-  left: number;
-}) {
-  if (!src) return null;
-  return (
-    <Image
-      src={src}
-      style={{
-        position: "absolute",
-        top,
-        left,
-        width: containerWidth,
-        height: containerHeight,
-        objectFit: "cover",
-      }}
-    />
-  );
-}
-
-function photoTiltDeg(assetId: string): number {
+// Shared by the web preview and the PDF renderer (src/pdf/buildPdfDocument.tsx).
+export function photoTiltDeg(assetId: string): number {
   const maxDeg = 3;
   return (seededRandom(assetId, 1) * 2 - 1) * maxDeg;
 }
 
-function tapeStyle(assetId: string) {
+export function tapeStyle(assetId: string) {
   const color = SCRAPBOOK.tape[Math.floor(seededRandom(assetId, 2) * 3)];
   const tiltDeg = (seededRandom(assetId, 3) * 2 - 1) * 8;
   return { color, tiltDeg };
@@ -435,7 +215,7 @@ function tapeStyle(assetId: string) {
 
 // Alternate the page caption between the top and bottom margin band so a
 // spread doesn't read as a rigid, repeated template.
-function captionAtBottom(logicalPageNumber: number): boolean {
+export function captionAtBottom(logicalPageNumber: number): boolean {
   return logicalPageNumber % 2 === 0;
 }
 
@@ -598,294 +378,22 @@ interface PhotoGridProps {
   onToggleDarkMode: () => void;
 }
 
-interface GlobalConfig {
-  // Page settings
-  // Which printer's constraints (available sizes, bleed, one-page-per-
-  // PDF-page) apply - "libre" leaves every field freely editable.
-  printerId: string;
-  pageWidth: number;
-  pageHeight: number;
-  margin: number;
-  combinePages: boolean;
-
-  // Layout settings
-  spacing: number;
-  filterVideos: boolean;
-  forceTimeline: boolean;
-  // Bleed ("fond perdu") - optional border around the trim size, filled
-  // with the page background, for print production.
-  bleedEnabled: boolean;
-  bleed: number;
-
-  // Display settings
-  showDates: boolean;
-  showCaptions: boolean;
-  fontSize: number;
-  pageBackground: PageBackground;
-  cardStyle: CardStyle;
-}
-
-type CoverLayout = "photo-title" | "full-bleed" | "text-only";
-
 const COVER_LAYOUTS: { value: CoverLayout; labelKey: keyof typeof translations.en }[] = [
   { value: "photo-title", labelKey: "coverLayoutPhotoTitle" },
   { value: "full-bleed", labelKey: "coverLayoutFullBleed" },
   { value: "text-only", labelKey: "coverLayoutTextOnly" },
 ];
 
-// How interior-page cards (photo and text) are mounted: "scrapbook" is
-// the original look - mildly tilted, matted, a piece of tape at the top;
-// "clean" is a flush, unrotated card the same size as its slot, no
-// mat/shadow/tape, for a plainer/more modern layout.
-type CardStyle = "scrapbook" | "clean";
-
 const CARD_STYLES: { value: CardStyle; label: string }[] = [
   { value: "scrapbook", label: "Scrapbook" },
   { value: "clean", label: "Clean" },
 ];
 
-interface AlbumConfig extends GlobalConfig {
-  // Customizations (album-specific only)
-  customOrdering: string[] | null;
-  // Bumped each time a page's "shuffle" control is used, to reroll its
-  // bento arrangement without changing anything else.
-  layoutVariants: Record<number, number>;
-  // Forces how many photos land on a given page number, overriding the
-  // automatically picked count. Keyed by logical page number.
-  pageCounts: Record<number, number>;
-  // LLM-generated page captions, keyed by logical page number
-  pageCaptions: Record<number, string>;
-  // User-written captions per photo (polaroid card), keyed by asset id
-  cardCaptions: Record<string, string>;
-  // How many photo slots on a page are turned into text cards (0-3),
-  // keyed by logical page number.
-  textCardCounts: Record<number, number>;
-  // Text card contents, keyed by the card's synthetic id
-  // ("text-{pageNumber}-{index}", see pageLayout.ts).
-  textCardContents: Record<string, string>;
-  // Manual per-page slot assignment (drag-and-drop swaps), keyed by
-  // logical page number - see LayoutOptions.slotOverrides in
-  // pageLayout.ts for why this exists instead of just reordering assets.
-  slotOverrides: Record<number, string[]>;
-  // Card/asset ids the user has manually swapped at least once, purely
-  // for the "reordered" indicator dot - a swap only ever touches exactly
-  // the two ids involved, unlike the old splice-based reorder it replaced
-  // which could shift a neighboring card's index without moving it.
-  manuallyMovedIds: string[];
-  // Front cover, rendered as an unnumbered page before page 1. Optional
-  // and off-by-default-when-unset isn't right here - some print services
-  // generate their own cover and don't want one in the submitted PDF, so
-  // this needs an explicit on/off rather than always including it.
-  showCover: boolean;
-  // Separated cover for print services like Blurb - creates a single page
-  // with back cover, spine, and front cover combined
-  separatedCover: boolean;
-  // Spine width in mm (typical 10mm for ~100 pages)
-  spineWidth: number;
-  // Background color for the spine
-  spineColor: string;
-  // Text color for the spine title
-  spineTextColor: string;
-  // Font size for spine title in points
-  spineTextSize: number;
-  // Title on spine (written vertically)
-  spineTitle: string;
-  // Empty string falls back to the album's own name at render time.
-  coverTitle: string;
-  // Which photo to use on the cover - null falls back to the first photo
-  // in the book's current order.
-  coverAssetId: string | null;
-  coverLayout: CoverLayout;
-  // Which photo to use on the back cover - independent of the front
-  // cover photo. Null falls back to the last photo in the book's
-  // current order (unless backCoverNoPhoto is set).
-  backCoverAssetId: string | null;
-  // Same layout choices as the front cover. Defaults to "photo-title" to
-  // match the back cover's original (pre-layout-picker) fixed look.
-  backCoverLayout: CoverLayout;
-  // Explicit "no photo" - overrides the fallback-to-last-photo default
-  // so a text-only (or empty) back cover is reachable, not just
-  // "haven't picked one yet".
-  backCoverNoPhoto: boolean;
-  // Optional short text shown on the back cover card, below its photo.
-  backCoverText: string;
-  // When there's no back cover photo, whether the text mounts on a
-  // white card (matching the rest of the scrapbook) or sits directly
-  // on the page background with no card at all.
-  backCoverPlainText: boolean;
-  // Whether the front/back cover photos are also left out of the
-  // interior pages - on by default, since printing the same photo twice
-  // (once on its cover, again inside the book) is rarely wanted.
-  excludeCoverPhotosFromPages: boolean;
-}
-
-const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
-  printerId: "libre",
-  pageWidth: 2515,
-  pageHeight: 3260,
-  margin: 118,
-  combinePages: false,
-  spacing: 20,
-  filterVideos: true,
-  forceTimeline: false,
-  bleedEnabled: false,
-  bleed: mmToPixels(3),
-  showDates: true,
-  showCaptions: true,
-  fontSize: 12,
-  pageBackground: "white",
-  cardStyle: "scrapbook",
-};
-
-// Helper functions for config persistence - stored server-side (see
-// backend/main.py, proxied at /photobooks and /globalconfig) rather than
-// in this browser's localStorage, so a photobook can be resumed from any
-// device/client, not just the one it was edited on.
-async function loadGlobalConfig(): Promise<GlobalConfig> {
-  try {
-    const res = await fetch("/globalconfig");
-    if (res.ok) {
-      return { ...DEFAULT_GLOBAL_CONFIG, ...(await res.json()) };
-    }
-  } catch (e) {
-    console.error("Failed to load global config:", e);
-  }
-  return DEFAULT_GLOBAL_CONFIG;
-}
-
-async function saveGlobalConfig(config: GlobalConfig) {
-  try {
-    await fetch("/globalconfig", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config),
-    });
-  } catch (e) {
-    console.error("Failed to save global config:", e);
-  }
-}
-
-async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
-  const globalConfig = await loadGlobalConfig();
-  const defaults: AlbumConfig = {
-    ...globalConfig,
-    customOrdering: null,
-    layoutVariants: {},
-    pageCounts: {},
-    pageCaptions: {},
-    cardCaptions: {},
-    textCardCounts: {},
-    textCardContents: {},
-    slotOverrides: {},
-    manuallyMovedIds: [],
-    showCover: true,
-    separatedCover: false,
-    spineWidth: 10,
-    spineColor: "#000000",
-    spineTextColor: "#FFFFFF",
-    spineTextSize: 18,
-    spineTitle: "",
-    coverTitle: "",
-    coverAssetId: null,
-    coverLayout: "photo-title",
-    backCoverAssetId: null,
-    backCoverLayout: "photo-title",
-    backCoverNoPhoto: false,
-    backCoverText: "",
-    backCoverPlainText: false,
-    excludeCoverPhotosFromPages: true,
-  };
-
-  try {
-    const res = await fetch(`/photobooks/${encodeURIComponent(albumId)}`);
-    if (res.ok) {
-      const albumSpecific = await res.json();
-      return { ...defaults, ...albumSpecific };
-    }
-  } catch (e) {
-    console.error("Failed to load album config:", e);
-  }
-
-  return defaults;
-}
-
-async function detectAlbumChanges(
-  albumId: string,
-  currentAssetIds: string[]
-): Promise<{ missingAssets: AssetResponseDto[]; newAssetIds: string[] }> {
-  try {
-    const res = await fetch(
-      `/photobooks/${encodeURIComponent(albumId)}/detect-changes`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentAssetIds }),
-      }
-    );
-    if (res.ok) {
-      const data = await res.json();
-      return {
-        missingAssets: data.missingAssets || [],
-        newAssetIds: data.newAssetIds || [],
-      };
-    }
-  } catch (e) {
-    console.error("Failed to detect album changes:", e);
-  }
-  return { missingAssets: [], newAssetIds: [] };
-}
-
-async function saveAlbumConfig(albumId: string, config: AlbumConfig, assets?: AssetResponseDto[]) {
-  try {
-    const payload: any = { config };
-    
-    // Only include assets snapshot if explicitly provided
-    if (assets && assets.length > 0) {
-      payload.assets = assets.map(a => ({
-        id: a.id,
-        type: a.type,
-        originalFileName: a.originalFileName,
-        fileCreatedAt: a.fileCreatedAt,
-        localDateTime: a.localDateTime,
-      }));
-    }
-    
-    await fetch(`/photobooks/${encodeURIComponent(albumId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    // Also update global config with page and layout settings, used to
-    // seed the defaults for the next album that has no photobook yet.
-    const globalConfig: GlobalConfig = {
-      printerId: config.printerId,
-      pageWidth: config.pageWidth,
-      pageHeight: config.pageHeight,
-      margin: config.margin,
-      combinePages: config.combinePages,
-      spacing: config.spacing,
-      filterVideos: config.filterVideos,
-      forceTimeline: config.forceTimeline,
-      bleedEnabled: config.bleedEnabled,
-      bleed: config.bleed,
-      showDates: config.showDates,
-      showCaptions: config.showCaptions,
-      fontSize: config.fontSize,
-      pageBackground: config.pageBackground,
-      cardStyle: config.cardStyle,
-    };
-    await saveGlobalConfig(globalConfig);
-  } catch (e) {
-    console.error("Failed to save album config:", e);
-  }
-}
-
 // Convert 300 DPI pixels to 72 DPI points for PDF
 // At 300 DPI: 1 inch = 300 pixels
 // At 72 DPI: 1 inch = 72 points
 // Conversion: points = pixels * (72/300)
-const toPoints = (pixels: number) => pixels * (72 / 300);
+export const toPoints = (pixels: number) => pixels * (72 / 300);
 
 // How tall the page-caption band needs to be (in points) to comfortably
 // fit its text: react-pdf drops the text entirely if its box isn't
@@ -895,18 +403,11 @@ const toPoints = (pixels: number) => pixels * (72 / 300);
 // content area's effective margin (see the `pages` useMemo) - without
 // the latter, photos are laid out right up to the nominal margin and
 // end up painted over a caption band that's actually taller than that.
-function pageCaptionBandHeightPt(fontSize: number, marginPx: number): number {
+export function pageCaptionBandHeightPt(fontSize: number, marginPx: number): number {
   const captionFontSizePt = fontSize * 1.9;
   const paddingPt = Math.max(4, toPoints(marginPx) * 0.15);
   return Math.max(toPoints(marginPx), captionFontSizePt * 1.6 + paddingPt * 2);
 }
-
-// Static styles for the PDF
-const staticStyles = StyleSheet.create({
-  page: {
-    backgroundColor: "white",
-  },
-});
 
 // Strips characters that aren't safe in a downloaded filename across
 // platforms, so the album name can be used directly.
@@ -1370,122 +871,19 @@ function PhotoGridEditor({
     secondId: string;
   } | null>(null);
 
-  // History of operations for undo functionality
-  type HistoryOperation =
-    | {
-        type: "swap-same-page";
-        pageNumber: number;
-        order: string[];
-        prevOrder: string[];
-        assetIds: [string, string];
-        timestamp: number;
-      }
-    | {
-        type: "swap-text-cards";
-        assetIds: [string, string];
-        prevContents: [string, string];
-        timestamp: number;
-      }
-    | {
-        type: "swap-cross-page";
-        assetIds: [string, string];
-        prevOrder: string[];
-        draggedPage: number;
-        targetPage: number;
-        timestamp: number;
-      }
-    | {
-        type: "shuffle-layout";
-        pageNumber: number;
-        prevVariant: number;
-        newVariant: number;
-        timestamp: number;
-      }
-    | {
-        type: "set-page-count";
-        pageNumber: number;
-        prevCount: number | null;
-        newCount: number | null;
-        timestamp: number;
-      }
-    | {
-        type: "set-text-card-count";
-        pageNumber: number;
-        prevCount: number;
-        newCount: number;
-        timestamp: number;
-      }
-    | {
-        type: "edit-page-caption";
-        pageNumber: number;
-        prevText: string;
-        newText: string;
-        timestamp: number;
-      }
-    | {
-        type: "edit-card-caption";
-        assetId: string;
-        prevText: string;
-        newText: string;
-        timestamp: number;
-      }
-    | {
-        type: "edit-text-card";
-        cardId: string;
-        prevText: string;
-        newText: string;
-        timestamp: number;
-      }
-    | {
-        type: "set-cover";
-        prevAssetId: string | null;
-        newAssetId: string | null;
-        timestamp: number;
-      }
-    | {
-        type: "set-back-cover";
-        prevAssetId: string | null;
-        newAssetId: string | null;
-        timestamp: number;
-      }
-    | {
-        type: "edit-cover-title";
-        prevText: string;
-        newText: string;
-        timestamp: number;
-      }
-    | {
-        type: "edit-back-cover-text";
-        prevText: string;
-        newText: string;
-        timestamp: number;
-      }
-    | {
-        type: "swap-new-photo";
-        newAsset: AssetResponseDto;
-        replacedAsset: AssetResponseDto;
-        timestamp: number;
-      }
-    | {
-        type: "replace-placeholder";
-        newAsset: AssetResponseDto;
-        placeholderAsset: AssetResponseDto;
-        timestamp: number;
-      }
-    | {
-        type: "insert-new-photo";
-        newAsset: AssetResponseDto;
-        pageNumber: number;
-        prevPageCount: number | null;
-        timestamp: number;
-      }
-    | {
-        type: "delete-placeholder";
-        placeholderAsset: AssetResponseDto;
-        pageNumber: number | null;
-        prevPageCount: number | null;
-        timestamp: number;
-      };
+  // Confirmation dialog for placing a newly-detected photo (from the
+  // "new photos to place" panel) onto a cover/back-cover/interior slot -
+  // deferred so every placement goes through the same confirm-then-apply
+  // step as an existing-card swap, instead of applying instantly.
+  type NewAssetTarget =
+    | { kind: "cover" }
+    | { kind: "back-cover" }
+    | { kind: "interior-replace"; placeholderAsset: AssetResponseDto }
+    | { kind: "interior-swap"; asset: AssetResponseDto };
+  const [newAssetPlacementConfirmation, setNewAssetPlacementConfirmation] =
+    useState<{ newAsset: AssetResponseDto; target: NewAssetTarget } | null>(
+      null,
+    );
 
   // History - stored in localStorage per album
   const [history, setHistory] = useState<HistoryOperation[]>(() => {
@@ -1516,17 +914,7 @@ function PhotoGridEditor({
   }, [history, album.id]);
 
   // Flattened reference state - the baseline for Reset All
-  const [flattenedState, setFlattenedState] = useState<{
-    customOrdering: string[] | null;
-    slotOverrides: Record<number, string[]>;
-    manuallyMovedIds: string[];
-    layoutVariants: Record<number, number>;
-    pageCounts: Record<number, number>;
-    textCardCounts: Record<number, number>;
-    textCardContents: Record<string, string>;
-    pageCaptions: Record<number, string>;
-    cardCaptions: Record<string, string>;
-  } | null>(null);
+  const [flattenedState, setFlattenedState] = useState<FlattenedState | null>(null);
 
   // Language preference - stored in localStorage
   const [language, setLanguage] = useState<Language>(() => {
@@ -1909,204 +1297,14 @@ function PhotoGridEditor({
     ]);
   };
 
-  // Undo the last operation from history
-  const handleUndo = () => {
-    if (history.length === 0) return;
-
-    const [lastOp, ...remainingHistory] = history;
-
-    switch (lastOp.type) {
-      case "swap-same-page":
-        setSlotOverrides((prev) =>
-          new Map(prev).set(lastOp.pageNumber, lastOp.prevOrder)
-        );
-        setManuallyMovedIds((prev) => {
-          const next = new Set(prev);
-          next.delete(lastOp.assetIds[0]);
-          next.delete(lastOp.assetIds[1]);
-          return next;
-        });
-        break;
-
-      case "swap-text-cards":
-        setTextCardContents((prev) => {
-          const next = new Map(prev);
-          const [id1, id2] = lastOp.assetIds;
-          const [text1, text2] = lastOp.prevContents;
-          if (text1) next.set(id1, text1);
-          else next.delete(id1);
-          if (text2) next.set(id2, text2);
-          else next.delete(id2);
-          return next;
-        });
-        setManuallyMovedIds((prev) => {
-          const next = new Set(prev);
-          next.delete(lastOp.assetIds[0]);
-          next.delete(lastOp.assetIds[1]);
-          return next;
-        });
-        break;
-
-      case "swap-cross-page":
-        setCustomOrdering(lastOp.prevOrder);
-        setSlotOverrides((prev) => {
-          const next = new Map(prev);
-          next.delete(lastOp.draggedPage);
-          next.delete(lastOp.targetPage);
-          return next;
-        });
-        setManuallyMovedIds((prev) => {
-          const next = new Set(prev);
-          next.delete(lastOp.assetIds[0]);
-          next.delete(lastOp.assetIds[1]);
-          return next;
-        });
-        break;
-
-      case "shuffle-layout":
-        setLayoutVariants((prev) =>
-          new Map(prev).set(lastOp.pageNumber, lastOp.prevVariant)
-        );
-        break;
-
-      case "set-page-count":
-        setPageCounts((prev) => {
-          const next = new Map(prev);
-          if (lastOp.prevCount === null) {
-            next.delete(lastOp.pageNumber);
-          } else {
-            next.set(lastOp.pageNumber, lastOp.prevCount);
-          }
-          return next;
-        });
-        break;
-
-      case "set-text-card-count":
-        setTextCardCounts((prev) => {
-          const next = new Map(prev);
-          if (lastOp.prevCount === 0) {
-            next.delete(lastOp.pageNumber);
-          } else {
-            next.set(lastOp.pageNumber, lastOp.prevCount);
-          }
-          return next;
-        });
-        break;
-
-      case "edit-page-caption":
-        setPageCaptions((prev) => {
-          const next = new Map(prev);
-          if (lastOp.prevText) {
-            next.set(lastOp.pageNumber, lastOp.prevText);
-          } else {
-            next.delete(lastOp.pageNumber);
-          }
-          return next;
-        });
-        break;
-
-      case "edit-card-caption":
-        setCardCaptions((prev) => {
-          const next = new Map(prev);
-          if (lastOp.prevText) {
-            next.set(lastOp.assetId, lastOp.prevText);
-          } else {
-            next.delete(lastOp.assetId);
-          }
-          return next;
-        });
-        break;
-
-      case "edit-text-card":
-        setTextCardContents((prev) => {
-          const next = new Map(prev);
-          if (lastOp.prevText) {
-            next.set(lastOp.cardId, lastOp.prevText);
-          } else {
-            next.delete(lastOp.cardId);
-          }
-          return next;
-        });
-        break;
-
-      case "set-cover":
-        setCoverAssetId(lastOp.prevAssetId);
-        break;
-
-      case "set-back-cover":
-        setBackCoverAssetId(lastOp.prevAssetId);
-        break;
-
-      case "edit-cover-title":
-        setCoverTitle(lastOp.prevText);
-        break;
-
-      case "edit-back-cover-text":
-        setBackCoverText(lastOp.prevText);
-        break;
-      
-      case "swap-new-photo":
-        // Undo swap: put back the replaced asset, add new asset to newAssets
-        setAssets(prev => prev.map(a => a.id === lastOp.newAsset.id ? lastOp.replacedAsset : a));
-        setNewAssets(prev => [...prev, lastOp.newAsset]);
-        break;
-      
-      case "replace-placeholder":
-        // Undo replace: restore placeholder, add new asset to newAssets
-        setAssets(prev => prev.map(a => a.id === lastOp.newAsset.id ? lastOp.placeholderAsset : a));
-        setNewAssets(prev => [...prev, lastOp.newAsset]);
-        setMissingAssetIds(prev => new Set([...prev, lastOp.placeholderAsset.id]));
-        break;
-      
-      case "insert-new-photo":
-        // Undo insert: remove the new asset, restore pageCount, add back to newAssets
-        setAssets(prev => prev.filter(a => a.id !== lastOp.newAsset.id));
-        setNewAssets(prev => [...prev, lastOp.newAsset]);
-        // Restore previous pageCount
-        setPageCounts(prev => {
-          const next = new Map(prev);
-          if (lastOp.prevPageCount === null) {
-            next.delete(lastOp.pageNumber);
-          } else {
-            next.set(lastOp.pageNumber, lastOp.prevPageCount);
-          }
-          return next;
-        });
-        break;
-      
-      case "delete-placeholder":
-        // Undo delete: restore the placeholder and pageCount
-        setAssets(prev => [...prev, lastOp.placeholderAsset]);
-        setMissingAssetIds(prev => new Set([...prev, lastOp.placeholderAsset.id]));
-        // Restore previous pageCount
-        if (lastOp.pageNumber !== null) {
-          setPageCounts(prev => {
-            const next = new Map(prev);
-            if (lastOp.prevPageCount === null) {
-              next.delete(lastOp.pageNumber!);
-            } else {
-              next.set(lastOp.pageNumber!, lastOp.prevPageCount);
-            }
-            return next;
-          });
-        }
-        break;
-      
-      case "remove-back-cover-photo":
-        // Undo remove: restore the photo
-        console.log(`[UNDO] Restauration de la photo de 4ème de couverture : ${lastOp.assetName} (ID: ${lastOp.assetId})`);
-        setBackCoverNoPhoto(false);
-        break;
-      
-      case "restore-back-cover-photo":
-        // Undo restore: hide the photo again
-        console.log(`[UNDO] Retrait de la photo de 4ème de couverture`);
-        setBackCoverNoPhoto(true);
-        break;
-    }
-
-    setHistory(remainingHistory);
-  };
+  // Filter assets based on user preferences (default order)
+  const defaultFilteredAssets = useMemo(() => {
+    // Filter out any undefined assets (safety after undo operations)
+    const validAssets = assets.filter((asset) => asset !== undefined && asset !== null);
+    return filterVideos
+      ? validAssets.filter((asset) => asset.type === "IMAGE")
+      : validAssets;
+  }, [assets, filterVideos]);
 
   // Drag & drop for reordering - implemented with pointer events and
   // manual hit-testing (element.closest("[data-reorder-asset-id]") under
@@ -2124,270 +1322,41 @@ function PhotoGridEditor({
     setReorderDragState({ draggedAssetId: assetId });
   };
 
-  // Undo a manual swap for one card: un-flag it, drop its page's slot
-  // override (that whole page falls back to fresh auto tiling - a manual
-  // arrangement only makes sense as the set the user actually placed, not
-  // a partial remnant of it), and if it was swapped across pages, restore
-  // its default position in the master sequence too.
-  const handleResetCard = (assetId: string) => {
-    setManuallyMovedIds((prev) => {
-      if (!prev.has(assetId)) return prev;
-      const next = new Set(prev);
-      next.delete(assetId);
-      return next;
-    });
-    setSlotOverrides((prev) => {
-      let changed = false;
-      const next = new Map(prev);
-      for (const [pageNumber, ids] of prev) {
-        if (ids.includes(assetId)) {
-          next.delete(pageNumber);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-    setCustomOrdering((prev) => {
-      if (!prev || !prev.includes(assetId)) return prev;
-      const defaultIndex = defaultFilteredAssets.findIndex(
-        (a) => a.id === assetId,
-      );
-      const next = prev.filter((id) => id !== assetId);
-      next.splice(defaultIndex, 0, assetId);
-      return next;
-    });
-  };
-
-  // Reset ordering to default
-  const handleResetOrdering = () => {
-    setCustomOrdering(null);
-    setSlotOverrides(new Map());
-    setManuallyMovedIds(new Set());
-  };
-
-  // Reset ALL modifications
-  const handleFlatten = () => {
-    // Capture current state as the new baseline
-    setFlattenedState({
+  const { handleUndo, handleResetCard, handleResetOrdering, handleFlatten, handleResetAll } =
+    useEditHistory({
+      history,
+      setHistory,
+      setSlotOverrides,
+      setManuallyMovedIds,
+      setTextCardContents,
+      setCustomOrdering,
+      setLayoutVariants,
+      setPageCounts,
+      setTextCardCounts,
+      setPageCaptions,
+      setCardCaptions,
+      setCoverAssetId,
+      setBackCoverAssetId,
+      setCoverTitle,
+      setBackCoverText,
+      setAssets,
+      setNewAssets,
+      setMissingAssetIds,
+      setBackCoverNoPhoto,
+      setFlattenedState,
+      setShowFlattenConfirmation,
+      setShowResetConfirmation,
+      defaultFilteredAssets,
       customOrdering,
-      slotOverrides: Object.fromEntries(slotOverrides),
-      manuallyMovedIds: Array.from(manuallyMovedIds),
-      layoutVariants: Object.fromEntries(layoutVariants),
-      pageCounts: Object.fromEntries(pageCounts),
-      textCardCounts: Object.fromEntries(textCardCounts),
-      textCardContents: Object.fromEntries(textCardContents),
-      pageCaptions: Object.fromEntries(pageCaptions),
-      cardCaptions: Object.fromEntries(cardCaptions),
+      slotOverrides,
+      manuallyMovedIds,
+      layoutVariants,
+      pageCounts,
+      textCardCounts,
+      textCardContents,
+      pageCaptions,
+      cardCaptions,
     });
-    
-    // Clear history AND manuallyMovedIds since this is now the new baseline
-    setHistory([]);
-    setManuallyMovedIds(new Set());
-    
-    // Close confirmation dialog
-    setShowFlattenConfirmation(false);
-  };
-
-  const handleResetAll = () => {
-    // Undo all operations by processing the entire history
-    const currentHistory = [...history];
-    
-    // Process all operations in reverse (from most recent to oldest)
-    currentHistory.forEach((op) => {
-      switch (op.type) {
-        case "swap-same-page":
-          setSlotOverrides((prev) =>
-            new Map(prev).set(op.pageNumber, op.prevOrder)
-          );
-          setManuallyMovedIds((prev) => {
-            const next = new Set(prev);
-            next.delete(op.assetIds[0]);
-            next.delete(op.assetIds[1]);
-            return next;
-          });
-          break;
-
-        case "swap-text-cards":
-          setTextCardContents((prev) => {
-            const next = new Map(prev);
-            const [id1, id2] = op.assetIds;
-            const [text1, text2] = op.prevContents;
-            if (text1) next.set(id1, text1);
-            else next.delete(id1);
-            if (text2) next.set(id2, text2);
-            else next.delete(id2);
-            return next;
-          });
-          setManuallyMovedIds((prev) => {
-            const next = new Set(prev);
-            next.delete(op.assetIds[0]);
-            next.delete(op.assetIds[1]);
-            return next;
-          });
-          break;
-
-        case "swap-cross-page":
-          setCustomOrdering(op.prevOrder);
-          setSlotOverrides((prev) => {
-            const next = new Map(prev);
-            next.delete(op.draggedPage);
-            next.delete(op.targetPage);
-            return next;
-          });
-          setManuallyMovedIds((prev) => {
-            const next = new Set(prev);
-            next.delete(op.assetIds[0]);
-            next.delete(op.assetIds[1]);
-            return next;
-          });
-          break;
-
-        case "shuffle-layout":
-          setLayoutVariants((prev) =>
-            new Map(prev).set(op.pageNumber, op.prevVariant)
-          );
-          break;
-
-        case "set-page-count":
-          setPageCounts((prev) => {
-            const next = new Map(prev);
-            if (op.prevCount === null) {
-              next.delete(op.pageNumber);
-            } else {
-              next.set(op.pageNumber, op.prevCount);
-            }
-            return next;
-          });
-          break;
-
-        case "set-text-card-count":
-          setTextCardCounts((prev) => {
-            const next = new Map(prev);
-            if (op.prevCount === 0) {
-              next.delete(op.pageNumber);
-            } else {
-              next.set(op.pageNumber, op.prevCount);
-            }
-            return next;
-          });
-          break;
-
-        case "edit-page-caption":
-          setPageCaptions((prev) => {
-            const next = new Map(prev);
-            if (op.prevText) {
-              next.set(op.pageNumber, op.prevText);
-            } else {
-              next.delete(op.pageNumber);
-            }
-            return next;
-          });
-          break;
-
-        case "edit-card-caption":
-          setCardCaptions((prev) => {
-            const next = new Map(prev);
-            if (op.prevText) {
-              next.set(op.assetId, op.prevText);
-            } else {
-              next.delete(op.assetId);
-            }
-            return next;
-          });
-          break;
-
-        case "edit-text-card":
-          setTextCardContents((prev) => {
-            const next = new Map(prev);
-            if (op.prevText) {
-              next.set(op.cardId, op.prevText);
-            } else {
-              next.delete(op.cardId);
-            }
-            return next;
-          });
-          break;
-
-        case "set-cover":
-          setCoverAssetId(op.prevAssetId);
-          break;
-
-        case "set-back-cover":
-          setBackCoverAssetId(op.prevAssetId);
-          break;
-
-        case "edit-cover-title":
-          setCoverTitle(op.prevText);
-          break;
-
-        case "edit-back-cover-text":
-          setBackCoverText(op.prevText);
-          break;
-        
-        case "swap-new-photo":
-          // Undo swap: put back the replaced asset, add new asset to newAssets
-          setAssets(prev => prev.map(a => a.id === op.newAsset.id ? op.replacedAsset : a));
-          setNewAssets(prev => [...prev, op.newAsset]);
-          break;
-        
-        case "replace-placeholder":
-          // Undo replace: restore placeholder, add new asset to newAssets
-          setAssets(prev => prev.map(a => a.id === op.newAsset.id ? op.placeholderAsset : a));
-          setNewAssets(prev => [...prev, op.newAsset]);
-          setMissingAssetIds(prev => new Set([...prev, op.placeholderAsset.id]));
-          break;
-        
-        case "insert-new-photo":
-          // Undo insert: remove the new asset, restore pageCount, add back to newAssets
-          setAssets(prev => prev.filter(a => a.id !== op.newAsset.id));
-          setNewAssets(prev => [...prev, op.newAsset]);
-          // Restore previous pageCount
-          setPageCounts(prev => {
-            const next = new Map(prev);
-            if (op.prevPageCount === null) {
-              next.delete(op.pageNumber);
-            } else {
-              next.set(op.pageNumber, op.prevPageCount);
-            }
-            return next;
-          });
-          break;
-        
-        case "delete-placeholder":
-          // Undo delete: restore the placeholder and pageCount
-          setAssets(prev => [...prev, op.placeholderAsset]);
-          setMissingAssetIds(prev => new Set([...prev, op.placeholderAsset.id]));
-          // Restore previous pageCount
-          if (op.pageNumber !== null) {
-            setPageCounts(prev => {
-              const next = new Map(prev);
-              if (op.prevPageCount === null) {
-                next.delete(op.pageNumber!);
-              } else {
-                next.set(op.pageNumber!, op.prevPageCount);
-              }
-              return next;
-            });
-          }
-          break;
-      }
-    });
-    
-    // Clear history after undoing everything
-    setHistory([]);
-    
-    // Close confirmation dialog
-    setShowResetConfirmation(false);
-  };
-
-  // Filter assets based on user preferences (default order)
-  const defaultFilteredAssets = useMemo(() => {
-    // Filter out any undefined assets (safety after undo operations)
-    const validAssets = assets.filter((asset) => asset !== undefined && asset !== null);
-    return filterVideos
-      ? validAssets.filter((asset) => asset.type === "IMAGE")
-      : validAssets;
-  }, [assets, filterVideos]);
 
   // Apply custom ordering to filtered assets
   const filteredAssets = useMemo(() => {
@@ -2510,8 +1479,83 @@ function PhotoGridEditor({
   // list to swap within, so it swaps their positions in the master
   // sequence instead, which changes which page each naturally belongs to.
   // Shared by both the drag-and-drop reorder below and click-to-swap mode.
+  // Front/back cover are addressed by a fixed, content-independent slot
+  // id ("cover"/"back-cover") rather than the id of whichever asset is
+  // currently shown there - unlike an interior card, the same asset can
+  // simultaneously be a cover AND appear in `pages` (when
+  // excludeCoverPhotosFromPages is off), so reusing the asset id here
+  // would make it ambiguous which of the two slots is meant. A cover
+  // swap only ever changes *membership* (which asset id is excluded from
+  // the interior sequence via coverAssetId/backCoverAssetId) - it never
+  // touches `assets`/`filteredAssets` directly, so the swapped-out photo
+  // reappears on its own in the interior pages (see interiorAssets)
+  // without any extra bookkeeping, and undo only needs to restore the id.
+  const isCoverSlotId = (id: string) => id === "cover" || id === "back-cover";
+
+  const performCoverSwap = (draggedId: string, targetId: string) => {
+    if (isCoverSlotId(draggedId) && isCoverSlotId(targetId)) {
+      // cover <-> back-cover: one atomic history entry so a single Undo
+      // reverses both fields together.
+      if (!coverAsset || !backCoverAsset) return;
+      const prevCoverAssetId = coverAsset.id;
+      const prevBackCoverAssetId = backCoverAsset.id;
+      setCoverAssetId(prevBackCoverAssetId);
+      setBackCoverAssetId(prevCoverAssetId);
+      setHistory((prev) => [
+        {
+          type: "swap-cover-slots",
+          prevCoverAssetId,
+          prevBackCoverAssetId,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
+      return;
+    }
+
+    // cover/back-cover <-> an interior photo.
+    const coverSlot = isCoverSlotId(draggedId) ? draggedId : targetId;
+    const photoAssetId = isCoverSlotId(draggedId) ? targetId : draggedId;
+    const photoAsset = filteredAssets.find((a) => a.id === photoAssetId);
+    if (!photoAsset) return;
+
+    if (coverSlot === "cover") {
+      if (!coverAsset) return;
+      const prevAssetId = coverAsset.id;
+      setCoverAssetId(photoAsset.id);
+      setHistory((prev) => [
+        {
+          type: "set-cover",
+          prevAssetId,
+          newAssetId: photoAsset.id,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
+    } else {
+      if (!backCoverAsset) return;
+      const prevAssetId = backCoverAsset.id;
+      setBackCoverAssetId(photoAsset.id);
+      setBackCoverNoPhoto(false);
+      setHistory((prev) => [
+        {
+          type: "set-back-cover",
+          prevAssetId,
+          newAssetId: photoAsset.id,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
+    }
+  };
+
   const performSwap = (draggedAssetId: string, targetAssetId: string) => {
     if (targetAssetId === draggedAssetId) return;
+
+    if (isCoverSlotId(draggedAssetId) || isCoverSlotId(targetAssetId)) {
+      performCoverSwap(draggedAssetId, targetAssetId);
+      return;
+    }
 
     let draggedPage: number | null = null;
     let targetPage: number | null = null;
@@ -2630,16 +1674,219 @@ function PhotoGridEditor({
     // nothing happens.
   };
 
+  // Resolves a card id from the existing-card swap system (swapFirstId -
+  // "cover", "back-cover", a text card id, or a real asset id) into a
+  // NewAssetTarget, so arming an existing card FIRST and then picking a
+  // new photo SECOND lands on the exact same confirm-then-place flow as
+  // the reverse order (pick the new photo first, then click a target) -
+  // the outcome shouldn't depend on which one the user clicked first.
+  const isNewAssetCardId = (id: string) => newAssets.some((a) => a.id === id);
+
+  // Sole dispatcher for "the user wants to exchange card A and card B" -
+  // drag-drop and click-arm-then-click both call ONLY this, for any
+  // pair of cards (interior photo, cover, back-cover, or a not-yet-
+  // placed "new photo" from the top panel). It decides which of the two
+  // confirmation flows applies and arms it; neither branch mutates
+  // anything itself. A pair where neither side is placed yet (two new
+  // photos) has nothing to swap, so it's a no-op.
+  const requestSwap = (idA: string, idB: string) => {
+    if (idA === idB) return;
+    const aIsNew = isNewAssetCardId(idA);
+    const bIsNew = isNewAssetCardId(idB);
+    if (aIsNew || bIsNew) {
+      if (aIsNew && bIsNew) return;
+      const newAssetId = aIsNew ? idA : idB;
+      const otherId = aIsNew ? idB : idA;
+      const newAsset = newAssets.find((a) => a.id === newAssetId);
+      const target = resolveNewAssetTarget(otherId);
+      if (newAsset && target) performNewAssetPlacement(newAsset, target);
+      return;
+    }
+    setSwapConfirmation({ firstId: idA, secondId: idB });
+  };
+
+  const resolveNewAssetTarget = (cardId: string): NewAssetTarget | null => {
+    if (cardId === "cover") return coverAsset ? { kind: "cover" } : null;
+    if (cardId === "back-cover") return backCoverAsset ? { kind: "back-cover" } : null;
+    if (cardId.startsWith("text-")) return null; // no photo-swap target
+    const asset = filteredAssets.find((a) => a.id === cardId);
+    if (!asset) return null;
+    return missingAssetIds.has(asset.id)
+      ? { kind: "interior-replace", placeholderAsset: asset }
+      : { kind: "interior-swap", asset };
+  };
+
+  // Single entry point for placing a "new photo" (from the top panel,
+  // not yet part of the book) onto a cover/back-cover/interior slot.
+  // Every click handler that offers this action calls ONLY this
+  // function - none of them mutate coverAssetId/backCoverAssetId/assets
+  // directly. It never applies the placement itself: it arms a
+  // confirmation (mirroring the swapFirstId -> swapConfirmation flow
+  // used for existing-card swaps), and the actual mutation lives in the
+  // single place below (applyNewAssetPlacement), run only from the
+  // confirmation dialog's Confirm button.
+  const performNewAssetPlacement = (
+    newAsset: AssetResponseDto,
+    target: NewAssetTarget,
+  ) => {
+    setNewAssetPlacementConfirmation({ newAsset, target });
+  };
+
+  const applyNewAssetPlacement = () => {
+    if (!newAssetPlacementConfirmation) return;
+    const { newAsset, target } = newAssetPlacementConfirmation;
+
+    switch (target.kind) {
+      case "cover": {
+        if (!coverAsset) break;
+        const oldCover = coverAsset;
+        // The incoming photo isn't part of the book yet - it has to be
+        // added to `assets` (taking the old cover's place) before
+        // setting coverAssetId, otherwise the coverAsset lookup
+        // (filteredAssets.find) can't find it and silently falls back
+        // to the wrong photo.
+        setAssets((prev) =>
+          prev.map((a) => (a.id === oldCover.id ? newAsset : a)),
+        );
+        setCoverAssetId(newAsset.id);
+        setNewAssets((prev) => [
+          ...prev.filter((a) => a.id !== newAsset.id),
+          oldCover,
+        ]);
+        setHistory((prev) => [
+          {
+            type: "set-cover",
+            prevAssetId: oldCover.id,
+            newAssetId: newAsset.id,
+            timestamp: Date.now(),
+          },
+          ...prev,
+        ]);
+        break;
+      }
+      case "back-cover": {
+        if (!backCoverAsset) break;
+        const oldBackCover = backCoverAsset;
+        setAssets((prev) =>
+          prev.map((a) => (a.id === oldBackCover.id ? newAsset : a)),
+        );
+        setBackCoverAssetId(newAsset.id);
+        setBackCoverNoPhoto(false);
+        setNewAssets((prev) => [
+          ...prev.filter((a) => a.id !== newAsset.id),
+          oldBackCover,
+        ]);
+        setHistory((prev) => [
+          {
+            type: "set-back-cover",
+            prevAssetId: oldBackCover.id,
+            newAssetId: newAsset.id,
+            timestamp: Date.now(),
+          },
+          ...prev,
+        ]);
+        break;
+      }
+      case "interior-replace": {
+        const placeholder = target.placeholderAsset;
+        const updatedAssets = assets.map((a) =>
+          a.id === placeholder.id ? newAsset : a,
+        );
+        setAssets(updatedAssets);
+        setNewAssets((prev) => prev.filter((a) => a.id !== newAsset.id));
+        setMissingAssetIds((prev) => {
+          const next = new Set(prev);
+          next.delete(placeholder.id);
+          return next;
+        });
+        setHistory((prev) => [
+          {
+            type: "replace-placeholder",
+            newAsset,
+            placeholderAsset: placeholder,
+            timestamp: Date.now(),
+          },
+          ...prev,
+        ]);
+        setTimeout(() => {
+          const config: AlbumConfig = {
+            printerId, pageWidth, pageHeight, margin, combinePages, spacing,
+            filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
+            fontSize, pageBackground, cardStyle, customOrdering,
+            layoutVariants: Object.fromEntries(layoutVariants),
+            pageCounts: Object.fromEntries(pageCounts),
+            pageCaptions: Object.fromEntries(pageCaptions),
+            cardCaptions: Object.fromEntries(cardCaptions),
+            textCardCounts: Object.fromEntries(textCardCounts),
+            textCardContents: Object.fromEntries(textCardContents),
+            slotOverrides: Object.fromEntries(slotOverrides),
+            manuallyMovedIds: Array.from(manuallyMovedIds),
+            showCover, coverTitle, coverAssetId, coverLayout,
+            backCoverAssetId, backCoverLayout, backCoverNoPhoto,
+            backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
+          };
+          saveAlbumConfig(album.id, config, updatedAssets);
+        }, 100);
+        break;
+      }
+      case "interior-swap": {
+        const asset = target.asset;
+        const updatedAssets = assets.map((a) =>
+          a.id === asset.id ? newAsset : a,
+        );
+        setAssets(updatedAssets);
+        setNewAssets((prev) => [
+          ...prev.filter((a) => a.id !== newAsset.id),
+          asset,
+        ]);
+        setHistory((prev) => [
+          {
+            type: "swap-new-photo",
+            newAsset,
+            replacedAsset: asset,
+            timestamp: Date.now(),
+          },
+          ...prev,
+        ]);
+        setTimeout(() => {
+          const config: AlbumConfig = {
+            printerId, pageWidth, pageHeight, margin, combinePages, spacing,
+            filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
+            fontSize, pageBackground, cardStyle, customOrdering,
+            layoutVariants: Object.fromEntries(layoutVariants),
+            pageCounts: Object.fromEntries(pageCounts),
+            pageCaptions: Object.fromEntries(pageCaptions),
+            cardCaptions: Object.fromEntries(cardCaptions),
+            textCardCounts: Object.fromEntries(textCardCounts),
+            textCardContents: Object.fromEntries(textCardContents),
+            slotOverrides: Object.fromEntries(slotOverrides),
+            manuallyMovedIds: Array.from(manuallyMovedIds),
+            showCover, coverTitle, coverAssetId, coverLayout,
+            backCoverAssetId, backCoverLayout, backCoverNoPhoto,
+            backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
+          };
+          saveAlbumConfig(album.id, config, updatedAssets);
+        }, 100);
+        break;
+      }
+    }
+
+    setSelectedNewAsset(null);
+    setNewAssetPlacementConfirmation(null);
+  };
+
   // While a reorder drag is active, track the pointer over the whole
   // window (not just the card it started on) and hit-test which card is
   // underneath via elementFromPoint - this works correctly regardless of
   // the preview's CSS zoom, since elementFromPoint uses actual rendered
   // coordinates. Both gestures are available at once, no mode switch:
-  // dropping onto a *different* card swaps them immediately (drag);
-  // releasing back over the *same* card (i.e. a plain click, no
+  // dropping onto a *different* card arms a confirmation for that pair
+  // (drag); releasing back over the *same* card (i.e. a plain click, no
   // movement) arms it instead, so a second plain click on another card
-  // completes the swap - handy when the two cards are far apart and
-  // dragging across the whole preview isn't practical.
+  // arms the same confirmation - handy when the two cards are far apart
+  // and dragging across the whole preview isn't practical. Either way,
+  // the swap itself only ever happens from swapConfirmation's Confirm
+  // button, via performSwap.
   useEffect(() => {
     if (!reorderDragState) return;
     const { draggedAssetId } = reorderDragState;
@@ -2658,20 +1905,26 @@ function PhotoGridEditor({
       const targetAssetId = cardUnderPointer(event.clientX, event.clientY);
 
       if (targetAssetId && targetAssetId !== draggedAssetId) {
-        // Drag and drop - swap immediately without confirmation
-        performSwap(draggedAssetId, targetAssetId);
+        // Drag and drop - goes through requestSwap, same as click-to-
+        // swap below, rather than applying immediately, so every swap -
+        // drag or click, between any two cards including a not-yet-
+        // placed new photo - is confirmed the same way.
+        requestSwap(draggedAssetId, targetAssetId);
         setSwapFirstId(null);
       } else if (targetAssetId === draggedAssetId) {
-        if (swapFirstId === null) {
+        if (isNewAssetCardId(draggedAssetId)) {
+          // A plain click on a new-photo thumbnail is handled by its
+          // own onClick (arm/complete via selectedNewAsset) - the
+          // click-arm-then-click-again flow below only applies between
+          // two already-placed cards.
+        } else if (swapFirstId === null) {
           setSwapFirstId(draggedAssetId);
         } else if (swapFirstId === draggedAssetId) {
           setSwapFirstId(null);
         } else {
           // Click-to-swap - show confirmation dialog
-          setSwapConfirmation({
-            firstId: swapFirstId,
-            secondId: draggedAssetId,
-          });
+          requestSwap(swapFirstId, draggedAssetId);
+          setSwapFirstId(null);
         }
       }
 
@@ -2685,7 +1938,7 @@ function PhotoGridEditor({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [reorderDragState, pages, filteredAssets, swapFirstId]);
+  }, [reorderDragState, pages, filteredAssets, swapFirstId, newAssets]);
 
   // Group page photos by logical page number - matches the numbering
   // already used for pageCaptions/the "Page X of Y" UI: in combined mode
@@ -2713,7 +1966,9 @@ function PhotoGridEditor({
   }, [pages, combinePages]);
 
   // Determine pageLayout based on combinePages setting
-  const pageLayout = combinePages ? "singlePage" : "twoPageLeft";
+  const pageLayout: "singlePage" | "twoPageLeft" = combinePages
+    ? "singlePage"
+    : "twoPageLeft";
 
   // Calculate total logical pages for display purposes
   const totalLogicalPages = combinePages ? pages.length * 2 : pages.length;
@@ -3022,1441 +2277,6 @@ function PhotoGridEditor({
     );
   }
 
-  // Builds the actual PDF document element from photo Blobs fetched
-  // ahead of time (see handleGeneratePdf) - react-pdf's own image
-  // fetching turned out to be unreliable on its own (photos randomly,
-  // but reproducibly, missing), so every photo is fetched ourselves with
-  // real error handling and handed to <Image> as a Blob instead of a URL.
-  const buildPdfDocument = (imageBlobs: Map<string, Blob>, pdfType: 'full' | 'cover' | 'interior' = 'full') => {
-    const coverPageWidth = toPoints(validPageWidth);
-    const coverPageHeight = toPoints(validPageHeight);
-    const coverImageBlob = coverAsset
-      ? imageBlobs.get(coverAsset.id)
-      : undefined;
-    const backCoverImageBlob = backCoverAsset
-      ? imageBlobs.get(backCoverAsset.id)
-      : undefined;
-    const coverScrimHeight = coverPageHeight * 0.28;
-    // Bleed ("fond perdu") - extra border filled with the page
-    // background, outside the trim size, so a print shop's trim line
-    // doesn't reveal a white edge. All existing page content keeps
-    // using the trim-size coordinates unchanged; it's just mounted
-    // inside a View offset by bleedPt on an enlarged page/background.
-    const bleedPt = bleedEnabled ? toPoints(validBleed) : 0;
-    const coverBleedWidth = coverPageWidth + bleedPt * 2;
-    const coverBleedHeight = coverPageHeight + bleedPt * 2;
-    
-    // Separated cover (for Blurb, etc.): back + spine + front in one page
-    const spineWidthPt = toPoints(mmToPixels(spineWidth)); // Convert mm → px → points
-    const separatedCoverWidth = separatedCover 
-      ? coverPageWidth * 2 + spineWidthPt 
-      : coverPageWidth;
-    const separatedCoverBleedWidth = separatedCoverWidth + bleedPt * 2;
-
-    // Helper to render back cover content (reused in both standalone and separated modes)
-    const renderBackCoverContent = () => {
-      // This is a direct extraction from the standalone back cover rendering
-      // to ensure separated cover gets the same layouts
-      return (
-        <>
-          {backCoverLayout === "text-only" && backCoverText && (
-            <View
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                paddingHorizontal: coverPageWidth * 0.1,
-              }}
-            >
-              <View
-                style={{
-                  width: coverPageWidth * 0.3,
-                  height: 1,
-                  backgroundColor: SCRAPBOOK.ink,
-                  opacity: 0.3,
-                  marginBottom: 16,
-                }}
-              />
-              <Text
-                style={{
-                  fontFamily: "Caveat",
-                  fontWeight: 600,
-                  fontSize: coverPageWidth * 0.09,
-                  color: SCRAPBOOK.ink,
-                  textAlign: "center",
-                }}
-              >
-                {backCoverText}
-              </Text>
-              <View
-                style={{
-                  width: coverPageWidth * 0.3,
-                  height: 1,
-                  backgroundColor: SCRAPBOOK.ink,
-                  opacity: 0.3,
-                  marginTop: 16,
-                }}
-              />
-            </View>
-          )}
-
-          {backCoverLayout === "photo-title" &&
-            (backCoverImageBlob || backCoverText) &&
-            (() => {
-              const hasImage = !!backCoverImageBlob;
-              if (!hasImage && backCoverPlainText && backCoverText) {
-                const plainWidth = coverPageWidth * 0.7;
-                return (
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: (coverPageWidth - plainWidth) / 2,
-                      width: plainWidth,
-                      height: coverPageHeight,
-                      display: "flex",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontFamily: "Caveat",
-                        fontWeight: 500,
-                        fontSize: fontSize * 1.9,
-                        color: SCRAPBOOK.ink,
-                        textAlign: "center",
-                      }}
-                    >
-                      {backCoverText}
-                    </Text>
-                  </View>
-                );
-              }
-
-              const cardWidth = coverPageWidth * 0.42;
-              const cardHeight = coverPageHeight * 0.3;
-              const cardTop = (coverPageHeight - cardHeight) / 2;
-              const cardLeft = (coverPageWidth - cardWidth) / 2;
-              const frameInset = Math.max(4, cardWidth * 0.045);
-              const captionStripHeight = backCoverText ? fontSize * 1.3 * 1.6 : 0;
-              
-              return (
-                <View
-                  style={{
-                    position: "absolute",
-                    top: cardTop,
-                    left: cardLeft,
-                    width: cardWidth,
-                    height: cardHeight,
-                  }}
-                >
-                  {hasImage && (
-                    <View
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: cardWidth,
-                        height: cardHeight - captionStripHeight,
-                        backgroundColor: SCRAPBOOK.mat,
-                      }}
-                    >
-                      <View
-                        style={{
-                          position: "absolute",
-                          top: frameInset,
-                          left: frameInset,
-                          right: frameInset,
-                          bottom: frameInset,
-                          overflow: "hidden",
-                        }}
-                      >
-                        <Image
-                          src={backCoverImageBlob}
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                          }}
-                        />
-                      </View>
-                    </View>
-                  )}
-                  {backCoverText && (
-                    <View
-                      style={{
-                        position: "absolute",
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        height: captionStripHeight,
-                        backgroundColor: SCRAPBOOK.mat,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        paddingHorizontal: 8,
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontFamily: "Caveat",
-                          fontWeight: 500,
-                          fontSize: fontSize * 1.3,
-                          color: SCRAPBOOK.ink,
-                          textAlign: "center",
-                        }}
-                      >
-                        {backCoverText}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              );
-            })()}
-
-          {backCoverLayout === "full-bleed" && backCoverImageBlob && (
-            <>
-              <Image
-                src={backCoverImageBlob}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: coverPageWidth,
-                  height: coverPageHeight,
-                  objectFit: "cover",
-                }}
-              />
-              <View
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  bottom: 0,
-                  width: coverPageWidth,
-                  height: coverScrimHeight,
-                }}
-              >
-                {Array.from({ length: 10 }, (_, i) => (
-                  <View
-                    key={i}
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: (coverScrimHeight * i) / 10,
-                      width: coverPageWidth,
-                      height: coverScrimHeight / 10 + 0.5,
-                      backgroundColor: "#000000",
-                      opacity: (0.55 * (i + 1)) / 10,
-                    }}
-                  />
-                ))}
-              </View>
-              {backCoverText && (
-                <View
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    height: coverScrimHeight,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontFamily: "Caveat",
-                      fontWeight: 600,
-                      fontSize: coverPageWidth * 0.06,
-                      color: "#FFFFFF",
-                      textAlign: "center",
-                    }}
-                  >
-                    {backCoverText}
-                  </Text>
-                </View>
-              )}
-            </>
-          )}
-        </>
-      );
-    };
-
-    // Helper to render front cover content (reused in both standalone and separated modes)
-    const renderFrontCoverContent = () => (
-      <>
-        {coverLayout === "text-only" && (
-          <View
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              paddingHorizontal: coverPageWidth * 0.1,
-            }}
-          >
-            <View
-              style={{
-                width: coverPageWidth * 0.3,
-                height: 1,
-                backgroundColor: SCRAPBOOK.ink,
-                opacity: 0.3,
-                marginBottom: 16,
-              }}
-            />
-            <Text
-              style={{
-                fontFamily: "Caveat",
-                fontWeight: 600,
-                fontSize: coverPageWidth * 0.09,
-                color: SCRAPBOOK.ink,
-                textAlign: "center",
-              }}
-            >
-              {coverTitle || album.albumName}
-            </Text>
-            <View
-              style={{
-                width: coverPageWidth * 0.3,
-                height: 1,
-                backgroundColor: SCRAPBOOK.ink,
-                opacity: 0.3,
-                marginTop: 16,
-              }}
-            />
-          </View>
-        )}
-
-        {coverLayout === "photo-title" && coverImageBlob && (
-          <>
-            <View
-              style={{
-                position: "absolute",
-                top: coverPageHeight * 0.08,
-                left: coverPageWidth * 0.08,
-                width: coverPageWidth * 0.84,
-                height: coverPageHeight * 0.68,
-                backgroundColor: SCRAPBOOK.mat,
-              }}
-            >
-              <PdfPhotoImage
-                src={coverImageBlob}
-                top={coverPageWidth * 0.02}
-                left={coverPageWidth * 0.02}
-                containerWidth={coverPageWidth * 0.8}
-                containerHeight={coverPageHeight * 0.64}
-              />
-            </View>
-            <View
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: coverPageHeight * 0.2,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text
-                style={{
-                  fontFamily: "Caveat",
-                  fontWeight: 600,
-                  fontSize: coverPageWidth * 0.055,
-                  color: SCRAPBOOK.ink,
-                  textAlign: "center",
-                }}
-              >
-                {coverTitle || album.albumName}
-              </Text>
-            </View>
-          </>
-        )}
-
-        {coverLayout === "full-bleed" && coverImageBlob && (
-          <>
-            <Image
-              src={coverImageBlob}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: coverPageWidth,
-                height: coverPageHeight,
-                objectFit: "cover",
-              }}
-            />
-            <View
-              style={{
-                position: "absolute",
-                left: 0,
-                bottom: 0,
-                width: coverPageWidth,
-                height: coverScrimHeight,
-              }}
-            >
-              {Array.from({ length: 10 }, (_, i) => (
-                <View
-                  key={i}
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: (coverScrimHeight * i) / 10,
-                    width: coverPageWidth,
-                    height: coverScrimHeight / 10 + 0.5,
-                    backgroundColor: "#000000",
-                    opacity: (0.55 * (i + 1)) / 10,
-                  }}
-                />
-              ))}
-            </View>
-            <View
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: coverScrimHeight,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text
-                style={{
-                  fontFamily: "Caveat",
-                  fontWeight: 600,
-                  fontSize: coverPageWidth * 0.06,
-                  color: "#FFFFFF",
-                  textAlign: "center",
-                }}
-              >
-                {coverTitle || album.albumName}
-              </Text>
-            </View>
-          </>
-        )}
-      </>
-    );
-
-    // Determine what to include based on PDF type
-    const includeFrontCover = pdfType === 'full' 
-      ? (showCover && !separatedCover) 
-      : false;
-    const includeBackCover = pdfType === 'full' 
-      ? (showCover && !separatedCover) 
-      : false;
-    const includeSeparatedCover = pdfType === 'cover' || (pdfType === 'full' && separatedCover);
-    const includeInteriorPages = pdfType === 'full' || pdfType === 'interior';
-
-    return (
-    <Document pageLayout={pageLayout}>
-      {includeFrontCover && (
-        <Page
-          size={{ width: coverBleedWidth, height: coverBleedHeight }}
-          style={{
-            ...staticStyles.page,
-            backgroundColor: PAGE_BACKGROUNDS[pageBackground].base,
-          }}
-        >
-          <PdfPageBackground
-            background={pageBackground}
-            width={coverBleedWidth}
-            height={coverBleedHeight}
-          />
-          <View
-            style={{
-              position: "absolute",
-              top: bleedPt,
-              left: bleedPt,
-              width: coverPageWidth,
-              height: coverPageHeight,
-            }}
-          >
-
-          {coverLayout === "text-only" && (
-            <View
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                paddingHorizontal: coverPageWidth * 0.1,
-              }}
-            >
-              <View
-                style={{
-                  width: coverPageWidth * 0.3,
-                  height: 1,
-                  backgroundColor: SCRAPBOOK.ink,
-                  opacity: 0.3,
-                  marginBottom: 16,
-                }}
-              />
-              <Text
-                style={{
-                  fontFamily: "Caveat",
-                  fontWeight: 600,
-                  fontSize: coverPageWidth * 0.09,
-                  color: SCRAPBOOK.ink,
-                  textAlign: "center",
-                }}
-              >
-                {coverTitle || album.albumName}
-              </Text>
-              <View
-                style={{
-                  width: coverPageWidth * 0.3,
-                  height: 1,
-                  backgroundColor: SCRAPBOOK.ink,
-                  opacity: 0.3,
-                  marginTop: 16,
-                }}
-              />
-            </View>
-          )}
-
-          {coverLayout === "photo-title" && coverImageBlob && (
-            <>
-              <View
-                style={{
-                  position: "absolute",
-                  top: coverPageHeight * 0.08,
-                  left: coverPageWidth * 0.08,
-                  width: coverPageWidth * 0.84,
-                  height: coverPageHeight * 0.68,
-                  backgroundColor: SCRAPBOOK.mat,
-                }}
-              >
-                <PdfPhotoImage
-                  src={coverImageBlob}
-                  top={coverPageWidth * 0.02}
-                  left={coverPageWidth * 0.02}
-                  containerWidth={coverPageWidth * 0.8}
-                  containerHeight={coverPageHeight * 0.64}
-                />
-              </View>
-              <View
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: coverPageHeight * 0.2,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: "Caveat",
-                    fontWeight: 600,
-                    fontSize: coverPageWidth * 0.055,
-                    color: SCRAPBOOK.ink,
-                    textAlign: "center",
-                  }}
-                >
-                  {coverTitle || album.albumName}
-                </Text>
-              </View>
-            </>
-          )}
-
-          {coverLayout === "full-bleed" && coverImageBlob && (
-            <>
-              <Image
-                src={coverImageBlob}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: coverPageWidth,
-                  height: coverPageHeight,
-                  objectFit: "cover",
-                }}
-              />
-              {/* Approximates a top-to-bottom fade with stacked bands
-                  rather than an Svg gradient - see PdfPageBackground's
-                  comment for why Svg is avoided here. */}
-              <View
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  bottom: 0,
-                  width: coverPageWidth,
-                  height: coverScrimHeight,
-                }}
-              >
-                {Array.from({ length: 10 }, (_, i) => (
-                  <View
-                    key={i}
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: (coverScrimHeight * i) / 10,
-                      width: coverPageWidth,
-                      height: coverScrimHeight / 10 + 0.5,
-                      backgroundColor: "#000000",
-                      opacity: (0.55 * (i + 1)) / 10,
-                    }}
-                  />
-                ))}
-              </View>
-              <View
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: coverScrimHeight,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: "Caveat",
-                    fontWeight: 600,
-                    fontSize: coverPageWidth * 0.06,
-                    color: "#FFFFFF",
-                    textAlign: "center",
-                  }}
-                >
-                  {coverTitle || album.albumName}
-                </Text>
-              </View>
-            </>
-          )}
-
-          </View>
-        </Page>
-      )}
-
-      {includeSeparatedCover && showCover && (
-        <Page
-          size={{ width: separatedCoverBleedWidth, height: coverBleedHeight }}
-          style={{
-            ...staticStyles.page,
-            backgroundColor: PAGE_BACKGROUNDS[pageBackground].base,
-          }}
-        >
-          <PdfPageBackground
-            background={pageBackground}
-            width={separatedCoverBleedWidth}
-            height={coverBleedHeight}
-          />
-          <View
-            style={{
-              position: "absolute",
-              top: bleedPt,
-              left: bleedPt,
-              width: separatedCoverWidth,
-              height: coverPageHeight,
-              flexDirection: "row",
-            }}
-          >
-            {/* Back Cover (left) */}
-            <View style={{ width: coverPageWidth, height: coverPageHeight, position: "relative" }}>
-              {renderBackCoverContent()}
-            </View>
-
-            {/* Spine (middle) */}
-            <View
-              style={{
-                width: spineWidthPt,
-                height: coverPageHeight,
-                backgroundColor: spineColor,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text
-                style={{
-                  fontFamily: "Caveat",
-                  fontSize: spineTextSize,
-                  color: spineTextColor,
-                  transform: "rotate(-90deg)",
-                }}
-              >
-                {spineTitle || album.albumName}
-              </Text>
-            </View>
-
-            {/* Front Cover (right) */}
-            <View style={{ width: coverPageWidth, height: coverPageHeight, position: "relative" }}>
-              {renderFrontCoverContent()}
-            </View>
-          </View>
-        </Page>
-      )}
-
-      {includeInteriorPages && pages.map((pageData) => {
-        // FIXME: pdfkit (internal of react-pdf) uses 72dpi internally and we downscale everything here;
-        // instead we should produce a high-quality 300 dpi pdf
-
-        // Convert page dimensions from 300 DPI to 72 DPI
-        const pageWidth = toPoints(pageData.width);
-        const pageHeight = toPoints(pageData.height);
-        const pageBleedWidth = pageWidth + bleedPt * 2;
-        const pageBleedHeight = pageHeight + bleedPt * 2;
-        return (
-          <Page
-            key={pageData.pageNumber}
-            size={{
-              width: pageBleedWidth,
-              height: pageBleedHeight,
-            }}
-            style={{
-              ...staticStyles.page,
-              backgroundColor: PAGE_BACKGROUNDS[pageBackground].base,
-            }}
-          >
-            <PdfPageBackground
-              background={pageBackground}
-              width={pageBleedWidth}
-              height={pageBleedHeight}
-            />
-            <View
-              style={{
-                position: "absolute",
-                top: bleedPt,
-                left: bleedPt,
-                width: pageWidth,
-                height: pageHeight,
-              }}
-            >
-
-            {/* Page break indicator for combined pages */}
-            {combinePages && (
-              <View
-                style={{
-                  position: "absolute",
-                  left: pageWidth / 2,
-                  top: 0,
-                  bottom: 0,
-                  width: 1,
-                  borderLeft: "1 dashed #D1D5DB",
-                }}
-              />
-            )}
-
-            {/* Page caption(s) - alternating margin band, one per
-                logical page (two side by side when combined) */}
-            {showCaptions &&
-              (combinePages
-                ? [
-                    {
-                      key: pageData.pageNumber * 2 - 1,
-                      left: 0,
-                      width: pageWidth / 2,
-                    },
-                    {
-                      key: pageData.pageNumber * 2,
-                      left: pageWidth / 2,
-                      width: pageWidth / 2,
-                    },
-                  ]
-                : [{ key: pageData.pageNumber, left: 0, width: pageWidth }]
-              ).map((band) => {
-                const caption = pageCaptions.get(band.key);
-                if (!caption) return null;
-                // Text size is the priority: the chosen font size is
-                // always honored, and the band grows to fit it if the
-                // page margin alone isn't tall enough - previously this
-                // was backwards (a Math.min capped the font size to the
-                // margin), which silently froze the caption at the same
-                // size for most of the font size range.
-                const captionFontSize = fontSize * 1.9;
-                const captionPaddingVertical = Math.max(
-                  4,
-                  toPoints(validMargin) * 0.15,
-                );
-                const bandHeight = pageCaptionBandHeightPt(
-                  fontSize,
-                  validMargin,
-                );
-                return (
-                  <View
-                    key={band.key}
-                    style={{
-                      position: "absolute",
-                      left: band.left,
-                      ...(captionAtBottom(band.key)
-                        ? { bottom: 0 }
-                        : { top: 0 }),
-                      width: band.width,
-                      height: bandHeight,
-                      paddingHorizontal: Math.max(16, band.width * 0.12),
-                      paddingVertical: captionPaddingVertical,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontFamily: "Caveat",
-                        fontWeight: 600,
-                        fontSize: captionFontSize,
-                        color: SCRAPBOOK.ink,
-                        textAlign: "center",
-                      }}
-                    >
-                      {caption}
-                    </Text>
-                  </View>
-                );
-              })}
-
-            {pageData.photos.map((photoBox) => {
-              const width = toPoints(photoBox.width);
-              const height = toPoints(photoBox.height);
-              const frameInset = Math.max(4, width * 0.035);
-              const tilt = photoTiltDeg(photoBox.id);
-              const tape = tapeStyle(photoBox.id);
-              const tapeWidth = width * 0.22;
-
-              // Text card - no backing photo, an editable note
-              // mounted the same way as a photo card.
-              if (!photoBox.asset) {
-                if (cardStyle === "clean") {
-                  return (
-                    <View
-                      key={photoBox.id}
-                      style={{
-                        position: "absolute",
-                        left: toPoints(photoBox.x),
-                        top: toPoints(photoBox.y),
-                        width,
-                        height,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontFamily: "Caveat",
-                          fontWeight: 500,
-                          fontSize: fontSize * 1.5,
-                          color: SCRAPBOOK.ink,
-                          textAlign: "center",
-                        }}
-                      >
-                        {textCardContents.get(photoBox.id) || ""}
-                      </Text>
-                    </View>
-                  );
-                }
-                return (
-                  <View
-                    key={photoBox.id}
-                    style={{
-                      position: "absolute",
-                      left: toPoints(photoBox.x),
-                      top: toPoints(photoBox.y),
-                      width,
-                      height,
-                    }}
-                  >
-                    <View
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width,
-                        height,
-                        transform: `rotate(${tilt}deg) scale(0.93)`,
-                      }}
-                    >
-                      <View
-                        style={{
-                          position: "absolute",
-                          top: 4,
-                          left: 3,
-                          width,
-                          height,
-                          backgroundColor: SCRAPBOOK.shadow,
-                        }}
-                      />
-                      <View
-                        style={{
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          width,
-                          height,
-                          backgroundColor: SCRAPBOOK.mat,
-                          padding: frameInset * 2,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontFamily: "Caveat",
-                            fontWeight: 500,
-                            fontSize: fontSize * 1.5,
-                            color: SCRAPBOOK.ink,
-                            textAlign: "center",
-                          }}
-                        >
-                          {textCardContents.get(photoBox.id) || ""}
-                        </Text>
-                      </View>
-                      <View
-                        style={{
-                          position: "absolute",
-                          top: -frameInset * 0.5,
-                          left: (width - tapeWidth) / 2,
-                          width: tapeWidth,
-                          height: frameInset * 1.6,
-                          backgroundColor: tape.color,
-                          opacity: 0.8,
-                          transform: `rotate(${tape.tiltDeg}deg)`,
-                        }}
-                      />
-                    </View>
-                  </View>
-                );
-              }
-
-              const asset = photoBox.asset;
-              // Pre-fetched by handleGeneratePdf as a Blob ("preview"
-              // size - always a plain, pre-rotated JPEG, unlike the
-              // original upload which can be any format/orientation).
-              const imageBlob = imageBlobs.get(asset.id);
-              const dateStripHeight = showDates
-                ? fontSize * 1.6
-                : 0;
-              const cardCaption = cardCaptions.get(asset.id);
-              // Only cards that actually have a caption reserve the
-              // extra strip - an empty card keeps its full image. The
-              // strip has to be noticeably taller than the caption
-              // text's own font size (not just a hair more) - confirmed
-              // by testing that a strip only ~1.1x the font size makes
-              // react-pdf drop the text entirely (presumably it doesn't
-              // fit the line box once line-height is accounted for),
-              // while ~1.6x renders reliably.
-              const captionStripHeight = cardCaption
-                ? fontSize * 1.3 * 1.6
-                : 0;
-              const bottomStripHeight =
-                dateStripHeight + captionStripHeight;
-
-              if (cardStyle === "clean") {
-                return (
-                  <View
-                    key={photoBox.id}
-                    style={{
-                      position: "absolute",
-                      left: toPoints(photoBox.x),
-                      top: toPoints(photoBox.y),
-                      width,
-                      height,
-                    }}
-                  >
-                    <PdfPhotoImage
-                      src={imageBlob}
-                      top={0}
-                      left={0}
-                      containerWidth={width}
-                      containerHeight={height - bottomStripHeight}
-                    />
-                    {cardCaption && (
-                      <View
-                        style={{
-                          position: "absolute",
-                          left: 0,
-                          width,
-                          bottom: dateStripHeight,
-                          height: captionStripHeight,
-                          backgroundColor: "rgba(255,255,255,0.85)",
-                          display: "flex",
-                          flexDirection: "row",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontFamily: "Caveat",
-                            fontWeight: 500,
-                            fontSize: fontSize * 1.3,
-                            color: SCRAPBOOK.ink,
-                            textAlign: "center",
-                          }}
-                        >
-                          {cardCaption}
-                        </Text>
-                      </View>
-                    )}
-                    {showDates && asset.fileCreatedAt && (
-                      <View
-                        style={{
-                          position: "absolute",
-                          left: 0,
-                          width,
-                          bottom: 0,
-                          height: dateStripHeight,
-                          backgroundColor: "rgba(255,255,255,0.85)",
-                          display: "flex",
-                          flexDirection: "row",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontFamily: "Caveat",
-                            fontWeight: 500,
-                            fontSize: fontSize * 1.3,
-                            color: SCRAPBOOK.ink,
-                          }}
-                        >
-                          {new Date(asset.fileCreatedAt).toLocaleDateString(
-                            undefined,
-                            { year: "numeric", month: "short", day: "numeric" },
-                          )}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                );
-              }
-
-              return (
-                <View
-                  key={photoBox.id}
-                  style={{
-                    position: "absolute",
-                    left: toPoints(photoBox.x),
-                    top: toPoints(photoBox.y),
-                    width,
-                    height,
-                  }}
-                >
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width,
-                      height,
-                      transform: `rotate(${tilt}deg) scale(0.93)`,
-                    }}
-                  >
-                    {/* Soft cast shadow behind the mat */}
-                    <View
-                      style={{
-                        position: "absolute",
-                        top: 4,
-                        left: 3,
-                        width,
-                        height,
-                        backgroundColor: SCRAPBOOK.shadow,
-                      }}
-                    />
-                    {/* Polaroid mat */}
-                    <View
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width,
-                        height,
-                        backgroundColor: SCRAPBOOK.mat,
-                      }}
-                    >
-                      <PdfPhotoImage
-                        src={imageBlob}
-                        top={frameInset}
-                        left={frameInset}
-                        containerWidth={width - frameInset * 2}
-                        containerHeight={
-                          height - frameInset * 2 - bottomStripHeight
-                        }
-                      />
-                      {cardCaption && (
-                        <View
-                          style={{
-                            position: "absolute",
-                            left: frameInset,
-                            width: width - frameInset * 2,
-                            bottom: frameInset * 0.3 + dateStripHeight,
-                            height: captionStripHeight,
-                            display: "flex",
-                            // react-pdf defaults to flexDirection:"column"
-                            // (unlike CSS's "row" default) - without this,
-                            // alignItems/justifyContent end up swapped
-                            // from what they'd mean on the web, which was
-                            // pushing the caption to the right instead of
-                            // centering it.
-                            flexDirection: "row",
-                            alignItems: "flex-end",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <Text
-                            style={{
-                              fontFamily: "Caveat",
-                              fontWeight: 500,
-                              fontSize: fontSize * 1.3,
-                              color: SCRAPBOOK.ink,
-                              textAlign: "center",
-                            }}
-                          >
-                            {cardCaption}
-                          </Text>
-                        </View>
-                      )}
-                      {showDates && asset.fileCreatedAt && (
-                        <View
-                          style={{
-                            position: "absolute",
-                            left: frameInset,
-                            width: width - frameInset * 2,
-                            bottom: frameInset * 0.3,
-                            height: dateStripHeight,
-                            display: "flex",
-                            flexDirection: "row",
-                            alignItems: "flex-end",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <Text
-                            style={{
-                              fontFamily: "Caveat",
-                              fontWeight: 500,
-                              fontSize: fontSize * 1.3,
-                              color: SCRAPBOOK.ink,
-                            }}
-                          >
-                            {new Date(
-                              asset.fileCreatedAt,
-                            ).toLocaleDateString(undefined, {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                            })}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    {/* Washi tape */}
-                    <View
-                      style={{
-                        position: "absolute",
-                        top: -frameInset * 0.5,
-                        left: (width - tapeWidth) / 2,
-                        width: tapeWidth,
-                        height: frameInset * 1.6,
-                        backgroundColor: tape.color,
-                        opacity: 0.8,
-                        transform: `rotate(${tape.tiltDeg}deg)`,
-                      }}
-                    />
-                  </View>
-                </View>
-              );
-            })}
-            </View>
-          </Page>
-        );
-      })}
-
-      {includeBackCover && (
-        <Page
-          size={{ width: coverBleedWidth, height: coverBleedHeight }}
-          style={{
-            ...staticStyles.page,
-            backgroundColor: PAGE_BACKGROUNDS[pageBackground].base,
-          }}
-        >
-          <PdfPageBackground
-            background={pageBackground}
-            width={coverBleedWidth}
-            height={coverBleedHeight}
-          />
-          <View
-            style={{
-              position: "absolute",
-              top: bleedPt,
-              left: bleedPt,
-              width: coverPageWidth,
-              height: coverPageHeight,
-            }}
-          >
-          {backCoverLayout === "text-only" && backCoverText && (
-            <View
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                paddingHorizontal: coverPageWidth * 0.1,
-              }}
-            >
-              <View
-                style={{
-                  width: coverPageWidth * 0.3,
-                  height: 1,
-                  backgroundColor: SCRAPBOOK.ink,
-                  opacity: 0.3,
-                  marginBottom: 16,
-                }}
-              />
-              <Text
-                style={{
-                  fontFamily: "Caveat",
-                  fontWeight: 600,
-                  fontSize: coverPageWidth * 0.09,
-                  color: SCRAPBOOK.ink,
-                  textAlign: "center",
-                }}
-              >
-                {backCoverText}
-              </Text>
-              <View
-                style={{
-                  width: coverPageWidth * 0.3,
-                  height: 1,
-                  backgroundColor: SCRAPBOOK.ink,
-                  opacity: 0.3,
-                  marginTop: 16,
-                }}
-              />
-            </View>
-          )}
-
-          {backCoverLayout === "photo-title" &&
-            (backCoverImageBlob || backCoverText) &&
-            (() => {
-              const hasImage = !!backCoverImageBlob;
-              // Plain text has no photo to mount, so no card/mat either -
-              // it just sits on the page background, centered on the
-              // whole page (not the whole scrapbook card treatment).
-              if (!hasImage && backCoverPlainText && backCoverText) {
-                const plainWidth = coverPageWidth * 0.7;
-                return (
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: (coverPageWidth - plainWidth) / 2,
-                      width: plainWidth,
-                      height: coverPageHeight,
-                      display: "flex",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontFamily: "Caveat",
-                        fontWeight: 500,
-                        fontSize: fontSize * 1.9,
-                        color: SCRAPBOOK.ink,
-                        textAlign: "center",
-                      }}
-                    >
-                      {backCoverText}
-                    </Text>
-                  </View>
-                );
-              }
-
-              // Card mounted flat (no tilt/tape), centered on the whole
-              // page, so it reads as a closing note rather than another
-              // scrapbook page.
-              const cardWidth = coverPageWidth * 0.42;
-              const cardHeight = coverPageHeight * 0.3;
-              const cardTop = (coverPageHeight - cardHeight) / 2;
-              const cardLeft = (coverPageWidth - cardWidth) / 2;
-              const frameInset = Math.max(4, cardWidth * 0.045);
-              const captionStripHeight = backCoverText
-                ? fontSize * 1.3 * 1.6
-                : 0;
-              return (
-                <View
-                  style={{
-                    position: "absolute",
-                    top: cardTop,
-                    left: cardLeft,
-                    width: cardWidth,
-                    height: cardHeight,
-                  }}
-                >
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 4,
-                      left: 3,
-                      width: cardWidth,
-                      height: cardHeight,
-                      backgroundColor: SCRAPBOOK.shadow,
-                    }}
-                  />
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: cardWidth,
-                      height: cardHeight,
-                      backgroundColor: SCRAPBOOK.mat,
-                    }}
-                  >
-                    {backCoverImageBlob && (
-                      <PdfPhotoImage
-                        src={backCoverImageBlob}
-                        top={frameInset}
-                        left={frameInset}
-                        containerWidth={cardWidth - frameInset * 2}
-                        containerHeight={
-                          cardHeight - frameInset * 2 - captionStripHeight
-                        }
-                      />
-                    )}
-                    {backCoverText && (
-                      <View
-                        style={{
-                          position: "absolute",
-                          left: frameInset,
-                          width: cardWidth - frameInset * 2,
-                          bottom: backCoverImageBlob ? frameInset * 0.3 : 0,
-                          height: backCoverImageBlob
-                            ? captionStripHeight
-                            : cardHeight,
-                          display: "flex",
-                          flexDirection: "row",
-                          alignItems: backCoverImageBlob
-                            ? "flex-end"
-                            : "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontFamily: "Caveat",
-                            fontWeight: 500,
-                            fontSize: backCoverImageBlob
-                              ? fontSize * 1.3
-                              : fontSize * 1.5,
-                            color: SCRAPBOOK.ink,
-                            textAlign: "center",
-                          }}
-                        >
-                          {backCoverText}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              );
-            })()}
-
-          {backCoverLayout === "full-bleed" && backCoverImageBlob && (
-            <>
-              <Image
-                src={backCoverImageBlob}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: coverPageWidth,
-                  height: coverPageHeight,
-                  objectFit: "cover",
-                }}
-              />
-              {backCoverText && (
-                <>
-                  <View
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      bottom: 0,
-                      width: coverPageWidth,
-                      height: coverScrimHeight,
-                    }}
-                  >
-                    {Array.from({ length: 10 }, (_, i) => (
-                      <View
-                        key={i}
-                        style={{
-                          position: "absolute",
-                          left: 0,
-                          top: (coverScrimHeight * i) / 10,
-                          width: coverPageWidth,
-                          height: coverScrimHeight / 10 + 0.5,
-                          backgroundColor: "#000000",
-                          opacity: (0.55 * (i + 1)) / 10,
-                        }}
-                      />
-                    ))}
-                  </View>
-                  <View
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: coverScrimHeight,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontFamily: "Caveat",
-                        fontWeight: 600,
-                        fontSize: coverPageWidth * 0.06,
-                        color: "#FFFFFF",
-                        textAlign: "center",
-                      }}
-                    >
-                      {backCoverText}
-                    </Text>
-                  </View>
-                </>
-              )}
-            </>
-          )}
-
-          </View>
-        </Page>
-      )}
-    </Document>
-    );
-  };
 
   const handleGeneratePdf = async () => {
     setPdfError(null);
@@ -4505,10 +2325,46 @@ function PhotoGridEditor({
           onProgress,
         );
 
+      // Shared by every buildPdfDocument() call below - only imageBlobs
+      // and pdfType vary between the cover/interior/full variants.
+      const pdfDocumentBaseParams = {
+        album,
+        validPageWidth,
+        validPageHeight,
+        validMargin,
+        validBleed,
+        bleedEnabled,
+        coverAsset,
+        backCoverAsset,
+        spineWidth,
+        separatedCover,
+        backCoverLayout,
+        backCoverText,
+        backCoverPlainText,
+        fontSize,
+        coverLayout,
+        coverTitle,
+        pageLayout,
+        showCover,
+        pageBackground,
+        spineColor,
+        spineTextSize,
+        spineTextColor,
+        spineTitle,
+        pages,
+        combinePages,
+        showCaptions,
+        pageCaptions,
+        cardStyle,
+        textCardContents,
+        showDates,
+        cardCaptions,
+      };
+
       if (separatedCover && showCover) {
         // Generate two PDFs: one for cover, one for interior
-        const coverBlob = await pdf(buildPdfDocument(imageBlobs, 'cover')).toBlob();
-        const interiorBlob = await pdf(buildPdfDocument(imageBlobs, 'interior')).toBlob();
+        const coverBlob = await pdf(buildPdfDocument({ ...pdfDocumentBaseParams, imageBlobs, pdfType: 'cover' })).toBlob();
+        const interiorBlob = await pdf(buildPdfDocument({ ...pdfDocumentBaseParams, imageBlobs, pdfType: 'interior' })).toBlob();
         
         // Download both files
         const albumSlug = album.albumName.replace(/[^a-z0-9]/gi, '-').toLowerCase();
@@ -4532,7 +2388,7 @@ function PhotoGridEditor({
         }, 500);
       } else {
         // Generate single PDF with everything
-        const blob = await pdf(buildPdfDocument(imageBlobs, 'full')).toBlob();
+        const blob = await pdf(buildPdfDocument({ ...pdfDocumentBaseParams, imageBlobs, pdfType: 'full' })).toBlob();
         setPdfUrl(URL.createObjectURL(blob));
       }
       
@@ -5719,8 +3575,31 @@ function PhotoGridEditor({
                     return (
                       <button
                         key={asset.id}
-                        onClick={() => setSelectedNewAsset(selectedNewAsset?.id === asset.id ? null : asset)}
-                        className={`relative rounded-lg overflow-hidden transition-all flex-shrink-0 ${
+                        data-reorder-asset-id={asset.id}
+                        onPointerDown={(e) => handleReorderPointerDown(asset.id, e)}
+                        onClick={() => {
+                          setSwapConfirmation(null);
+                          setNewAssetPlacementConfirmation(null);
+
+                          // An existing card/cover was armed first
+                          // (swapFirstId) - clicking a new photo now
+                          // completes that swap the same way clicking an
+                          // existing target after picking the new photo
+                          // first would have, instead of just silently
+                          // dropping the earlier selection and requiring
+                          // a third click. Dragging this thumbnail onto
+                          // a target does the same thing, via the
+                          // generic reorder-drag effect (requestSwap).
+                          if (swapFirstId) {
+                            requestSwap(swapFirstId, asset.id);
+                            setSwapFirstId(null);
+                            return;
+                          }
+
+                          setSelectedNewAsset(selectedNewAsset?.id === asset.id ? null : asset);
+                        }}
+                        style={{ touchAction: "none" }}
+                        className={`relative rounded-lg overflow-hidden transition-all flex-shrink-0 cursor-move ${
                           selectedNewAsset?.id === asset.id
                             ? 'ring-4 ring-indigo-500 scale-105'
                             : 'hover:scale-105 hover:shadow-lg'
@@ -5801,24 +3680,19 @@ function PhotoGridEditor({
                   >
                     {/* Back Cover (left) */}
                     <div
-                      className={`relative bg-gray-100 dark:bg-gray-800 border-r border-gray-300 dark:border-gray-700 ${selectedNewAsset && backCoverAsset ? "cursor-pointer" : ""} ${selectedNewAsset && backCoverAsset ? "hover:ring-2 hover:ring-green-400" : ""}`}
+                      data-reorder-asset-id="back-cover"
+                      className={`relative bg-gray-100 dark:bg-gray-800 border-r border-gray-300 dark:border-gray-700 ${selectedNewAsset ? "cursor-pointer" : "cursor-move"} ${selectedNewAsset && backCoverAsset ? "hover:ring-2 hover:ring-green-400" : ""} ${swapFirstId === "back-cover" ? "ring-4 ring-indigo-500 ring-offset-2 z-10" : ""}`}
                       style={{
                         width: `${displayWidth * scale}px`,
                         height: `${displayHeight * scale}px`,
+                        touchAction: "none",
+                      }}
+                      onPointerDown={(e) => {
+                        if (!selectedNewAsset) handleReorderPointerDown("back-cover", e);
                       }}
                       onClick={() => {
                         if (selectedNewAsset && backCoverAsset) {
-                          const oldBackCover = backCoverAsset;
-                          setBackCoverAssetId(selectedNewAsset.id);
-                          setBackCoverNoPhoto(false);
-                          setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), oldBackCover]);
-                          setHistory(prev => [{
-                            type: "set-back-cover",
-                            prevAssetId: backCoverAsset.id,
-                            newAssetId: selectedNewAsset.id,
-                            timestamp: Date.now(),
-                          }, ...prev]);
-                          setSelectedNewAsset(null);
+                          performNewAssetPlacement(selectedNewAsset, { kind: "back-cover" });
                         }
                       }}
                     >
@@ -5846,6 +3720,9 @@ function PhotoGridEditor({
                               }
                             }}
                             placeholder={t(language, "backCoverTextPlaceholder")}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
                             className="text-center bg-transparent focus:outline-none rounded w-[80%] text-gray-700 dark:text-gray-300"
                             style={{
                               fontFamily: "Caveat",
@@ -5901,6 +3778,9 @@ function PhotoGridEditor({
                                 }
                               }}
                               placeholder={t(language, "backCoverTextPlaceholder")}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
                               className="text-center bg-transparent focus:outline-none focus:bg-white/60 rounded w-[90%]"
                               style={{
                                 fontFamily: "Caveat",
@@ -5949,6 +3829,9 @@ function PhotoGridEditor({
                                 }
                               }}
                               placeholder={t(language, "backCoverTextPlaceholder")}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
                               className="text-center bg-transparent focus:outline-none rounded w-[90%] text-white"
                               style={{
                                 fontFamily: "Caveat",
@@ -5991,23 +3874,19 @@ function PhotoGridEditor({
 
                     {/* Front Cover (right) */}
                     <div
-                      className={`relative bg-gray-100 dark:bg-gray-800 border-l border-gray-300 dark:border-gray-700 ${selectedNewAsset && coverAsset ? "cursor-pointer" : ""} ${selectedNewAsset && coverAsset ? "hover:ring-2 hover:ring-green-400" : ""}`}
+                      data-reorder-asset-id="cover"
+                      className={`relative bg-gray-100 dark:bg-gray-800 border-l border-gray-300 dark:border-gray-700 ${selectedNewAsset ? "cursor-pointer" : "cursor-move"} ${selectedNewAsset && coverAsset ? "hover:ring-2 hover:ring-green-400" : ""} ${swapFirstId === "cover" ? "ring-4 ring-indigo-500 ring-offset-2 z-10" : ""}`}
                       style={{
                         width: `${displayWidth * scale}px`,
                         height: `${displayHeight * scale}px`,
+                        touchAction: "none",
+                      }}
+                      onPointerDown={(e) => {
+                        if (!selectedNewAsset) handleReorderPointerDown("cover", e);
                       }}
                       onClick={() => {
                         if (selectedNewAsset && coverAsset) {
-                          const oldCover = coverAsset;
-                          setCoverAssetId(selectedNewAsset.id);
-                          setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), oldCover]);
-                          setHistory(prev => [{
-                            type: "set-cover",
-                            prevAssetId: coverAsset.id,
-                            newAssetId: selectedNewAsset.id,
-                            timestamp: Date.now(),
-                          }, ...prev]);
-                          setSelectedNewAsset(null);
+                          performNewAssetPlacement(selectedNewAsset, { kind: "cover" });
                         }
                       }}
                     >
@@ -6035,6 +3914,9 @@ function PhotoGridEditor({
                               }
                             }}
                             placeholder={album.albumName}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
                             className="text-center bg-transparent focus:outline-none rounded w-[80%] text-gray-700 dark:text-gray-300"
                             style={{
                               fontFamily: "Caveat",
@@ -6090,6 +3972,9 @@ function PhotoGridEditor({
                                 }
                               }}
                               placeholder={album.albumName}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
                               className="text-center bg-transparent focus:outline-none focus:bg-white/60 rounded w-[90%]"
                               style={{
                                 fontFamily: "Caveat",
@@ -6138,6 +4023,9 @@ function PhotoGridEditor({
                                 }
                               }}
                               placeholder={album.albumName}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
                               className="text-center bg-transparent focus:outline-none rounded w-[90%] text-white"
                               style={{
                                 fontFamily: "Caveat",
@@ -6182,6 +4070,7 @@ function PhotoGridEditor({
               const imageUrl = coverAsset
                 ? `${immichConfig.baseUrl}/assets/${coverAsset.id}/thumbnail?size=preview`
                 : null;
+              const isCoverSwapSelected = swapFirstId === "cover";
               const titleInput = (
                 titleFontSize: number,
                 color: string,
@@ -6296,21 +4185,16 @@ function PhotoGridEditor({
                           <img
                             src={imageUrl}
                             alt=""
-                            className={`w-full h-full object-contain ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+                            data-reorder-asset-id="cover"
+                            className={`w-full h-full object-contain ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
+                            style={{ touchAction: "none" }}
+                            onPointerDown={(e) => {
+                              if (!selectedNewAsset) handleReorderPointerDown("cover", e);
+                            }}
                             onClick={(e) => {
                               if (selectedNewAsset && coverAsset) {
                                 e.stopPropagation();
-                                console.log(`SWAP COVER: ${coverAsset.id} with ${selectedNewAsset.id}`);
-                                const oldCover = coverAsset;
-                                setCoverAssetId(selectedNewAsset.id);
-                                setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), oldCover]);
-                                setHistory(prev => [{
-                                  type: "set-cover",
-                                  prevAssetId: coverAsset.id,
-                                  newAssetId: selectedNewAsset.id,
-                                  timestamp: Date.now(),
-                                }, ...prev]);
-                                setSelectedNewAsset(null);
+                                performNewAssetPlacement(selectedNewAsset, { kind: "cover" });
                               }
                             }}
                           />
@@ -6333,21 +4217,16 @@ function PhotoGridEditor({
                         <img
                           src={imageUrl}
                           alt=""
-                          className={`absolute inset-0 w-full h-full object-cover ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+                          data-reorder-asset-id="cover"
+                          className={`absolute inset-0 w-full h-full object-cover ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
+                          style={{ touchAction: "none" }}
+                          onPointerDown={(e) => {
+                            if (!selectedNewAsset) handleReorderPointerDown("cover", e);
+                          }}
                           onClick={(e) => {
                             if (selectedNewAsset && coverAsset) {
                               e.stopPropagation();
-                              console.log(`SWAP COVER (full-bleed): ${coverAsset.id} with ${selectedNewAsset.id}`);
-                              const oldCover = coverAsset;
-                              setCoverAssetId(selectedNewAsset.id);
-                              setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), oldCover]);
-                              setHistory(prev => [{
-                                type: "set-cover",
-                                prevAssetId: coverAsset.id,
-                                newAssetId: selectedNewAsset.id,
-                                timestamp: Date.now(),
-                              }, ...prev]);
-                              setSelectedNewAsset(null);
+                              performNewAssetPlacement(selectedNewAsset, { kind: "cover" });
                             }
                           }}
                         />
@@ -6774,80 +4653,16 @@ function PhotoGridEditor({
                         onClick={(e) => {
                           if (selectedNewAsset) {
                             e.stopPropagation();
-                            
                             if (isMissingPhoto) {
-                              // REPLACE: new photo replaces the placeholder
-                              console.log(`REPLACE: ${asset.id} with ${selectedNewAsset.id}`);
-                              const updatedAssets = assets.map(a => a.id === asset.id ? selectedNewAsset : a);
-                              setAssets(updatedAssets);
-                              setNewAssets(prev => prev.filter(a => a.id !== selectedNewAsset.id));
-                              setMissingAssetIds(prev => {
-                                const next = new Set(prev);
-                                next.delete(asset.id);
-                                return next;
-                              });
-                              setHistory(prev => [{
-                                type: "replace-placeholder",
-                                newAsset: selectedNewAsset,
+                              performNewAssetPlacement(selectedNewAsset, {
+                                kind: "interior-replace",
                                 placeholderAsset: asset,
-                                timestamp: Date.now(),
-                              }, ...prev]);
-                              setSelectedNewAsset(null);
-                              
-                              // Save snapshot async
-                              setTimeout(() => {
-                                const config: AlbumConfig = {
-                                  printerId, pageWidth, pageHeight, margin, combinePages, spacing,
-                                  filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
-                                  fontSize, pageBackground, cardStyle, customOrdering,
-                                  layoutVariants: Object.fromEntries(layoutVariants),
-                                  pageCounts: Object.fromEntries(pageCounts),
-                                  pageCaptions: Object.fromEntries(pageCaptions),
-                                  cardCaptions: Object.fromEntries(cardCaptions),
-                                  textCardCounts: Object.fromEntries(textCardCounts),
-                                  textCardContents: Object.fromEntries(textCardContents),
-                                  slotOverrides: Object.fromEntries(slotOverrides),
-                                  manuallyMovedIds: Array.from(manuallyMovedIds),
-                                  showCover, coverTitle, coverAssetId, coverLayout,
-                                  backCoverAssetId, backCoverLayout, backCoverNoPhoto,
-                                  backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
-                                };
-                                saveAlbumConfig(album.id, config, updatedAssets);
-                              }, 100);
+                              });
                             } else {
-                              // SWAP: new photo takes this position, this photo goes to newAssets
-                              console.log(`SWAP: ${asset.id} with ${selectedNewAsset.id}`);
-                              const updatedAssets = assets.map(a => a.id === asset.id ? selectedNewAsset : a);
-                              setAssets(updatedAssets);
-                              setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), asset]);
-                              setHistory(prev => [{
-                                type: "swap-new-photo",
-                                newAsset: selectedNewAsset,
-                                replacedAsset: asset,
-                                timestamp: Date.now(),
-                              }, ...prev]);
-                              setSelectedNewAsset(null);
-                              
-                              // Save snapshot async
-                              setTimeout(() => {
-                                const config: AlbumConfig = {
-                                  printerId, pageWidth, pageHeight, margin, combinePages, spacing,
-                                  filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
-                                  fontSize, pageBackground, cardStyle, customOrdering,
-                                  layoutVariants: Object.fromEntries(layoutVariants),
-                                  pageCounts: Object.fromEntries(pageCounts),
-                                  pageCaptions: Object.fromEntries(pageCaptions),
-                                  cardCaptions: Object.fromEntries(cardCaptions),
-                                  textCardCounts: Object.fromEntries(textCardCounts),
-                                  textCardContents: Object.fromEntries(textCardContents),
-                                  slotOverrides: Object.fromEntries(slotOverrides),
-                                  manuallyMovedIds: Array.from(manuallyMovedIds),
-                                  showCover, coverTitle, coverAssetId, coverLayout,
-                                  backCoverAssetId, backCoverLayout, backCoverNoPhoto,
-                                  backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
-                                };
-                                saveAlbumConfig(album.id, config, updatedAssets);
-                              }, 100);
+                              performNewAssetPlacement(selectedNewAsset, {
+                                kind: "interior-swap",
+                                asset,
+                              });
                             }
                           }
                         }}
@@ -7215,6 +5030,7 @@ function PhotoGridEditor({
                   }}
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
                   className={`text-center bg-transparent focus:outline-none rounded w-[90%] ${extraClassName}`}
                   style={{
                     fontFamily: "Caveat",
@@ -7224,6 +5040,7 @@ function PhotoGridEditor({
                   }}
                 />
               );
+              const isBackCoverSwapSelected = swapFirstId === "back-cover";
               return (
                 <div className="relative">
                   <div className="text-center mb-2">
@@ -7252,28 +5069,21 @@ function PhotoGridEditor({
                        />
                      )}
                      <div
-                       className={`absolute ${selectedNewAsset && backCoverAsset ? "cursor-pointer" : ""} ${selectedNewAsset && backCoverAsset ? "hover:ring-2 hover:ring-green-400" : ""}`}
+                       data-reorder-asset-id="back-cover"
+                       className={`absolute ${selectedNewAsset ? "cursor-pointer" : "cursor-move"} ${selectedNewAsset && backCoverAsset ? "hover:ring-2 hover:ring-green-400" : ""} ${isBackCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
                        style={{
                          top: bleedPreviewPt,
                          left: bleedPreviewPt,
                          width: displayWidth,
                          height: displayHeight,
+                         touchAction: "none",
+                       }}
+                       onPointerDown={(e) => {
+                         if (!selectedNewAsset) handleReorderPointerDown("back-cover", e);
                        }}
                        onClick={() => {
                          if (selectedNewAsset && backCoverAsset) {
-                           // SWAP: new photo becomes back cover, old back cover goes to newAssets
-                           console.log(`SWAP BACK COVER: ${backCoverAsset.id} with ${selectedNewAsset.id}`);
-                           const oldBackCover = backCoverAsset;
-                           setBackCoverAssetId(selectedNewAsset.id);
-                           setBackCoverNoPhoto(false);
-                           setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), oldBackCover]);
-                           setHistory(prev => [{
-                             type: "set-back-cover",
-                             prevAssetId: backCoverAsset.id,
-                             newAssetId: selectedNewAsset.id,
-                             timestamp: Date.now(),
-                           }, ...prev]);
-                           setSelectedNewAsset(null);
+                           performNewAssetPlacement(selectedNewAsset, { kind: "back-cover" });
                          }
                        }}
                      >
@@ -7341,6 +5151,7 @@ function PhotoGridEditor({
                               }}
                               onClick={(e) => e.stopPropagation()}
                               onMouseDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
                               className="absolute text-center bg-transparent focus:outline-none focus:bg-white/40 rounded"
                               style={{
                                 top: 0,
@@ -7420,6 +5231,7 @@ function PhotoGridEditor({
                               }}
                               onClick={(e) => e.stopPropagation()}
                               onMouseDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
                               className="absolute text-center bg-transparent focus:outline-none focus:bg-white/70 rounded"
                               style={{
                                 left: frameInset,
@@ -7564,303 +5376,24 @@ function PhotoGridEditor({
         )}
       </main>
 
-      {/* History Panel - Right Side */}
-      <aside
-        className={`flex-none flex flex-col border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 transition-all duration-200 overflow-hidden ${
-          historyCollapsed ? "w-16" : "w-80"
-        }`}
-      >
-          {historyCollapsed ? (
-            <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar flex flex-col items-center gap-3 py-4">
-              <button
-                onClick={() => setHistoryCollapsed(false)}
-                title={t(language, "history")}
-                className="w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-colors relative"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="15"
-                  height="15"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                >
-                  <path d="M3 7v6h6M21 17v-6h-6" />
-                  <path d="M20.49 9A9 9 0 0 0 5.64 5.64L3 8m18 8l-2.64 2.36A9 9 0 0 1 3.51 15" />
-                </svg>
-                {history.length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                    {history.length}
-                  </span>
-                )}
-              </button>
-              
-              <div className="w-8 border-t border-gray-200 dark:border-gray-800" />
-              
-              {/* Reset All button (collapsed) */}
-              {history.length > 0 && (
-                <button
-                  onClick={() => setShowResetConfirmation(true)}
-                  title={t(language, "resetAll")}
-                  className="w-9 h-9 rounded-lg border-2 border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center transition-colors"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="15"
-                    height="15"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  </svg>
-                </button>
-              )}
-              
-              {/* Flatten button (collapsed) */}
-              {(history.length > 0 ||
-                customOrdering !== null ||
-                slotOverrides.size > 0 ||
-                manuallyMovedIds.size > 0 ||
-                layoutVariants.size > 0 ||
-                pageCounts.size > 0 ||
-                textCardCounts.size > 0 ||
-                textCardContents.size > 0 ||
-                pageCaptions.size > 0 ||
-                cardCaptions.size > 0) && (
-                <button
-                  onClick={() => setShowFlattenConfirmation(true)}
-                  title={t(language, "flatten")}
-                  className="w-9 h-9 rounded-lg border-2 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 flex items-center justify-center transition-colors"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="15"
-                    height="15"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M7 10v12M21 10v12M5 4h16v6H5zM3 4h2M3 22h18" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          ) : (
-            <>
-              {/* Header - Sticky */}
-              <div className="flex-none p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
-                    {t(language, "historyTitle")}
-                  </h2>
-                  <button
-                    onClick={() => setHistoryCollapsed(true)}
-                    title={t(language, "closePanel")}
-                    className="w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300 flex items-center justify-center transition-colors"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="14"
-                      height="14"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.2"
-                    >
-                      <path d="M9 18l6-6-6-6" />
-                    </svg>
-                  </button>
-                </div>
-
-                {/* Reset All and Flatten buttons */}
-                {(history.length > 0 ||
-                  customOrdering !== null ||
-                  slotOverrides.size > 0 ||
-                  manuallyMovedIds.size > 0 ||
-                  layoutVariants.size > 0 ||
-                  pageCounts.size > 0 ||
-                  textCardCounts.size > 0 ||
-                  textCardContents.size > 0 ||
-                  pageCaptions.size > 0 ||
-                  cardCaptions.size > 0) && (
-                  <div className="flex flex-col gap-2">
-                    {history.length > 0 && (
-                      <button
-                        onClick={() => setShowResetConfirmation(true)}
-                        className="w-full px-4 py-2 rounded-lg border-2 border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          width="16"
-                          height="16"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                        </svg>
-                        {t(language, "resetAll")}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setShowFlattenConfirmation(true)}
-                      className="w-full px-4 py-2 rounded-lg border-2 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 font-medium text-sm transition-colors flex items-center justify-center gap-2"
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        width="16"
-                        height="16"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M7 10v12M21 10v12M5 4h16v6H5zM3 4h2M3 22h18" />
-                      </svg>
-                      {t(language, "flatten")}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Scrollable content */}
-              <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar p-4">
-              {history.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
-                  {t(language, "noOperations")}
-                </div>
-              ) : (
-                <div className="flex-1 overflow-y-auto custom-scrollbar -mx-4 px-4 space-y-2">
-              {history.map((op, index) => {
-                const timeAgo = Math.floor((Date.now() - op.timestamp) / 1000);
-                const timeStr =
-                  timeAgo < 60
-                    ? `${timeAgo}${t(language, "timeAgo_seconds")}`
-                    : timeAgo < 3600
-                      ? `${Math.floor(timeAgo / 60)}${t(language, "timeAgo_minutes")}`
-                      : `${Math.floor(timeAgo / 3600)}${t(language, "timeAgo_hours")}`;
-
-                let description = "";
-                switch (op.type) {
-                  case "swap-same-page":
-                    description = `${t(language, "historySwapSamePage")} ${op.pageNumber}`;
-                    break;
-                  case "swap-text-cards":
-                    description = t(language, "historySwapTextCards");
-                    break;
-                  case "swap-cross-page":
-                    description = `${t(language, "historySwapCrossPage")} ${op.draggedPage} ${t(language, "historySwapCrossPageDetail")} ${op.targetPage}`;
-                    break;
-                  case "shuffle-layout":
-                    description = `${t(language, "historyShuffleLayout")} ${op.pageNumber}`;
-                    break;
-                  case "set-page-count":
-                    description = `${t(language, "historySetPageCount")} ${op.pageNumber} ${t(language, "historySetPageCountTo")} ${op.newCount ?? t(language, "historySetPageCountAuto")}`;
-                    break;
-                  case "set-text-card-count":
-                    description = `${t(language, "historySetTextCardCount")} ${op.pageNumber} ${t(language, "historySetPageCountTo")} ${op.newCount}`;
-                    break;
-                  case "edit-page-caption":
-                    description = `${t(language, "historyEditPageCaption")} ${op.pageNumber}`;
-                    break;
-                  case "edit-card-caption":
-                    description = t(language, "historyEditCardCaption");
-                    break;
-                  case "edit-text-card":
-                    description = t(language, "historyEditTextCard");
-                    break;
-                  case "set-cover":
-                    description = t(language, "historySetCover");
-                    break;
-                  case "set-back-cover":
-                    description = t(language, "historySetBackCover");
-                    break;
-                  case "edit-cover-title":
-                    description = t(language, "historyEditCoverTitle");
-                    break;
-                  case "edit-back-cover-text":
-                    description = t(language, "historyEditBackCoverText");
-                    break;
-                  case "swap-new-photo":
-                    description = t(language, "historySwapNewPhoto");
-                    break;
-                  case "replace-placeholder":
-                    description = t(language, "historyReplacePlaceholder");
-                    break;
-                  case "insert-new-photo":
-                    description = t(language, "historyInsertNewPhoto");
-                    break;
-                  case "delete-placeholder":
-                    description = t(language, "historyDeletePlaceholder");
-                    break;
-                }
-
-                return (
-                  <div
-                    key={index}
-                    className={`p-3 rounded-lg border ${
-                      index === 0
-                        ? "border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30"
-                        : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/30"
-                    }`}
-                  >
-                    <div className="text-sm text-gray-900 dark:text-gray-50 font-medium">
-                      {description}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      {timeStr}
-                    </div>
-                  </div>
-                 );
-               })}
-                </div>
-              )}
-              </div>
-            </>
-          )}
-
-        {/* Undo button - Sticky at bottom */}
-        {history.length > 0 && (
-          <div className="flex-none border-t border-gray-200 dark:border-gray-800 p-3 bg-white dark:bg-gray-950">
-            {historyCollapsed ? (
-              <button
-                onClick={handleUndo}
-                title={t(language, "undoLastAction")}
-                className="w-full h-10 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center transition-colors"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M3 7v6h6M21 17v-6h-6" />
-                  <path d="M20.49 9A9 9 0 0 0 5.64 5.64L3 8m18 8l-2.64 2.36A9 9 0 0 1 3.51 15" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                onClick={handleUndo}
-                className="w-full px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm transition-colors flex items-center justify-center gap-2"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M3 7v6h6M21 17v-6h-6" />
-                  <path d="M20.49 9A9 9 0 0 0 5.64 5.64L3 8m18 8l-2.64 2.36A9 9 0 0 1 3.51 15" />
-                </svg>
-                {t(language, "undoLastAction")}
-              </button>
-            )}
-          </div>
-        )}
-      </aside>
+      <HistoryPanel
+        history={history}
+        historyCollapsed={historyCollapsed}
+        setHistoryCollapsed={setHistoryCollapsed}
+        setShowResetConfirmation={setShowResetConfirmation}
+        setShowFlattenConfirmation={setShowFlattenConfirmation}
+        customOrdering={customOrdering}
+        slotOverrides={slotOverrides}
+        manuallyMovedIds={manuallyMovedIds}
+        layoutVariants={layoutVariants}
+        pageCounts={pageCounts}
+        textCardCounts={textCardCounts}
+        textCardContents={textCardContents}
+        pageCaptions={pageCaptions}
+        cardCaptions={cardCaptions}
+        language={language}
+        handleUndo={handleUndo}
+      />
 
       {/* Swap Confirmation Dialog */}
       {swapConfirmation && (
@@ -7902,67 +5435,47 @@ function PhotoGridEditor({
         </div>
       )}
 
-      {/* Reset All Confirmation Dialog */}
-      {/* Reset All Confirmation Dialog */}
-      {showResetConfirmation && (
+      {newAssetPlacementConfirmation && (
         <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-800">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-3">
-              {t(language, "resetAllConfirmTitle")}
+              {t(language, "swapConfirmTitle")}
             </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              {t(language, "resetAllConfirmMessage")}
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+              {t(language, "swapConfirmMessage")}
             </p>
-            <ul className="text-sm text-gray-600 dark:text-gray-400 mb-6 space-y-1">
-              <li>{t(language, "resetAllConfirmList1")}</li>
-              <li>{t(language, "resetAllConfirmList2")}</li>
-              <li>{t(language, "resetAllConfirmList3")}</li>
-              <li>{t(language, "resetAllConfirmList4")}</li>
-            </ul>
             <div className="flex gap-3">
               <button
-                onClick={() => setShowResetConfirmation(false)}
+                onClick={() => setNewAssetPlacementConfirmation(null)}
                 className="flex-1 px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium text-sm transition-colors"
               >
                 {t(language, "cancel")}
               </button>
               <button
-                onClick={handleResetAll}
-                className="flex-1 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium text-sm transition-colors"
+                onClick={applyNewAssetPlacement}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm transition-colors"
               >
-                {t(language, "resetAll")}
+                {t(language, "swapConfirm")}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Flatten Confirmation Dialog */}
+      {showResetConfirmation && (
+        <ResetAllConfirmDialog
+          language={language}
+          onCancel={() => setShowResetConfirmation(false)}
+          onConfirm={handleResetAll}
+        />
+      )}
+
       {showFlattenConfirmation && (
-        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-800">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-3">
-              {t(language, "flattenConfirmTitle")}
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-              {t(language, "flattenConfirmMessage")}
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowFlattenConfirmation(false)}
-                className="flex-1 px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium text-sm transition-colors"
-              >
-                {t(language, "cancel")}
-              </button>
-              <button
-                onClick={handleFlatten}
-                className="flex-1 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors"
-              >
-                {t(language, "flatten")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <FlattenConfirmDialog
+          language={language}
+          onCancel={() => setShowFlattenConfirmation(false)}
+          onConfirm={handleFlatten}
+        />
       )}
     </div>
   );
