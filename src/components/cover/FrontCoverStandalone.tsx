@@ -2,9 +2,9 @@ import type { Dispatch, SetStateAction } from "react";
 import type { AlbumResponseDto, AssetResponseDto } from "@immich/sdk";
 import type { ImmichConfig } from "../../types";
 import { t, type Language } from "../../i18n";
-import type { CoverLayout, PageBackground } from "../../config/albumConfig";
+import type { CoverLayout, FocalPoint, PageBackground } from "../../config/albumConfig";
 import type { HistoryOperation } from "../../history/editHistory";
-import { pageBackgroundCss, SCRAPBOOK, toPoints, type NewAssetTarget } from "../PhotoGrid";
+import { focalPointToCss, pageBackgroundCss, SCRAPBOOK, toPoints, type NewAssetTarget } from "../PhotoGrid";
 
 export interface FrontCoverStandaloneProps {
   validPageWidth: number;
@@ -13,6 +13,7 @@ export interface FrontCoverStandaloneProps {
   validBleed: number;
   previewWidth: number;
   coverAsset: AssetResponseDto | null;
+  coverFocalPoint: FocalPoint | null;
   immichConfig: ImmichConfig;
   swapFirstId: string | null;
   coverTitle: string;
@@ -23,7 +24,7 @@ export interface FrontCoverStandaloneProps {
   pageBackground: PageBackground;
   coverLayout: CoverLayout;
   selectedNewAsset: AssetResponseDto | null;
-  handleReorderPointerDown: (id: string, e: React.PointerEvent) => void;
+  handleReorderPointerDown: (id: string, e: React.PointerEvent, croppable?: boolean) => void;
   performNewAssetPlacement: (
     newAsset: AssetResponseDto,
     target: NewAssetTarget,
@@ -37,6 +38,7 @@ export function FrontCoverStandalone({
   validBleed,
   previewWidth,
   coverAsset,
+  coverFocalPoint,
   immichConfig,
   swapFirstId,
   coverTitle,
@@ -212,9 +214,12 @@ export function FrontCoverStandalone({
               alt=""
               data-reorder-asset-id="cover"
               className={`absolute inset-0 w-full h-full object-cover ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
-              style={{ touchAction: "none" }}
+              style={{
+                touchAction: "none",
+                objectPosition: focalPointToCss(coverFocalPoint),
+              }}
               onPointerDown={(e) => {
-                if (!selectedNewAsset) handleReorderPointerDown("cover", e);
+                if (!selectedNewAsset) handleReorderPointerDown("cover", e, true);
               }}
               onClick={(e) => {
                 if (selectedNewAsset && coverAsset) {

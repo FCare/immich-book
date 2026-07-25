@@ -2,9 +2,9 @@ import type { Dispatch, SetStateAction } from "react";
 import type { AssetResponseDto } from "@immich/sdk";
 import type { ImmichConfig } from "../../types";
 import { t, type Language } from "../../i18n";
-import type { CoverLayout, PageBackground } from "../../config/albumConfig";
+import type { CoverLayout, FocalPoint, PageBackground } from "../../config/albumConfig";
 import type { HistoryOperation } from "../../history/editHistory";
-import { pageBackgroundCss, SCRAPBOOK, toPoints, type NewAssetTarget } from "../PhotoGrid";
+import { focalPointToCss, pageBackgroundCss, SCRAPBOOK, toPoints, type NewAssetTarget } from "../PhotoGrid";
 
 export interface BackCoverStandaloneProps {
   validPageWidth: number;
@@ -19,8 +19,9 @@ export interface BackCoverStandaloneProps {
   language: Language;
   selectedNewAsset: AssetResponseDto | null;
   backCoverAsset: AssetResponseDto | null;
+  backCoverFocalPoint: FocalPoint | null;
   pageBackground: PageBackground;
-  handleReorderPointerDown: (id: string, e: React.PointerEvent) => void;
+  handleReorderPointerDown: (id: string, e: React.PointerEvent, croppable?: boolean) => void;
   performNewAssetPlacement: (
     newAsset: AssetResponseDto,
     target: NewAssetTarget,
@@ -44,6 +45,7 @@ export function BackCoverStandalone({
   language,
   selectedNewAsset,
   backCoverAsset,
+  backCoverFocalPoint,
   pageBackground,
   handleReorderPointerDown,
   performNewAssetPlacement,
@@ -145,7 +147,7 @@ export function BackCoverStandalone({
              touchAction: "none",
            }}
            onPointerDown={(e) => {
-             if (!selectedNewAsset) handleReorderPointerDown("back-cover", e);
+             if (!selectedNewAsset) handleReorderPointerDown("back-cover", e, backCoverLayout === "full-bleed");
            }}
            onClick={() => {
              if (selectedNewAsset && backCoverAsset) {
@@ -327,6 +329,9 @@ export function BackCoverStandalone({
                   src={imageUrl}
                   alt=""
                   className="absolute inset-0 w-full h-full object-cover"
+                  style={{
+                    objectPosition: focalPointToCss(backCoverFocalPoint),
+                  }}
                 />
                 <div
                   className="absolute inset-x-0 bottom-0 flex items-center justify-center"

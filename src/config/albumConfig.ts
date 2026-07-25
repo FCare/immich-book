@@ -26,6 +26,16 @@ export type CardStyle = "scrapbook" | "clean";
 
 export type CoverLayout = "photo-title" | "full-bleed" | "text-only";
 
+// Normalized (0-1, 0-1) point of interest within a photo, used to bias
+// object-fit: cover cropping toward it instead of a dead-center crop -
+// see computeFocalPointFromAsset in PhotoGrid.tsx. null means the photo
+// was checked and no face was found (fall back to center crop); absent
+// from the map means it hasn't been checked yet.
+export interface FocalPoint {
+  x: number;
+  y: number;
+}
+
 export interface GlobalConfig {
   // Page settings
   // Which printer's constraints (available sizes, bleed, one-page-per-
@@ -66,6 +76,10 @@ export interface AlbumConfig extends GlobalConfig {
   pageCaptions: Record<number, string>;
   // User-written captions per photo (polaroid card), keyed by asset id
   cardCaptions: Record<string, string>;
+  // Smart-crop focal point per photo, keyed by asset id - fetched lazily
+  // (see ensureFocalPoints in PhotoGrid.tsx) and cached here so it's only
+  // computed once per photo, not on every reload.
+  focalPoints: Record<string, FocalPoint | null>;
   // How many photo slots on a page are turned into text cards (0-3),
   // keyed by logical page number.
   textCardCounts: Record<number, number>;
@@ -183,6 +197,7 @@ export async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     pageCounts: {},
     pageCaptions: {},
     cardCaptions: {},
+    focalPoints: {},
     textCardCounts: {},
     textCardContents: {},
     slotOverrides: {},

@@ -3,8 +3,10 @@ import {
   getAlbumInfo,
   getTimeBuckets,
   getTimeBucket,
+  getFaces,
   type AlbumResponseDto,
   type AssetResponseDto,
+  type AssetFaceResponseDto,
 } from "@immich/sdk";
 import { pdf, Font } from "@react-pdf/renderer";
 import {
@@ -18,6 +20,7 @@ import {
   type PageBackground,
   type CardStyle,
   type CoverLayout,
+  type FocalPoint,
   type AlbumConfig,
   loadAlbumConfig,
   detectAlbumChanges,
@@ -474,6 +477,60 @@ async function fetchBlobsWithConcurrency(
   return { blobs, failures };
 }
 
+// Smart-crop focal point: the area-weighted centroid of every face Immich
+// detected on this asset, normalized to (0-1, 0-1) - used to bias an
+// object-fit: cover crop toward it instead of a dead-center crop that can
+// cut off a face. null means the photo was checked and no face was found
+// (falls back to the default center crop).
+// NOTE: face data does NOT come from getAssetInfo()/AssetResponseDto -
+// `people[].faces` and `unassignedFaces` are never populated by
+// /api/assets/{id} on this Immich version (confirmed by direct API
+// inspection: people[] lists names but each person's faces[] is always
+// empty, and unassignedFaces is always null). The bounding boxes live
+// behind the dedicated /api/faces?id= endpoint instead (SDK: getFaces),
+// which is what ensureFocalPoints calls.
+// CAVEAT: boundingBoxX1/X2/Y1/Y2 are relative to that face's own
+// imageWidth/imageHeight - if that reference frame ever differs from the
+// displayed (EXIF-rotation-corrected) image, the computed point will be
+// off. Unverified against a real portrait/rotated photo as of writing.
+export function computeFocalPoint(
+  faces: AssetFaceResponseDto[],
+): FocalPoint | null {
+  if (faces.length === 0) return null;
+
+  let totalWeight = 0;
+  let sumX = 0;
+  let sumY = 0;
+  for (const f of faces) {
+    const w = f.imageWidth || 1;
+    const h = f.imageHeight || 1;
+    const x1 = f.boundingBoxX1 / w;
+    const x2 = f.boundingBoxX2 / w;
+    const y1 = f.boundingBoxY1 / h;
+    const y2 = f.boundingBoxY2 / h;
+    const area = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    // A degenerate (zero-area) box still counts a little, rather than
+    // vanishing entirely from the average.
+    const weight = area > 0 ? area : 1e-6;
+    totalWeight += weight;
+    sumX += ((x1 + x2) / 2) * weight;
+    sumY += ((y1 + y2) / 2) * weight;
+  }
+  if (totalWeight === 0) return null;
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  return { x: clamp01(sumX / totalWeight), y: clamp01(sumY / totalWeight) };
+}
+
+// CSS `object-position` value for a focal point, or undefined (browser's
+// own 50%/50% default) when none was found - shared by every `object-cover`
+// image in the web preview.
+export function focalPointToCss(
+  point: FocalPoint | null | undefined,
+): string | undefined {
+  if (!point) return undefined;
+  return `${point.x * 100}% ${point.y * 100}%`;
+}
+
 // A small spinning flower (petals in the washi-tape palette) shown while
 // the PDF is being generated - in keeping with the scrapbook look rather
 // than a generic spinner.
@@ -729,6 +786,13 @@ function PhotoGridEditor({
   const [cardCaptions, setCardCaptions] = useState<Map<string, string>>(
     () => new Map(Object.entries(initialConfig.cardCaptions)),
   );
+  const [focalPoints, setFocalPoints] = useState<
+    Map<string, FocalPoint | null>
+  >(() => new Map(Object.entries(initialConfig.focalPoints)));
+  // Ids currently being fetched via getFaces - a ref (not state) so
+  // ensureFocalPoints can dedupe concurrent calls without waiting for a
+  // re-render.
+  const focalPointFetchesInFlight = useRef<Set<string>>(new Set());
   const [textCardCounts, setTextCardCounts] = useState<Map<number, number>>(
     () =>
       new Map(
@@ -816,16 +880,34 @@ function PhotoGridEditor({
       String(sidebarCollapsed),
     );
   }, [sidebarCollapsed]);
-  // Drag state for reordering - dropping one card onto another swaps
-  // them outright (see the pointermove/pointerup effect below), rather
-  // than splicing the dragged card into the sequence at the drop
-  // position, which is why we only need the dragged id here.
+  // Drag state for reordering. Dragging no longer swaps cards outright -
+  // on a "croppable" (object-cover) card it instead pans the smart-crop
+  // focal point (see handleReorderPointerDown/the pointermove effect
+  // below); on any other card it's inert. Swapping is click-only now
+  // (arm with a click, confirm with a second click) - see swapFirstId.
+  // `pan`, when present, carries everything the drag needs to compute a
+  // new focal point purely from pixel deltas, without touching React
+  // state until the gesture ends (state updates on every pointermove
+  // would be a lot of re-renders of this very large component tree).
   const [reorderDragState, setReorderDragState] = useState<{
     draggedAssetId: string;
+    pan?: {
+      imgEl: HTMLImageElement;
+      startX: number;
+      startY: number;
+      startFocalX: number;
+      startFocalY: number;
+      // The actual pre-drag value (possibly absent), for the history
+      // entry - distinct from startFocalX/Y above, which default to
+      // 0.5/0.5 for the pan math and would otherwise make an undo pin a
+      // card at dead-center instead of clearing back to "no override".
+      prevPoint: FocalPoint | null;
+      containerWidth: number;
+      containerHeight: number;
+      naturalWidth: number;
+      naturalHeight: number;
+    };
   } | null>(null);
-  const [dropTargetAssetId, setDropTargetAssetId] = useState<string | null>(
-    null,
-  );
   // Selected photo for swapping (can be cover, back-cover, or regular photo)
   const [selectedPhotoForSwap, setSelectedPhotoForSwap] = useState<{
     type: 'cover' | 'back-cover' | 'photo';
@@ -1026,6 +1108,7 @@ function PhotoGridEditor({
       pageCounts: Object.fromEntries(pageCounts),
       pageCaptions: Object.fromEntries(pageCaptions),
       cardCaptions: Object.fromEntries(cardCaptions),
+      focalPoints: Object.fromEntries(focalPoints),
       textCardCounts: Object.fromEntries(textCardCounts),
       textCardContents: Object.fromEntries(textCardContents),
       slotOverrides: Object.fromEntries(slotOverrides),
@@ -1071,6 +1154,7 @@ function PhotoGridEditor({
     pageCounts,
     pageCaptions,
     cardCaptions,
+    focalPoints,
     showCover,
     separatedCover,
     spineWidth,
@@ -1298,13 +1382,48 @@ function PhotoGridEditor({
   // ancestor (the preview's fit-to-width zoom), silently swallows drops on
   // tiles with no onDrop handler (text cards), and needs browser-specific
   // dataTransfer setup. Pointer events sidestep all of that.
+  //
+  // `croppable` opts a card into smart-crop panning instead of swapping
+  // when dragged (see the pointermove/pointerup effect below) - true only
+  // for an object-cover photo `<img>` (interior "clean" cards, full-bleed
+  // covers), since panning only makes sense where a crop is actually
+  // happening. `event.currentTarget` is either that `<img>` itself, or a
+  // wrapping element containing it (the cover components wrap every
+  // layout, cropped or not, in one pointerdown target) - either way, the
+  // `<img>`'s own rendered box is exactly the object-fit: cover
+  // "container" the pan math needs.
   const handleReorderPointerDown = (
     assetId: string,
     event: React.PointerEvent,
+    croppable = false,
   ) => {
     if (event.button !== 0) return;
     event.preventDefault();
-    setReorderDragState({ draggedAssetId: assetId });
+
+    let pan: NonNullable<typeof reorderDragState>["pan"];
+    if (croppable) {
+      const target = event.currentTarget as HTMLElement;
+      const imgEl = (
+        target.tagName === "IMG" ? target : target.querySelector("img")
+      ) as HTMLImageElement | null;
+      if (imgEl && imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0) {
+        const rect = imgEl.getBoundingClientRect();
+        const start = focalPoints.get(assetId) ?? null;
+        pan = {
+          imgEl,
+          startX: event.clientX,
+          startY: event.clientY,
+          startFocalX: start?.x ?? 0.5,
+          startFocalY: start?.y ?? 0.5,
+          prevPoint: start,
+          containerWidth: rect.width,
+          containerHeight: rect.height,
+          naturalWidth: imgEl.naturalWidth,
+          naturalHeight: imgEl.naturalHeight,
+        };
+      }
+    }
+    setReorderDragState({ draggedAssetId: assetId, pan });
   };
 
   const { handleUndo, handleResetCard, handleResetOrdering, handleFlatten, handleResetAll } =
@@ -1320,6 +1439,7 @@ function PhotoGridEditor({
       setTextCardCounts,
       setPageCaptions,
       setCardCaptions,
+      setFocalPoints,
       setCoverAssetId,
       setBackCoverAssetId,
       setCoverTitle,
@@ -1415,6 +1535,81 @@ function PhotoGridEditor({
     backCoverLayout,
     backCoverAsset,
   ]);
+
+  // Fetches face info (getFaces) for whichever asset ids don't have a
+  // focal point yet, concurrency-limited like fetchBlobsWithConcurrency
+  // above - a book can have hundreds of photos, and firing that many
+  // requests at once would hammer Immich the same way an unbounded image
+  // fetch burst would. Never re-fetches an id already in `focalPoints`,
+  // even if its value is null (checked, no face found). Returns only the
+  // newly-fetched entries, since the `focalPoints` state won't reflect
+  // them until the next render - callers that need them immediately
+  // (e.g. PDF generation) must merge the return value themselves.
+  const FOCAL_POINT_FETCH_CONCURRENCY = 4;
+  const ensureFocalPoints = async (
+    ids: string[],
+  ): Promise<Map<string, FocalPoint | null>> => {
+    const missing = Array.from(new Set(ids)).filter(
+      (id) =>
+        !focalPoints.has(id) && !focalPointFetchesInFlight.current.has(id),
+    );
+    if (missing.length === 0) return new Map();
+    missing.forEach((id) => focalPointFetchesInFlight.current.add(id));
+
+    const results = new Map<string, FocalPoint | null>();
+    let nextIndex = 0;
+    const worker = async () => {
+      while (true) {
+        const i = nextIndex++;
+        if (i >= missing.length) return;
+        const id = missing[i];
+        try {
+          const faces = await getFaces({ id });
+          results.set(id, computeFocalPoint(faces));
+        } catch (e) {
+          console.error(`Failed to fetch face info for ${id}:`, e);
+          // Not added to results -> not cached -> retried next time
+          // ensureFocalPoints is called for this id, unlike a genuine
+          // "no face found" which must be cached as null.
+        } finally {
+          focalPointFetchesInFlight.current.delete(id);
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(FOCAL_POINT_FETCH_CONCURRENCY, missing.length) }, worker),
+    );
+
+    if (results.size > 0) {
+      setFocalPoints((prev) => {
+        const next = new Map(prev);
+        results.forEach((v, k) => next.set(k, v));
+        return next;
+      });
+    }
+    return results;
+  };
+
+  const coverFocalPoint = coverAsset
+    ? focalPoints.get(coverAsset.id) ?? null
+    : null;
+  const backCoverFocalPoint = backCoverAsset
+    ? focalPoints.get(backCoverAsset.id) ?? null
+    : null;
+
+  // Prefetch focal points for every currently-placed photo (interior +
+  // covers) as soon as the book's photo set changes, regardless of the
+  // current card style/cover layout - the PDF export always crops in
+  // "cover" mode even when the web preview doesn't (e.g. "scrapbook" card
+  // style), so this keeps generation instant instead of waiting on
+  // face-detection fetches at that point.
+  useEffect(() => {
+    const ids = new Set<string>();
+    interiorAssets.forEach((a) => ids.add(a.id));
+    if (coverAsset) ids.add(coverAsset.id);
+    if (backCoverAsset) ids.add(backCoverAsset.id);
+    ensureFocalPoints(Array.from(ids));
+  }, [interiorAssets, coverAsset, backCoverAsset]);
 
   // Calculate unified page layout - single source of truth!
   // When page captions are on, the content area's margin needs to be at
@@ -1802,6 +1997,7 @@ function PhotoGridEditor({
             pageCounts: Object.fromEntries(pageCounts),
             pageCaptions: Object.fromEntries(pageCaptions),
             cardCaptions: Object.fromEntries(cardCaptions),
+            focalPoints: Object.fromEntries(focalPoints),
             textCardCounts: Object.fromEntries(textCardCounts),
             textCardContents: Object.fromEntries(textCardContents),
             slotOverrides: Object.fromEntries(slotOverrides),
@@ -1842,6 +2038,7 @@ function PhotoGridEditor({
             pageCounts: Object.fromEntries(pageCounts),
             pageCaptions: Object.fromEntries(pageCaptions),
             cardCaptions: Object.fromEntries(cardCaptions),
+            focalPoints: Object.fromEntries(focalPoints),
             textCardCounts: Object.fromEntries(textCardCounts),
             textCardContents: Object.fromEntries(textCardContents),
             slotOverrides: Object.fromEntries(slotOverrides),
@@ -1860,61 +2057,94 @@ function PhotoGridEditor({
     setNewAssetPlacementConfirmation(null);
   };
 
-  // While a reorder drag is active, track the pointer over the whole
-  // window (not just the card it started on) and hit-test which card is
-  // underneath via elementFromPoint - this works correctly regardless of
-  // the preview's CSS zoom, since elementFromPoint uses actual rendered
-  // coordinates. Both gestures are available at once, no mode switch:
-  // dropping onto a *different* card arms a confirmation for that pair
-  // (drag); releasing back over the *same* card (i.e. a plain click, no
-  // movement) arms it instead, so a second plain click on another card
-  // arms the same confirmation - handy when the two cards are far apart
-  // and dragging across the whole preview isn't practical. Either way,
-  // the swap itself only ever happens from swapConfirmation's Confirm
-  // button, via performSwap.
+  // While a reorder gesture is active, track the pointer over the whole
+  // window (not just the card it started on). Two outcomes, decided by
+  // whether the pointer actually moved past a small threshold - dragging
+  // a card onto another no longer swaps them (removed - swapping is
+  // click-only now, see below):
+  //   - Real movement on a "croppable" card (reorderDragState.pan set) -
+  //     pans that card's smart-crop focal point live. The focal point is
+  //     written straight to the dragged <img>'s style during the drag
+  //     (imperative DOM mutation, not React state) so dragging stays
+  //     smooth regardless of how large this component tree is; the
+  //     result is only committed to `focalPoints` (one state update) on
+  //     release.
+  //   - No real movement (a plain click, on any card) - arms/confirms a
+  //     swap exactly as before: a click arms a card, a second click on a
+  //     different card opens swapConfirmation, via requestSwap.
   useEffect(() => {
     if (!reorderDragState) return;
-    const { draggedAssetId } = reorderDragState;
+    const { draggedAssetId, pan } = reorderDragState;
 
-    const cardUnderPointer = (clientX: number, clientY: number) => {
-      const el = document.elementFromPoint(clientX, clientY);
-      const card = el?.closest<HTMLElement>("[data-reorder-asset-id]");
-      return card?.dataset.reorderAssetId ?? null;
-    };
+    const PAN_THRESHOLD_PX = 6;
+    let hasPanned = false;
+    let lastFocalX = pan?.startFocalX ?? 0.5;
+    let lastFocalY = pan?.startFocalY ?? 0.5;
 
     const handlePointerMove = (event: PointerEvent) => {
-      setDropTargetAssetId(cardUnderPointer(event.clientX, event.clientY));
+      if (!pan) return;
+      const dx = event.clientX - pan.startX;
+      const dy = event.clientY - pan.startY;
+      if (!hasPanned && Math.hypot(dx, dy) < PAN_THRESHOLD_PX) return;
+      hasPanned = true;
+
+      // Same geometry object-fit: cover itself uses - the image is
+      // scaled up just enough to cover the container on its shorter
+      // axis, then the "spare" length in the other axis is how far the
+      // crop window can slide. Dragging the pointer right should feel
+      // like dragging the photo itself right (i.e. revealing more of
+      // its left side), hence the minus sign.
+      const scale = Math.max(
+        pan.containerWidth / pan.naturalWidth,
+        pan.containerHeight / pan.naturalHeight,
+      );
+      const overflowX = pan.naturalWidth * scale - pan.containerWidth;
+      const overflowY = pan.naturalHeight * scale - pan.containerHeight;
+      const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+      lastFocalX =
+        overflowX > 0.5
+          ? clamp01(pan.startFocalX - dx / overflowX)
+          : pan.startFocalX;
+      lastFocalY =
+        overflowY > 0.5
+          ? clamp01(pan.startFocalY - dy / overflowY)
+          : pan.startFocalY;
+      pan.imgEl.style.objectPosition = `${lastFocalX * 100}% ${lastFocalY * 100}%`;
     };
 
-    const handlePointerUp = (event: PointerEvent) => {
-      const targetAssetId = cardUnderPointer(event.clientX, event.clientY);
-
-      if (targetAssetId && targetAssetId !== draggedAssetId) {
-        // Drag and drop - goes through requestSwap, same as click-to-
-        // swap below, rather than applying immediately, so every swap -
-        // drag or click, between any two cards including a not-yet-
-        // placed new photo - is confirmed the same way.
-        requestSwap(draggedAssetId, targetAssetId);
+    const handlePointerUp = () => {
+      if (hasPanned) {
+        setFocalPoints((prev) => {
+          const next = new Map(prev);
+          next.set(draggedAssetId, { x: lastFocalX, y: lastFocalY });
+          return next;
+        });
+        setHistory((prev) => [
+          {
+            type: "pan-focal-point",
+            assetId: draggedAssetId,
+            prevPoint: pan?.prevPoint ?? null,
+            newPoint: { x: lastFocalX, y: lastFocalY },
+            timestamp: Date.now(),
+          },
+          ...prev,
+        ]);
+      } else if (isNewAssetCardId(draggedAssetId)) {
+        // A plain click on a new-photo thumbnail is handled by its own
+        // onClick (arm/complete via selectedNewAsset) - the click-arm-
+        // then-click-again flow below only applies between two already-
+        // placed cards.
+      } else if (swapFirstId === null) {
+        setSwapFirstId(draggedAssetId);
+      } else if (swapFirstId === draggedAssetId) {
         setSwapFirstId(null);
-      } else if (targetAssetId === draggedAssetId) {
-        if (isNewAssetCardId(draggedAssetId)) {
-          // A plain click on a new-photo thumbnail is handled by its
-          // own onClick (arm/complete via selectedNewAsset) - the
-          // click-arm-then-click-again flow below only applies between
-          // two already-placed cards.
-        } else if (swapFirstId === null) {
-          setSwapFirstId(draggedAssetId);
-        } else if (swapFirstId === draggedAssetId) {
-          setSwapFirstId(null);
-        } else {
-          // Click-to-swap - show confirmation dialog
-          requestSwap(swapFirstId, draggedAssetId);
-          setSwapFirstId(null);
-        }
+      } else {
+        // Click-to-swap - show confirmation dialog
+        requestSwap(swapFirstId, draggedAssetId);
+        setSwapFirstId(null);
       }
 
       setReorderDragState(null);
-      setDropTargetAssetId(null);
     };
 
     window.addEventListener("pointermove", handlePointerMove);
@@ -2171,6 +2401,7 @@ function PhotoGridEditor({
                     pageCounts: Object.fromEntries(pageCounts),
                     pageCaptions: Object.fromEntries(pageCaptions),
                     cardCaptions: Object.fromEntries(cardCaptions),
+                    focalPoints: Object.fromEntries(focalPoints),
                     textCardCounts: Object.fromEntries(textCardCounts),
                     textCardContents: Object.fromEntries(textCardContents),
                     slotOverrides: Object.fromEntries(slotOverrides),
@@ -2310,6 +2541,19 @@ function PhotoGridEditor({
           onProgress,
         );
 
+      // Top-up: the background prefetch (see the useEffect above
+      // interiorAssets/coverAsset/backCoverAsset) usually already has
+      // every placed photo's focal point by the time the user clicks
+      // "Generate", but this guarantees it regardless of timing - the
+      // PDF always crops in "cover" mode (even for card styles/layouts
+      // that don't crop in the web preview), so it must never wait on a
+      // stale/incomplete `focalPoints` state. `ensureFocalPoints` dedupes
+      // against what's already cached, so this is a no-op fetch-wise
+      // once the background prefetch has caught up.
+      const freshFocalPoints = await ensureFocalPoints(ids);
+      const focalPointsForPdf = new Map(focalPoints);
+      freshFocalPoints.forEach((v, k) => focalPointsForPdf.set(k, v));
+
       // Shared by every buildPdfDocument() call below - only imageBlobs
       // and pdfType vary between the cover/interior/full variants.
       const pdfDocumentBaseParams = {
@@ -2344,6 +2588,7 @@ function PhotoGridEditor({
         textCardContents,
         showDates,
         cardCaptions,
+        focalPoints: focalPointsForPdf,
       };
 
       // react-pdf's WASM layout engine (yoga-layout) computes the whole
@@ -2567,16 +2812,13 @@ function PhotoGridEditor({
               <button
                 onClick={() => {
                   setIsDetectingChanges(true);
-                  fetch(`/photobooks/${encodeURIComponent(album.id)}/detect-changes`, {
-                    method: 'POST',
-                  })
-                    .then(res => res.json())
+                  detectAlbumChanges(album.id, assets.map(a => a.id))
                     .then(({ missingAssets, newAssetIds }) => {
                       console.log(`Manual sync: ${newAssetIds.length} new, ${missingAssets.length} missing`);
-                      
+
                       // Update missing assets
                       setMissingAssetIds(new Set(missingAssets.map((a: AssetResponseDto) => a.id)));
-                      
+
                       // Handle new photos
                       if (newAssetIds.length > 0) {
                         const newPhotos = assets.filter(a => newAssetIds.includes(a.id));
@@ -2590,7 +2832,7 @@ function PhotoGridEditor({
                         setAssets(prev => prev.filter(a => !newAssetIds.includes(a.id)));
                         console.log(`${newPhotos.length} new photos added to panel`);
                       }
-                      
+
                       setChangesDetected(missingAssets.length > 0 || newAssetIds.length > 0);
                     })
                     .catch(err => {
@@ -3123,6 +3365,8 @@ function PhotoGridEditor({
               previewWidth={previewWidth}
               coverAsset={coverAsset}
               backCoverAsset={backCoverAsset}
+              coverFocalPoint={coverFocalPoint}
+              backCoverFocalPoint={backCoverFocalPoint}
               immichConfig={immichConfig}
               selectedNewAsset={selectedNewAsset}
               swapFirstId={swapFirstId}
@@ -3153,6 +3397,7 @@ function PhotoGridEditor({
               validBleed={validBleed}
               previewWidth={previewWidth}
               coverAsset={coverAsset}
+              coverFocalPoint={coverFocalPoint}
               immichConfig={immichConfig}
               swapFirstId={swapFirstId}
               coverTitle={coverTitle}
@@ -3386,7 +3631,6 @@ function PhotoGridEditor({
                     if (!photoBox.asset) {
                       const isBeingDragged =
                         reorderDragState?.draggedAssetId === photoBox.id;
-                      const isDropTarget = dropTargetAssetId === photoBox.id;
                       const isReordered = manuallyMovedIds.has(photoBox.id);
                       const isSwapSelected = swapFirstId === photoBox.id;
 
@@ -3406,11 +3650,6 @@ function PhotoGridEditor({
                             handleReorderPointerDown(photoBox.id, e)
                           }
                         >
-                          {/* Drop indicator - shown on left edge when hovering during drag */}
-                          {isDropTarget && reorderDragState && (
-                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500 shadow-lg z-10" />
-                          )}
-
                           {(() => {
                             const textCardBody = (
                               <textarea
@@ -3539,9 +3778,13 @@ function PhotoGridEditor({
                     
                     const imageUrl = `${immichConfig.baseUrl}/assets/${asset.id}/thumbnail?size=preview`;
 
+                    // Dimming a card mid-drag signals "this is being moved
+                    // elsewhere" - wrong feedback while its own crop is
+                    // being panned in place, so panning cards stay at full
+                    // opacity.
                     const isBeingDragged =
-                      reorderDragState?.draggedAssetId === asset.id;
-                    const isDropTarget = dropTargetAssetId === asset.id;
+                      reorderDragState?.draggedAssetId === asset.id &&
+                      !reorderDragState.pan;
                     const isReordered = manuallyMovedIds.has(asset.id);
                     const isSwapSelected = swapFirstId === asset.id;
 
@@ -3591,17 +3834,13 @@ function PhotoGridEditor({
                           if (target.closest('button')) {
                             return;
                           }
-                          
+
                           // Only allow drag if no new photo is selected
                           if (!selectedNewAsset) {
-                            handleReorderPointerDown(asset.id, e);
+                            handleReorderPointerDown(asset.id, e, cardStyle === "clean");
                           }
                         }}
                       >
-                        {/* Drop indicator - shown on left edge when hovering during drag */}
-                        {isDropTarget && reorderDragState && (
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500 shadow-lg z-10" />
-                        )}
 
                         {(() => {
                           const captionInput = (
@@ -3731,6 +3970,11 @@ function PhotoGridEditor({
                                       src={imageUrl}
                                       alt={asset.originalFileName}
                                       className="object-cover w-full h-full"
+                                      style={{
+                                        objectPosition: focalPointToCss(
+                                          focalPoints.get(asset.id),
+                                        ),
+                                      }}
                                       loading="lazy"
                                     />
                                   )}
@@ -3868,6 +4112,7 @@ function PhotoGridEditor({
                                   pageCounts: Object.fromEntries(pageCounts),
                                   pageCaptions: Object.fromEntries(pageCaptions),
                                   cardCaptions: Object.fromEntries(cardCaptions),
+                                  focalPoints: Object.fromEntries(focalPoints),
                                   textCardCounts: Object.fromEntries(textCardCounts),
                                   textCardContents: Object.fromEntries(textCardContents),
                                   slotOverrides: Object.fromEntries(slotOverrides),
@@ -3917,6 +4162,7 @@ function PhotoGridEditor({
               language={language}
               selectedNewAsset={selectedNewAsset}
               backCoverAsset={backCoverAsset}
+              backCoverFocalPoint={backCoverFocalPoint}
               pageBackground={pageBackground}
               handleReorderPointerDown={handleReorderPointerDown}
               performNewAssetPlacement={performNewAssetPlacement}

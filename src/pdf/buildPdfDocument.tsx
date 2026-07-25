@@ -1,7 +1,7 @@
 import type { AlbumResponseDto, AssetResponseDto } from "@immich/sdk";
 import { Document, Page, Image, View, Text, StyleSheet } from "@react-pdf/renderer";
 import { mmToPixels, type Page as LayoutPage } from "../utils/pageLayout";
-import type { PageBackground, CardStyle, CoverLayout } from "../config/albumConfig";
+import type { PageBackground, CardStyle, CoverLayout, FocalPoint } from "../config/albumConfig";
 import {
   SCRAPBOOK,
   PAGE_BACKGROUNDS,
@@ -207,12 +207,14 @@ function PdfPhotoImage({
   containerHeight,
   top,
   left,
+  focalPoint,
 }: {
   src: Blob | undefined;
   containerWidth: number;
   containerHeight: number;
   top: number;
   left: number;
+  focalPoint?: FocalPoint | null;
 }) {
   if (!src) return null;
   return (
@@ -225,6 +227,12 @@ function PdfPhotoImage({
         width: containerWidth,
         height: containerHeight,
         objectFit: "cover",
+        ...(focalPoint
+          ? {
+              objectPositionX: `${focalPoint.x * 100}%`,
+              objectPositionY: `${focalPoint.y * 100}%`,
+            }
+          : {}),
       }}
     />
   );
@@ -275,6 +283,9 @@ export interface BuildPdfDocumentParams {
   textCardContents: Map<string, string>;
   showDates: boolean;
   cardCaptions: Map<string, string>;
+  // Smart-crop focal point per asset id (see computeFocalPointFromAsset
+  // in PhotoGrid.tsx) - null means checked, no face found.
+  focalPoints: Map<string, FocalPoint | null>;
 }
 
 // Builds the actual PDF document element from photo Blobs fetched ahead
@@ -318,6 +329,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
     textCardContents,
     showDates,
     cardCaptions,
+    focalPoints,
   } = params;
 
   const coverPageWidth = toPoints(validPageWidth);
@@ -328,6 +340,12 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
   const backCoverImageBlob = backCoverAsset
     ? imageBlobs.get(backCoverAsset.id)
     : undefined;
+  const coverFocalPoint = coverAsset
+    ? focalPoints.get(coverAsset.id) ?? null
+    : null;
+  const backCoverFocalPoint = backCoverAsset
+    ? focalPoints.get(backCoverAsset.id) ?? null
+    : null;
   const coverScrimHeight = coverPageHeight * 0.28;
   // Bleed ("fond perdu") - extra border filled with the page
   // background, outside the trim size, so a print shop's trim line
@@ -476,6 +494,12 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                           width: "100%",
                           height: "100%",
                           objectFit: "cover",
+                          ...(backCoverFocalPoint
+                            ? {
+                                objectPositionX: `${backCoverFocalPoint.x * 100}%`,
+                                objectPositionY: `${backCoverFocalPoint.y * 100}%`,
+                              }
+                            : {}),
                         }}
                       />
                     </View>
@@ -524,6 +548,12 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 width: coverPageWidth,
                 height: coverPageHeight,
                 objectFit: "cover",
+                ...(backCoverFocalPoint
+                  ? {
+                      objectPositionX: `${backCoverFocalPoint.x * 100}%`,
+                      objectPositionY: `${backCoverFocalPoint.y * 100}%`,
+                    }
+                  : {}),
               }}
             />
             <View
@@ -649,6 +679,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               left={coverPageWidth * 0.02}
               containerWidth={coverPageWidth * 0.8}
               containerHeight={coverPageHeight * 0.64}
+              focalPoint={coverFocalPoint}
             />
           </View>
           <View
@@ -689,6 +720,12 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               width: coverPageWidth,
               height: coverPageHeight,
               objectFit: "cover",
+              ...(coverFocalPoint
+                ? {
+                    objectPositionX: `${coverFocalPoint.x * 100}%`,
+                    objectPositionY: `${coverFocalPoint.y * 100}%`,
+                  }
+                : {}),
             }}
           />
           <View
@@ -843,6 +880,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 left={coverPageWidth * 0.02}
                 containerWidth={coverPageWidth * 0.8}
                 containerHeight={coverPageHeight * 0.64}
+                focalPoint={coverFocalPoint}
               />
             </View>
             <View
@@ -883,6 +921,12 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 width: coverPageWidth,
                 height: coverPageHeight,
                 objectFit: "cover",
+                ...(coverFocalPoint
+                  ? {
+                      objectPositionX: `${coverFocalPoint.x * 100}%`,
+                      objectPositionY: `${coverFocalPoint.y * 100}%`,
+                    }
+                  : {}),
               }}
             />
             {/* Approximates a top-to-bottom fade with stacked bands
@@ -1255,6 +1299,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             // size - always a plain, pre-rotated JPEG, unlike the
             // original upload which can be any format/orientation).
             const imageBlob = imageBlobs.get(asset.id);
+            const cardFocalPoint = focalPoints.get(asset.id) ?? null;
             const dateStripHeight = showDates
               ? fontSize * 1.6
               : 0;
@@ -1291,6 +1336,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                     left={0}
                     containerWidth={width}
                     containerHeight={height - bottomStripHeight}
+                    focalPoint={cardFocalPoint}
                   />
                   {!!cardCaption && (
                     <View
@@ -1405,6 +1451,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                       containerHeight={
                         height - frameInset * 2 - bottomStripHeight
                       }
+                      focalPoint={cardFocalPoint}
                     />
                     {!!cardCaption && (
                       <View
@@ -1650,6 +1697,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                       containerHeight={
                         cardHeight - frameInset * 2 - captionStripHeight
                       }
+                      focalPoint={backCoverFocalPoint}
                     />
                   )}
                   {!!backCoverText && (
@@ -1701,6 +1749,12 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 width: coverPageWidth,
                 height: coverPageHeight,
                 objectFit: "cover",
+                ...(backCoverFocalPoint
+                  ? {
+                      objectPositionX: `${backCoverFocalPoint.x * 100}%`,
+                      objectPositionY: `${backCoverFocalPoint.y * 100}%`,
+                    }
+                  : {}),
               }}
             />
             {!!backCoverText && (

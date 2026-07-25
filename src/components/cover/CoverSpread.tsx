@@ -2,10 +2,10 @@ import type { Dispatch, SetStateAction } from "react";
 import type { AlbumResponseDto, AssetResponseDto } from "@immich/sdk";
 import type { ImmichConfig } from "../../types";
 import { t, type Language } from "../../i18n";
-import type { CoverLayout } from "../../config/albumConfig";
+import type { CoverLayout, FocalPoint } from "../../config/albumConfig";
 import type { HistoryOperation } from "../../history/editHistory";
 import { mmToPixels } from "../../utils/pageLayout";
-import { SCRAPBOOK, toPoints, type NewAssetTarget } from "../PhotoGrid";
+import { focalPointToCss, SCRAPBOOK, toPoints, type NewAssetTarget } from "../PhotoGrid";
 
 export interface CoverSpreadProps {
   validPageWidth: number;
@@ -16,10 +16,12 @@ export interface CoverSpreadProps {
   previewWidth: number;
   coverAsset: AssetResponseDto | null;
   backCoverAsset: AssetResponseDto | null;
+  coverFocalPoint: FocalPoint | null;
+  backCoverFocalPoint: FocalPoint | null;
   immichConfig: ImmichConfig;
   selectedNewAsset: AssetResponseDto | null;
   swapFirstId: string | null;
-  handleReorderPointerDown: (id: string, e: React.PointerEvent) => void;
+  handleReorderPointerDown: (id: string, e: React.PointerEvent, croppable?: boolean) => void;
   performNewAssetPlacement: (
     newAsset: AssetResponseDto,
     target: NewAssetTarget,
@@ -48,6 +50,8 @@ export function CoverSpread({
   previewWidth,
   coverAsset,
   backCoverAsset,
+  coverFocalPoint,
+  backCoverFocalPoint,
   immichConfig,
   selectedNewAsset,
   swapFirstId,
@@ -115,7 +119,7 @@ export function CoverSpread({
             touchAction: "none",
           }}
           onPointerDown={(e) => {
-            if (!selectedNewAsset) handleReorderPointerDown("back-cover", e);
+            if (!selectedNewAsset) handleReorderPointerDown("back-cover", e, backCoverLayout === "full-bleed");
           }}
           onClick={() => {
             if (selectedNewAsset && backCoverAsset) {
@@ -226,6 +230,9 @@ export function CoverSpread({
                 src={backCoverImageUrl}
                 alt="Back cover"
                 className="absolute inset-0 w-full h-full object-cover"
+                style={{
+                  objectPosition: focalPointToCss(backCoverFocalPoint),
+                }}
               />
               <div
                 className="absolute inset-x-0 bottom-0 flex items-center justify-center"
@@ -309,7 +316,7 @@ export function CoverSpread({
             touchAction: "none",
           }}
           onPointerDown={(e) => {
-            if (!selectedNewAsset) handleReorderPointerDown("cover", e);
+            if (!selectedNewAsset) handleReorderPointerDown("cover", e, coverLayout === "full-bleed");
           }}
           onClick={() => {
             if (selectedNewAsset && coverAsset) {
@@ -420,6 +427,7 @@ export function CoverSpread({
                 src={coverImageUrl}
                 alt="Front cover"
                 className="absolute inset-0 w-full h-full object-cover"
+                style={{ objectPosition: focalPointToCss(coverFocalPoint) }}
               />
               <div
                 className="absolute inset-x-0 bottom-0 flex items-center justify-center"

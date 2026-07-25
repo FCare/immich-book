@@ -1,5 +1,6 @@
 import type { AssetResponseDto } from "@immich/sdk";
 import type { Dispatch, SetStateAction } from "react";
+import type { FocalPoint } from "../config/albumConfig";
 
 // History of operations for undo functionality
 export type HistoryOperation =
@@ -125,6 +126,17 @@ export type HistoryOperation =
       pageNumber: number | null;
       prevPageCount: number | null;
       timestamp: number;
+    }
+  | {
+      // Manual smart-crop adjustment (dragging a croppable card) - see
+      // the pointermove/pointerup effect in PhotoGrid.tsx. prevPoint is
+      // null when the card had no focal point yet (auto-detection never
+      // ran, or found no face).
+      type: "pan-focal-point";
+      assetId: string;
+      prevPoint: FocalPoint | null;
+      newPoint: FocalPoint;
+      timestamp: number;
     };
 
 // Baseline snapshot captured by "flatten" - everything a Reset All
@@ -153,6 +165,7 @@ export interface UseEditHistoryParams {
   setTextCardCounts: Dispatch<SetStateAction<Map<number, number>>>;
   setPageCaptions: Dispatch<SetStateAction<Map<number, string>>>;
   setCardCaptions: Dispatch<SetStateAction<Map<string, string>>>;
+  setFocalPoints: Dispatch<SetStateAction<Map<string, FocalPoint | null>>>;
   setCoverAssetId: Dispatch<SetStateAction<string | null>>;
   setBackCoverAssetId: Dispatch<SetStateAction<string | null>>;
   setCoverTitle: Dispatch<SetStateAction<string>>;
@@ -195,6 +208,7 @@ export function useEditHistory(params: UseEditHistoryParams) {
     setTextCardCounts,
     setPageCaptions,
     setCardCaptions,
+    setFocalPoints,
     setCoverAssetId,
     setBackCoverAssetId,
     setCoverTitle,
@@ -322,6 +336,14 @@ export function useEditHistory(params: UseEditHistoryParams) {
           } else {
             next.delete(lastOp.assetId);
           }
+          return next;
+        });
+        break;
+
+      case "pan-focal-point":
+        setFocalPoints((prev) => {
+          const next = new Map(prev);
+          next.set(lastOp.assetId, lastOp.prevPoint);
           return next;
         });
         break;
@@ -590,6 +612,14 @@ export function useEditHistory(params: UseEditHistoryParams) {
             } else {
               next.delete(op.assetId);
             }
+            return next;
+          });
+          break;
+
+        case "pan-focal-point":
+          setFocalPoints((prev) => {
+            const next = new Map(prev);
+            next.set(op.assetId, op.prevPoint);
             return next;
           });
           break;

@@ -348,6 +348,9 @@ export function HistoryPanel({
                     case "delete-placeholder":
                       description = t(language, "historyDeletePlaceholder");
                       break;
+                    case "pan-focal-point":
+                      description = t(language, "historyPanFocalPoint");
+                      break;
                   }
 
                   return (
