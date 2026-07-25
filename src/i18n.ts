@@ -83,7 +83,6 @@ export const translations = {
     excludeCoverPhotosHint: "Certains imprimeurs génèrent leur propre couverture et ne veulent pas de couverture dans le PDF soumis",
     plainBackCoverText: "Texte simple au dos de la couverture",
     plainBackCoverTextHint: "Pas de carte derrière le texte - s'applique uniquement lorsque la quatrième de couverture n'a pas de photo",
-    coverHint: "La couverture utilise le même fond de page que le reste du livre. Survolez une photo ci-dessous et cliquez sur « Définir comme couverture » ou « Définir comme quatrième de couverture » pour choisir les images avant et arrière - par défaut, ce sont la première et la dernière photo du livre.",
     cardReordered: "Carte réorganisée",
     imageReordered: "Image réorganisée",
     
@@ -284,7 +283,6 @@ export const translations = {
     excludeCoverPhotosHint: "Some print services generate their own cover and don't want one in the submitted PDF",
     plainBackCoverText: "Plain back cover text",
     plainBackCoverTextHint: "No card behind the text - only applies when the back cover has no photo",
-    coverHint: "The cover uses the same page background as the rest of the book. Hover a photo below and click \"Set as cover\" or \"Set as back cover\" to choose the front and back cover images - they default to the book's first and last photo.",
     cardReordered: "Card reordered",
     imageReordered: "Image reordered",
     

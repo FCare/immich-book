@@ -977,13 +977,28 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               width: spineWidthPt,
               height: coverPageHeight,
               backgroundColor: spineColor,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              position: "relative",
             }}
           >
+            {/* react-pdf's Yoga layout sizes a node BEFORE the rotation
+                transform is applied - a Text centered via flex in the
+                (narrow) spineWidthPt parent gets wrapped/cut to fit that
+                width, same as normal (non-rotated) text would. The web
+                preview avoids this with CSS white-space:nowrap, which
+                react-pdf has no equivalent of. Instead, size the Text's
+                own box as if it were laid out un-rotated along the
+                spine's full height (plenty of room, so it never wraps),
+                center that box on the spine's center point, then rotate
+                it in place - rotating around an element's own center
+                doesn't move that center, so it ends up centered on the
+                spine post-rotation too. */}
             <Text
               style={{
+                position: "absolute",
+                width: coverPageHeight,
+                left: spineWidthPt / 2 - coverPageHeight / 2,
+                top: coverPageHeight / 2 - spineTextSize * 0.6,
+                textAlign: "center",
                 fontFamily: "Caveat",
                 fontSize: spineTextSize,
                 color: spineTextColor,
