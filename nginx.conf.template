@@ -55,6 +55,29 @@ server {
         proxy_set_header Host $host;
     }
 
+    # Merges the PDF chunks the frontend renders client-side into one
+    # file - see backend/main.py's /pdf/merge. Uploads can be large (a
+    # several-hundred-page book's chunks, at full image quality), and
+    # merging that much data takes longer than the other endpoints here.
+    location /pdf/ {
+        proxy_pass http://immich-book-backend:8000/pdf/;
+        proxy_set_header Host $host;
+        client_max_body_size 0;
+        # client_body_timeout guards the upload leg (the browser sending
+        # the chunk PDFs to nginx) - proxy_read/send_timeout only cover
+        # nginx<->backend, not client<->nginx. Without this, nginx's 60s
+        # default kills the connection outright if uploading a large
+        # book's chunks takes longer than that, before the backend ever
+        # sees the request - which looks exactly like "generation never
+        # finishes" with no error surfaced.
+        client_body_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        # Stream the upload straight to the backend instead of nginx
+        # buffering the whole (potentially huge) request body first.
+        proxy_request_buffering off;
+    }
+
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|wasm)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";

@@ -232,7 +232,18 @@ function PdfPhotoImage({
 
 export interface BuildPdfDocumentParams {
   imageBlobs: Map<string, Blob>;
-  pdfType?: "full" | "cover" | "interior";
+  // "front-cover-standalone"/"back-cover-standalone" render just that
+  // one page - used to assemble a large book out of several small
+  // pdf().toBlob() calls (front cover, interior in chunks, back cover)
+  // merged afterward server-side (see mergePdfBlobs), instead of one
+  // giant call: react-pdf's WASM layout engine (yoga-layout) can crash
+  // the tab on a document with hundreds of pages built in a single pass.
+  pdfType?:
+    | "full"
+    | "cover"
+    | "interior"
+    | "front-cover-standalone"
+    | "back-cover-standalone";
   album: AlbumResponseDto;
   validPageWidth: number;
   validPageHeight: number;
@@ -340,7 +351,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
     // to ensure separated cover gets the same layouts
     return (
       <>
-        {backCoverLayout === "text-only" && backCoverText && (
+        {backCoverLayout === "text-only" && !!backCoverText && (
           <View
             style={{
               position: "absolute",
@@ -387,7 +398,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
         )}
 
         {backCoverLayout === "photo-title" &&
-          (backCoverImageBlob || backCoverText) &&
+          Boolean(backCoverImageBlob || backCoverText) &&
           (() => {
             const hasImage = !!backCoverImageBlob;
             if (!hasImage && backCoverPlainText && backCoverText) {
@@ -470,7 +481,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                     </View>
                   </View>
                 )}
-                {backCoverText && (
+                {!!backCoverText && (
                   <View
                     style={{
                       position: "absolute",
@@ -539,7 +550,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 />
               ))}
             </View>
-            {backCoverText && (
+            {!!backCoverText && (
               <View
                 style={{
                   position: "absolute",
@@ -734,12 +745,12 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
   );
 
   // Determine what to include based on PDF type
-  const includeFrontCover = pdfType === "full"
-    ? (showCover && !separatedCover)
-    : false;
-  const includeBackCover = pdfType === "full"
-    ? (showCover && !separatedCover)
-    : false;
+  const includeFrontCover =
+    pdfType === "front-cover-standalone" ||
+    (pdfType === "full" && showCover && !separatedCover);
+  const includeBackCover =
+    pdfType === "back-cover-standalone" ||
+    (pdfType === "full" && showCover && !separatedCover);
   const includeSeparatedCover = pdfType === "cover" || (pdfType === "full" && separatedCover);
   const includeInteriorPages = pdfType === "full" || pdfType === "interior";
 
@@ -1266,7 +1277,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                     containerWidth={width}
                     containerHeight={height - bottomStripHeight}
                   />
-                  {cardCaption && (
+                  {!!cardCaption && (
                     <View
                       style={{
                         position: "absolute",
@@ -1380,7 +1391,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                         height - frameInset * 2 - bottomStripHeight
                       }
                     />
-                    {cardCaption && (
+                    {!!cardCaption && (
                       <View
                         style={{
                           position: "absolute",
@@ -1490,7 +1501,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             height: coverPageHeight,
           }}
         >
-        {backCoverLayout === "text-only" && backCoverText && (
+        {backCoverLayout === "text-only" && !!backCoverText && (
           <View
             style={{
               position: "absolute",
@@ -1537,7 +1548,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
         )}
 
         {backCoverLayout === "photo-title" &&
-          (backCoverImageBlob || backCoverText) &&
+          Boolean(backCoverImageBlob || backCoverText) &&
           (() => {
             const hasImage = !!backCoverImageBlob;
             // Plain text has no photo to mount, so no card/mat either -
@@ -1626,7 +1637,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                       }
                     />
                   )}
-                  {backCoverText && (
+                  {!!backCoverText && (
                     <View
                       style={{
                         position: "absolute",
@@ -1677,7 +1688,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 objectFit: "cover",
               }}
             />
-            {backCoverText && (
+            {!!backCoverText && (
               <>
                 <View
                   style={{

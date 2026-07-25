@@ -24,6 +24,7 @@ import {
   saveAlbumConfig,
 } from "../config/albumConfig";
 import { buildPdfDocument } from "../pdf/buildPdfDocument";
+import { mergePdfBlobs } from "../pdf/mergePdf";
 import {
   type HistoryOperation,
   type FlattenedState,
@@ -1256,6 +1257,21 @@ function PhotoGridEditor({
       }
       return next;
     });
+    // A manual slot override is a permutation of this page's card ids at
+    // its PREVIOUS count - changing the count invalidates it outright
+    // (calculatePageLayout already ignores a length-mismatched override,
+    // but only by accident of the new count differing from the old one;
+    // an override left over from an earlier count/insert cycle that
+    // happens to match the new count by coincidence would otherwise be
+    // silently reapplied, pinning old slot assignments - including
+    // freezing out an asset added since - instead of the fresh natural
+    // tiling a page-count change should always produce).
+    setSlotOverrides((prev) => {
+      if (!prev.has(logicalPageNumber)) return prev;
+      const next = new Map(prev);
+      next.delete(logicalPageNumber);
+      return next;
+    });
     // Record in history
     setHistory((prev) => [
       {
@@ -2361,34 +2377,116 @@ function PhotoGridEditor({
         cardCaptions,
       };
 
+      // react-pdf's WASM layout engine (yoga-layout) computes the whole
+      // document's layout in a single pass - confirmed to crash the tab
+      // outright on a book with hundreds of pages built in one
+      // pdf().toBlob() call (~700+ photos), while ~100 photos in one
+      // pass is fine. Building the interior in chunks this size, each
+      // its own small react-pdf render, and concatenating the resulting
+      // PDFs server-side (mergePdfBlobs -> backend /pdf/merge, byte-level
+      // page copy, no re-encoding - full image quality kept) scales to a
+      // book of any length: even after chunking, a large book's combined
+      // size can exceed what a browser tab can hold as one buffer to
+      // merge itself, which the server doesn't run into.
+      const INTERIOR_CHUNK_PAGE_COUNT = 40;
+      // Renders just the interior chunks - does NOT merge them. Merging
+      // happens exactly once, at the end, over the full ordered part
+      // list (front cover + interior chunks + back cover) - merging the
+      // interior on its own first and then merging that result again
+      // into the final file would mean downloading the (potentially
+      // huge) merged interior from the server only to immediately
+      // re-upload the same bytes for the second merge, doubling the
+      // transfer for no reason and, with no progress feedback during
+      // that leg, making generation look stuck.
+      const buildInteriorChunkBlobs = async (): Promise<Blob[]> => {
+        const chunks: typeof pages[] = [];
+        for (let i = 0; i < pages.length; i += INTERIOR_CHUNK_PAGE_COUNT) {
+          chunks.push(pages.slice(i, i + INTERIOR_CHUNK_PAGE_COUNT));
+        }
+        if (chunks.length === 0) chunks.push([]);
+        setPdfProgress({ done: 0, total: chunks.length });
+        const chunkBlobs: Blob[] = [];
+        for (const chunkPages of chunks) {
+          chunkBlobs.push(
+            await pdf(
+              buildPdfDocument({
+                ...pdfDocumentBaseParams,
+                imageBlobs,
+                pdfType: "interior",
+                pages: chunkPages,
+              }),
+            ).toBlob(),
+          );
+          setPdfProgress({ done: chunkBlobs.length, total: chunks.length });
+        }
+        return chunkBlobs;
+      };
+
       if (separatedCover && showCover) {
         // Generate two PDFs: one for cover, one for interior
         const coverBlob = await pdf(buildPdfDocument({ ...pdfDocumentBaseParams, imageBlobs, pdfType: 'cover' })).toBlob();
-        const interiorBlob = await pdf(buildPdfDocument({ ...pdfDocumentBaseParams, imageBlobs, pdfType: 'interior' })).toBlob();
-        
+        const interiorChunks = await buildInteriorChunkBlobs();
+        // No numeric count for this leg - it's one request to the
+        // backend, not a series of steps - but still clear the stale
+        // "N/N" so the button doesn't look stuck while it runs.
+        setPdfProgress(null);
+        const interiorBlob =
+          interiorChunks.length === 1
+            ? interiorChunks[0]
+            : await mergePdfBlobs(interiorChunks);
+
         // Download both files
         const albumSlug = album.albumName.replace(/[^a-z0-9]/gi, '-').toLowerCase();
         const coverUrl = URL.createObjectURL(coverBlob);
         const interiorUrl = URL.createObjectURL(interiorBlob);
-        
+
         // Create download links
         const coverLink = document.createElement('a');
         coverLink.href = coverUrl;
         coverLink.download = `${albumSlug}-cover.pdf`;
         coverLink.click();
-        
+
         setTimeout(() => {
           const interiorLink = document.createElement('a');
           interiorLink.href = interiorUrl;
           interiorLink.download = `${albumSlug}-interior.pdf`;
           interiorLink.click();
-          
+
           // Show the cover PDF in preview
           setPdfUrl(coverUrl);
         }, 500);
       } else {
-        // Generate single PDF with everything
-        const blob = await pdf(buildPdfDocument({ ...pdfDocumentBaseParams, imageBlobs, pdfType: 'full' })).toBlob();
+        // Generate a single PDF with everything: front cover and back
+        // cover each rendered standalone (cheap, one page), the
+        // interior in chunks, all concatenated into one file.
+        const parts: Blob[] = [];
+        if (showCover) {
+          parts.push(
+            await pdf(
+              buildPdfDocument({
+                ...pdfDocumentBaseParams,
+                imageBlobs,
+                pdfType: "front-cover-standalone",
+              }),
+            ).toBlob(),
+          );
+        }
+        parts.push(...(await buildInteriorChunkBlobs()));
+        if (showCover) {
+          parts.push(
+            await pdf(
+              buildPdfDocument({
+                ...pdfDocumentBaseParams,
+                imageBlobs,
+                pdfType: "back-cover-standalone",
+              }),
+            ).toBlob(),
+          );
+        }
+        // Clear the stale "N/N" chunk count before the (single) merge
+        // request, which has no per-step count of its own to show.
+        setPdfProgress(null);
+        const blob = parts.length === 1 ? parts[0] : await mergePdfBlobs(parts);
         setPdfUrl(URL.createObjectURL(blob));
       }
       

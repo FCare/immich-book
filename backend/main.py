@@ -1,10 +1,13 @@
+import io
 import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from typing import List
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
+from pypdf import PdfWriter
 
 DB_PATH = Path("/data/photobooks.db")
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -277,3 +280,50 @@ async def put_global_config(request: Request):
         )
         conn.commit()
     return {"status": "ok"}
+
+
+@app.post("/pdf/merge")
+def merge_pdf(files: List[UploadFile] = File(...)):
+    """
+    Concatenates already-rendered PDF parts (uploaded in order) into one
+    file. The frontend renders a large book's interior in page chunks
+    client-side (react-pdf's WASM layout engine crashes the tab on a
+    document with hundreds of pages built in one pass) and asks this
+    endpoint to do only the final concatenation - a large book's combined
+    size (multiple GB for a several-hundred-photo book at full quality)
+    can exceed what a browser tab can hold as one contiguous buffer, but
+    the server has far more memory headroom. No re-encoding happens here,
+    pages are copied as-is, so this costs nothing in image quality.
+
+    Declared as a plain (non-async) endpoint on purpose: pypdf is
+    synchronous/CPU-bound, and merging a large book can take a while.
+    FastAPI runs a `def` path operation in a worker thread automatically,
+    so this doesn't block the event loop - and everything else served
+    off it, health checks included - the way an `async def` endpoint
+    calling this same blocking code directly would.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    writer = PdfWriter()
+    try:
+        for part in files:
+            writer.append(io.BytesIO(part.file.read()))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid PDF part: {e}")
+
+    output = io.BytesIO()
+    writer.write(output)
+    writer.close()
+
+    # A plain Response with the full bytes, not StreamingResponse(output):
+    # Starlette iterates a raw file-like object's own __iter__, which for
+    # BytesIO means "split on \n" (its default line-iteration), not "read
+    # in binary chunks" - the wrong behavior for arbitrary PDF bytes. The
+    # merged file is already fully built in memory at this point either
+    # way, so there's nothing to gain from streaming it out incrementally.
+    return Response(
+        content=output.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="photobook.pdf"'},
+    )

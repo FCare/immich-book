@@ -7,6 +7,14 @@ export default defineConfig(({ mode }) => {
   return {
     base: env.VITE_BASE_PATH || "/",
     plugins: [react()],
+    // @react-pdf/renderer's dependencies (pdfkit/fontkit) assume a
+    // Node-like global `global` object - Vite/esbuild don't provide
+    // one, unlike Webpack's old auto-polyfills. `Buffer` itself is
+    // polyfilled explicitly in main.tsx instead of here, since that
+    // needs an actual runtime implementation, not just a name binding.
+    define: {
+      global: "globalThis",
+    },
     server: {
       proxy: {
         "/api": {
