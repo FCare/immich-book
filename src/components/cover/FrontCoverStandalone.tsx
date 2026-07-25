@@ -203,33 +203,43 @@ export function FrontCoverStandalone({
 
           return (
             <>
+              {/* Outer wrapper carries no overflow clipping, so the
+                  resize handle (deliberately positioned half outside the
+                  frame's own corner) stays visible/clickable - only the
+                  inner mat clips the photo. */}
               <div
-                className="absolute shadow-lg overflow-hidden"
+                className="absolute"
                 style={{
                   top: `${frameTopFrac * 100}%`,
                   left: `${frameLeftFrac * 100}%`,
                   width: `${frameWidthFrac * 100}%`,
                   height: `${frameHeightFrac * 100}%`,
-                  backgroundColor: SCRAPBOOK.mat,
-                  padding: `${matPaddingPt}px`,
                 }}
               >
-                <img
-                  src={imageUrl}
-                  alt=""
-                  data-reorder-asset-id="cover"
-                  className={`w-full h-full object-contain ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
-                  style={{ touchAction: "none" }}
-                  onPointerDown={(e) => {
-                    if (!selectedNewAsset) handleReorderPointerDown("cover", e);
+                <div
+                  className="absolute inset-0 shadow-lg overflow-hidden"
+                  style={{
+                    backgroundColor: SCRAPBOOK.mat,
+                    padding: `${matPaddingPt}px`,
                   }}
-                  onClick={(e) => {
-                    if (selectedNewAsset && coverAsset) {
-                      e.stopPropagation();
-                      performNewAssetPlacement(selectedNewAsset, { kind: "cover" });
-                    }
-                  }}
-                />
+                >
+                  <img
+                    src={imageUrl}
+                    alt=""
+                    data-reorder-asset-id="cover"
+                    className={`w-full h-full object-contain ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
+                    style={{ touchAction: "none" }}
+                    onPointerDown={(e) => {
+                      if (!selectedNewAsset) handleReorderPointerDown("cover", e);
+                    }}
+                    onClick={(e) => {
+                      if (selectedNewAsset && coverAsset) {
+                        e.stopPropagation();
+                        performNewAssetPlacement(selectedNewAsset, { kind: "cover" });
+                      }
+                    }}
+                  />
+                </div>
                 <div
                   onPointerDown={(e) => {
                     e.stopPropagation();

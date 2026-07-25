@@ -13,6 +13,7 @@ import {
   calculatePageLayout,
   mmToPixels,
   pixelsToMm,
+  naturalAspectRatio,
   type Page,
 } from "../utils/pageLayout";
 import type { ImmichConfig } from "../types";
@@ -3739,6 +3740,10 @@ function PhotoGridEditor({
               backCoverAsset={backCoverAsset}
               coverFocalPoint={coverFocalPoint}
               backCoverFocalPoint={backCoverFocalPoint}
+              coverFrameSize={resolvedCoverFrameSize}
+              backCoverFrameSize={resolvedBackCoverFrameSize}
+              onFrameResizePointerDown={handleFrameResizePointerDown}
+              pageBackground={pageBackground}
               immichConfig={immichConfig}
               selectedNewAsset={selectedNewAsset}
               swapFirstId={swapFirstId}
@@ -4174,6 +4179,29 @@ function PhotoGridEditor({
                     const bottomStripHeight =
                       dateStripHeight + captionStripHeight;
 
+                    // Scrapbook mode shows the whole photo (no cropping), so
+                    // the mat has to hug the photo's own aspect ratio rather
+                    // than stretch to the bento box's shape - otherwise a
+                    // photo whose ratio doesn't match its box (e.g. a
+                    // landscape photo in a portrait slot) reads as a mat with
+                    // a huge, unbalanced blank margin on two sides.
+                    const photoAspect = naturalAspectRatio(asset);
+                    const availFrameWidth = Math.max(1, containerWidth - 2 * frameInset);
+                    const availFrameHeight = Math.max(1, containerHeight - 2 * frameInset - bottomStripHeight);
+                    let huggedImageWidth: number;
+                    let huggedImageHeight: number;
+                    if (photoAspect > availFrameWidth / availFrameHeight) {
+                      huggedImageWidth = availFrameWidth;
+                      huggedImageHeight = availFrameWidth / photoAspect;
+                    } else {
+                      huggedImageHeight = availFrameHeight;
+                      huggedImageWidth = availFrameHeight * photoAspect;
+                    }
+                    const huggedFrameWidth = huggedImageWidth + 2 * frameInset;
+                    const huggedFrameHeight = huggedImageHeight + 2 * frameInset + bottomStripHeight;
+                    const huggedFrameLeft = (containerWidth - huggedFrameWidth) / 2;
+                    const huggedFrameTop = (containerHeight - huggedFrameHeight) / 2;
+
                     return (
                       <div
                         key={photoBox.id}
@@ -4361,8 +4389,12 @@ function PhotoGridEditor({
 
                           return (
                             <div
-                              className="absolute inset-0"
+                              className="absolute"
                               style={{
+                                top: huggedFrameTop,
+                                left: huggedFrameLeft,
+                                width: huggedFrameWidth,
+                                height: huggedFrameHeight,
                                 transform: `rotate(${tilt}deg) scale(0.93)`,
                                 boxShadow: `2px 5px 10px ${SCRAPBOOK.shadow}`,
                                 backgroundColor: SCRAPBOOK.mat,

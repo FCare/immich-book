@@ -131,7 +131,7 @@ function scramblePageNumber(n: number): number {
   return x >>> 0;
 }
 
-function naturalAspectRatio(asset: AssetResponseDto): number {
+export function naturalAspectRatio(asset: AssetResponseDto): number {
   // Every asset in this app comes from Immich's timeline bucket API
   // (getTimeBuckets/getTimeBucket - see loadAlbumAssets in PhotoGrid.tsx),
   // whose rows carry a `ratio` field (width/height, already corrected for
