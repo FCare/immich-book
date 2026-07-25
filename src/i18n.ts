@@ -195,6 +195,8 @@ export const translations = {
     
     // New photos
     newPhotosToPlace: "Nouvelles photos à placer",
+    setAsCover: "Définir comme couverture",
+    setAsBackCover: "Définir comme 4ème de couverture",
     addHere: "+ Ajouter ici",
     loadingPhotos: "Chargement des photos...",
     analyzingChanges: "Analyse des changements...",
@@ -393,6 +395,8 @@ export const translations = {
     
     // New photos
     newPhotosToPlace: "New photos to place",
+    setAsCover: "Set as cover",
+    setAsBackCover: "Set as back cover",
     addHere: "+ Add here",
     loadingPhotos: "Loading photos...",
     analyzingChanges: "Analyzing changes...",

@@ -1112,7 +1112,8 @@ function PhotoGridEditor({
 
   // Layout settings
   const [spacing, setSpacing] = useState(initialConfig.spacing);
-  const [filterVideos, setFilterVideos] = useState(initialConfig.filterVideos);
+  // Never filter videos - simpler UX
+  const filterVideos = false;
   const [forceTimeline, setForceTimeline] = useState(initialConfig.forceTimeline);
   // Bleed ("fond perdu") - an optional border around the trim size,
   // filled with the page background, so a print shop trimming the book
@@ -1288,7 +1289,8 @@ function PhotoGridEditor({
   const [newAssets, setNewAssets] = useState<AssetResponseDto[]>([]);
   const [selectedNewAsset, setSelectedNewAsset] = useState<AssetResponseDto | null>(null);
   const [loadedNewAssetIds, setLoadedNewAssetIds] = useState<Set<string>>(new Set());
-  const [showCover, setShowCover] = useState(initialConfig.showCover);
+  // Always show cover - simpler UX
+  const showCover = true;
   const [separatedCover, setSeparatedCover] = useState(initialConfig.separatedCover);
   const [spineWidth, setSpineWidth] = useState(initialConfig.spineWidth);
   const [spineColor, setSpineColor] = useState(initialConfig.spineColor);
@@ -1319,8 +1321,8 @@ function PhotoGridEditor({
   const [backCoverPlainText, setBackCoverPlainText] = useState(
     initialConfig.backCoverPlainText,
   );
-  const [excludeCoverPhotosFromPages, setExcludeCoverPhotosFromPages] =
-    useState(initialConfig.excludeCoverPhotosFromPages);
+  // Always exclude cover photos from pages - simpler UX
+  const excludeCoverPhotosFromPages = true;
   // Which settings tab is showing - purely local UI state, not worth
   // persisting per album.
   const [settingsTab, setSettingsTab] = useState<
@@ -1348,6 +1350,11 @@ function PhotoGridEditor({
   const [dropTargetAssetId, setDropTargetAssetId] = useState<string | null>(
     null,
   );
+  // Selected photo for swapping (can be cover, back-cover, or regular photo)
+  const [selectedPhotoForSwap, setSelectedPhotoForSwap] = useState<{
+    type: 'cover' | 'back-cover' | 'photo';
+    assetId: string;
+  } | null>(null);
 
   // Armed card for click-to-swap - an alternative to dragging for two
   // cards that are far apart (different pages, off the visible area). A
@@ -1647,7 +1654,7 @@ function PhotoGridEditor({
       margin,
       combinePages,
       spacing,
-      filterVideos,
+      filterVideos: false, // Never filter videos - simpler UX
       forceTimeline,
       bleedEnabled,
       bleed,
@@ -1665,7 +1672,7 @@ function PhotoGridEditor({
       textCardContents: Object.fromEntries(textCardContents),
       slotOverrides: Object.fromEntries(slotOverrides),
       manuallyMovedIds: Array.from(manuallyMovedIds),
-      showCover,
+      showCover: true, // Always true - simpler UX
       separatedCover,
       spineWidth,
       spineColor,
@@ -1680,7 +1687,7 @@ function PhotoGridEditor({
       backCoverNoPhoto,
       backCoverText,
       backCoverPlainText,
-      excludeCoverPhotosFromPages,
+      excludeCoverPhotosFromPages: true, // Always true - simpler UX
     };
     // Save config (without assets snapshot - that's saved separately after resolving placeholders)
     saveAlbumConfig(album.id, config);
@@ -5236,11 +5243,6 @@ function PhotoGridEditor({
             <div className="flex flex-col gap-5">
               <div>
                 <ToggleSwitch
-                  checked={filterVideos}
-                  onChange={setFilterVideos}
-                  label={t(language, "filterVideos")}
-                />
-                <ToggleSwitch
                   checked={forceTimeline}
                   onChange={setForceTimeline}
                   label={t(language, "forceTimeline")}
@@ -5400,14 +5402,6 @@ function PhotoGridEditor({
 
           {settingsTab === "cover" && (
             <div className="flex flex-col gap-5">
-              <ToggleSwitch
-                checked={showCover}
-                onChange={setShowCover}
-                label={t(language, "includeCoverPage")}
-                sublabel={t(language, "includeCoverPageHint")}
-              />
-              {showCover && (
-                <>
                   <ToggleSwitch
                     checked={separatedCover}
                     onChange={setSeparatedCover}
@@ -5501,12 +5495,6 @@ function PhotoGridEditor({
                       </div>
                     </>
                   )}
-                  <ToggleSwitch
-                    checked={excludeCoverPhotosFromPages}
-                    onChange={setExcludeCoverPhotosFromPages}
-                    label={t(language, "leaveCoverPhotosOut")}
-                    sublabel={t(language, "leaveCoverPhotosOutHint")}
-                  />
                   <div>
                     <label
                       htmlFor="coverTitle"
@@ -5643,8 +5631,6 @@ function PhotoGridEditor({
                   <p className="text-xs text-gray-400 dark:text-gray-500">
                     {t(language, "coverHint")}
                   </p>
-                </>
-              )}
             </div>
           )}
         </div>
@@ -5815,10 +5801,25 @@ function PhotoGridEditor({
                   >
                     {/* Back Cover (left) */}
                     <div
-                      className="relative bg-gray-100 dark:bg-gray-800 border-r border-gray-300 dark:border-gray-700"
+                      className={`relative bg-gray-100 dark:bg-gray-800 border-r border-gray-300 dark:border-gray-700 ${selectedNewAsset && backCoverAsset ? "cursor-pointer" : ""} ${selectedNewAsset && backCoverAsset ? "hover:ring-2 hover:ring-green-400" : ""}`}
                       style={{
                         width: `${displayWidth * scale}px`,
                         height: `${displayHeight * scale}px`,
+                      }}
+                      onClick={() => {
+                        if (selectedNewAsset && backCoverAsset) {
+                          const oldBackCover = backCoverAsset;
+                          setBackCoverAssetId(selectedNewAsset.id);
+                          setBackCoverNoPhoto(false);
+                          setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), oldBackCover]);
+                          setHistory(prev => [{
+                            type: "set-back-cover",
+                            prevAssetId: backCoverAsset.id,
+                            newAssetId: selectedNewAsset.id,
+                            timestamp: Date.now(),
+                          }, ...prev]);
+                          setSelectedNewAsset(null);
+                        }
                       }}
                     >
                       {backCoverLayout === "text-only" && (
@@ -5990,10 +5991,24 @@ function PhotoGridEditor({
 
                     {/* Front Cover (right) */}
                     <div
-                      className="relative bg-gray-100 dark:bg-gray-800 border-l border-gray-300 dark:border-gray-700"
+                      className={`relative bg-gray-100 dark:bg-gray-800 border-l border-gray-300 dark:border-gray-700 ${selectedNewAsset && coverAsset ? "cursor-pointer" : ""} ${selectedNewAsset && coverAsset ? "hover:ring-2 hover:ring-green-400" : ""}`}
                       style={{
                         width: `${displayWidth * scale}px`,
                         height: `${displayHeight * scale}px`,
+                      }}
+                      onClick={() => {
+                        if (selectedNewAsset && coverAsset) {
+                          const oldCover = coverAsset;
+                          setCoverAssetId(selectedNewAsset.id);
+                          setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), oldCover]);
+                          setHistory(prev => [{
+                            type: "set-cover",
+                            prevAssetId: coverAsset.id,
+                            newAssetId: selectedNewAsset.id,
+                            timestamp: Date.now(),
+                          }, ...prev]);
+                          setSelectedNewAsset(null);
+                        }
                       }}
                     >
                       {coverLayout === "text-only" && (
@@ -6281,7 +6296,23 @@ function PhotoGridEditor({
                           <img
                             src={imageUrl}
                             alt=""
-                            className="w-full h-full object-contain"
+                            className={`w-full h-full object-contain ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+                            onClick={(e) => {
+                              if (selectedNewAsset && coverAsset) {
+                                e.stopPropagation();
+                                console.log(`SWAP COVER: ${coverAsset.id} with ${selectedNewAsset.id}`);
+                                const oldCover = coverAsset;
+                                setCoverAssetId(selectedNewAsset.id);
+                                setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), oldCover]);
+                                setHistory(prev => [{
+                                  type: "set-cover",
+                                  prevAssetId: coverAsset.id,
+                                  newAssetId: selectedNewAsset.id,
+                                  timestamp: Date.now(),
+                                }, ...prev]);
+                                setSelectedNewAsset(null);
+                              }
+                            }}
                           />
                         </div>
                         <div
@@ -6302,7 +6333,23 @@ function PhotoGridEditor({
                         <img
                           src={imageUrl}
                           alt=""
-                          className="absolute inset-0 w-full h-full object-cover"
+                          className={`absolute inset-0 w-full h-full object-cover ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+                          onClick={(e) => {
+                            if (selectedNewAsset && coverAsset) {
+                              e.stopPropagation();
+                              console.log(`SWAP COVER (full-bleed): ${coverAsset.id} with ${selectedNewAsset.id}`);
+                              const oldCover = coverAsset;
+                              setCoverAssetId(selectedNewAsset.id);
+                              setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), oldCover]);
+                              setHistory(prev => [{
+                                type: "set-cover",
+                                prevAssetId: coverAsset.id,
+                                newAssetId: selectedNewAsset.id,
+                                timestamp: Date.now(),
+                              }, ...prev]);
+                              setSelectedNewAsset(null);
+                            }
+                          }}
                         />
                         <div
                           className="absolute inset-x-0 bottom-0 flex items-center justify-center"
@@ -6393,15 +6440,15 @@ function PhotoGridEditor({
                     in layout, unlike `transform`, whose CSS transform on an
                     ancestor breaks native HTML5 drag-and-drop for photo
                     reordering in Chromium. */}
-                <div
-                  className="mx-auto relative shadow-lg dark:shadow-black/40 border border-gray-200 dark:border-gray-800"
-                  style={{
-                    width: `${displayWidth + bleedPreviewPt * 2}px`,
-                    height: `${displayHeight + bleedPreviewPt * 2}px`,
-                    zoom: scale,
-                    ...pageBackgroundCss(pageBackground),
-                  }}
-                >
+                  <div
+                    className={`mx-auto relative shadow-lg dark:shadow-black/40 border border-gray-200 dark:border-gray-800 ${selectedNewAsset && coverAsset ? "ring-4 ring-green-400 ring-offset-2" : ""}`}
+                    style={{
+                      width: `${displayWidth + bleedPreviewPt * 2}px`,
+                      height: `${displayHeight + bleedPreviewPt * 2}px`,
+                      zoom: scale,
+                      ...pageBackgroundCss(pageBackground),
+                    }}
+                  >
                   {/* Trim line - only meaningful when bleed is on; marks
                       where the printer will cut. */}
                   {bleedPreviewPt > 0 && (
@@ -6416,15 +6463,15 @@ function PhotoGridEditor({
                     />
                   )}
 
-                  <div
-                    className="absolute"
-                    style={{
-                      top: bleedPreviewPt,
-                      left: bleedPreviewPt,
-                      width: displayWidth,
-                      height: displayHeight,
-                    }}
-                  >
+                    <div
+                      className="absolute"
+                      style={{
+                        top: bleedPreviewPt,
+                        left: bleedPreviewPt,
+                        width: displayWidth,
+                        height: displayHeight,
+                      }}
+                    >
                   {/* Page break indicator for combined pages */}
                   {combinePages && (
                     <div
@@ -7012,76 +7059,6 @@ function PhotoGridEditor({
                           );
                         })()}
 
-                        {/* Cover picker */}
-                        {coverAsset?.id === asset.id ? (
-                          <div
-                            className="absolute top-2 right-2 bg-amber-500 text-white px-2 py-0.5 rounded shadow text-xs font-medium z-10"
-                            title={language === "fr" ? "Ceci est la photo de couverture" : "This is the cover photo"}
-                          >
-                            ★ {t(language, "cover")}
-                          </div>
-                        ) : (
-                          <div
-                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-amber-500 hover:bg-amber-600 text-white px-2 py-0.5 rounded shadow text-xs font-medium z-10"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              const prevAssetId = coverAssetId;
-                              setCoverAssetId(asset.id);
-                              setHistory((prev) => [
-                                {
-                                  type: "set-cover",
-                                  prevAssetId,
-                                  newAssetId: asset.id,
-                                  timestamp: Date.now(),
-                                },
-                                ...prev,
-                              ]);
-                            }}
-                            title="Set as cover photo"
-                          >
-                            Set as cover
-                          </div>
-                        )}
-
-                        {/* Back cover picker */}
-                        {backCoverAsset?.id === asset.id ? (
-                          <div
-                            className="absolute top-9 right-2 cursor-pointer bg-indigo-500 hover:bg-red-600 text-white px-2 py-0.5 rounded shadow text-xs font-medium z-10 transition-colors"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setBackCoverNoPhoto(true);
-                            }}
-                            title="Remove as back cover photo"
-                          >
-                            ★ Back cover ✕
-                          </div>
-                        ) : (
-                          <div
-                            className="absolute top-9 right-2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-indigo-500 hover:bg-indigo-600 text-white px-2 py-0.5 rounded shadow text-xs font-medium z-10"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              const prevAssetId = backCoverAssetId;
-                              setBackCoverAssetId(asset.id);
-                              setBackCoverNoPhoto(false);
-                              setHistory((prev) => [
-                                {
-                                  type: "set-back-cover",
-                                  prevAssetId,
-                                  newAssetId: asset.id,
-                                  timestamp: Date.now(),
-                                },
-                                ...prev,
-                              ]);
-                            }}
-                            title="Set as back cover photo"
-                          >
-                            Set as back cover
-                          </div>
-                        )}
-
                         {/* Delete placeholder button - only for missing photos */}
                         {isMissingPhoto && (
                           <button
@@ -7255,7 +7232,7 @@ function PhotoGridEditor({
                     </span>
                   </div>
                   <div
-                    className="mx-auto relative shadow-lg dark:shadow-black/40 border border-gray-200 dark:border-gray-800"
+                    className={`mx-auto relative shadow-lg dark:shadow-black/40 border border-gray-200 dark:border-gray-800 ${selectedNewAsset && backCoverAsset ? "ring-4 ring-green-400 ring-offset-2" : ""}`}
                     style={{
                       width: `${displayWidth + bleedPreviewPt * 2}px`,
                       height: `${displayHeight + bleedPreviewPt * 2}px`,
@@ -7272,20 +7249,37 @@ function PhotoGridEditor({
                           width: displayWidth,
                           height: displayHeight,
                         }}
-                      />
-                    )}
-                    <div
-                      className="absolute"
-                      style={{
-                        top: bleedPreviewPt,
-                        left: bleedPreviewPt,
-                        width: displayWidth,
-                        height: displayHeight,
-                      }}
-                    >
-                    {backCoverLayout === "text-only" && (
-                      <div
-                        className="absolute inset-0 flex flex-col items-center justify-center gap-4"
+                       />
+                     )}
+                     <div
+                       className={`absolute ${selectedNewAsset && backCoverAsset ? "cursor-pointer" : ""} ${selectedNewAsset && backCoverAsset ? "hover:ring-2 hover:ring-green-400" : ""}`}
+                       style={{
+                         top: bleedPreviewPt,
+                         left: bleedPreviewPt,
+                         width: displayWidth,
+                         height: displayHeight,
+                       }}
+                       onClick={() => {
+                         if (selectedNewAsset && backCoverAsset) {
+                           // SWAP: new photo becomes back cover, old back cover goes to newAssets
+                           console.log(`SWAP BACK COVER: ${backCoverAsset.id} with ${selectedNewAsset.id}`);
+                           const oldBackCover = backCoverAsset;
+                           setBackCoverAssetId(selectedNewAsset.id);
+                           setBackCoverNoPhoto(false);
+                           setNewAssets(prev => [...prev.filter(a => a.id !== selectedNewAsset.id), oldBackCover]);
+                           setHistory(prev => [{
+                             type: "set-back-cover",
+                             prevAssetId: backCoverAsset.id,
+                             newAssetId: selectedNewAsset.id,
+                             timestamp: Date.now(),
+                           }, ...prev]);
+                           setSelectedNewAsset(null);
+                         }
+                       }}
+                     >
+                     {backCoverLayout === "text-only" && (
+                       <div
+                         className="absolute inset-0 flex flex-col items-center justify-center gap-4"
                         style={{ paddingLeft: "10%", paddingRight: "10%" }}
                       >
                         <div
