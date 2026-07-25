@@ -2,9 +2,16 @@ import type { Dispatch, SetStateAction } from "react";
 import type { AlbumResponseDto, AssetResponseDto } from "@immich/sdk";
 import type { ImmichConfig } from "../../types";
 import { t, type Language } from "../../i18n";
-import type { CoverLayout, FocalPoint, PageBackground } from "../../config/albumConfig";
+import type { CoverLayout, FocalPoint, FrameSize, PageBackground } from "../../config/albumConfig";
 import type { HistoryOperation } from "../../history/editHistory";
 import { focalPointToCss, pageBackgroundCss, SCRAPBOOK, toPoints, type NewAssetTarget } from "../PhotoGrid";
+
+// Default "photo-title" mat size, as a fraction of the full page - the
+// mat's own available vertical band is 8%..76% of the page (the title
+// band below it, at 76%..100%, never moves), so 0.68 fills that whole
+// band by default, same as before this was made resizable.
+const DEFAULT_COVER_FRAME_WIDTH = 0.84;
+const DEFAULT_COVER_FRAME_HEIGHT = 0.68;
 
 export interface FrontCoverStandaloneProps {
   validPageWidth: number;
@@ -14,6 +21,16 @@ export interface FrontCoverStandaloneProps {
   previewWidth: number;
   coverAsset: AssetResponseDto | null;
   coverFocalPoint: FocalPoint | null;
+  coverFrameSize: FrameSize | null;
+  onFrameResizePointerDown: (
+    target: "cover" | "back-cover",
+    e: React.PointerEvent,
+    currentWidth: number,
+    currentHeight: number,
+    availWidth: number,
+    availHeight: number,
+    scale: number,
+  ) => void;
   immichConfig: ImmichConfig;
   swapFirstId: string | null;
   coverTitle: string;
@@ -39,6 +56,8 @@ export function FrontCoverStandalone({
   previewWidth,
   coverAsset,
   coverFocalPoint,
+  coverFrameSize,
+  onFrameResizePointerDown,
   immichConfig,
   swapFirstId,
   coverTitle,
@@ -164,48 +183,88 @@ export function FrontCoverStandalone({
           </div>
         )}
 
-        {coverLayout === "photo-title" && imageUrl && (
-          <>
-            <div
-              className="absolute shadow-lg overflow-hidden"
-              style={{
-                top: "8%",
-                left: "8%",
-                right: "8%",
-                bottom: "24%",
-                backgroundColor: SCRAPBOOK.mat,
-                padding: "3%",
-              }}
-            >
-              <img
-                src={imageUrl}
-                alt=""
-                data-reorder-asset-id="cover"
-                className={`w-full h-full object-contain ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
-                style={{ touchAction: "none" }}
-                onPointerDown={(e) => {
-                  if (!selectedNewAsset) handleReorderPointerDown("cover", e);
+        {coverLayout === "photo-title" && imageUrl && (() => {
+          const frameWidthFrac = coverFrameSize?.width ?? DEFAULT_COVER_FRAME_WIDTH;
+          const frameHeightFrac = coverFrameSize?.height ?? DEFAULT_COVER_FRAME_HEIGHT;
+          const availTopFrac = 0.08;
+          const availHeightFrac = 0.68; // band between the 8% top margin and the 24%-tall title band
+          const frameLeftFrac = (1 - frameWidthFrac) / 2;
+          const frameTopFrac = availTopFrac + (availHeightFrac - frameHeightFrac) / 2;
+          const frameWidthPt = frameWidthFrac * displayWidth;
+          const frameHeightPt = frameHeightFrac * displayHeight;
+          // An even-looking mat border regardless of the frame's own
+          // aspect ratio - CSS percentage padding is always relative to
+          // the container's *width*, even for top/bottom, which reads as
+          // an uneven border on a non-square frame (worse for a tall
+          // portrait photo, which is what actually surfaced this) - a
+          // single pixel value derived from the frame's own smaller
+          // dimension keeps all four sides visually equal instead.
+          const matPaddingPt = Math.min(frameWidthPt, frameHeightPt) * 0.03;
+
+          return (
+            <>
+              <div
+                className="absolute shadow-lg overflow-hidden"
+                style={{
+                  top: `${frameTopFrac * 100}%`,
+                  left: `${frameLeftFrac * 100}%`,
+                  width: `${frameWidthFrac * 100}%`,
+                  height: `${frameHeightFrac * 100}%`,
+                  backgroundColor: SCRAPBOOK.mat,
+                  padding: `${matPaddingPt}px`,
                 }}
-                onClick={(e) => {
-                  if (selectedNewAsset && coverAsset) {
+              >
+                <img
+                  src={imageUrl}
+                  alt=""
+                  data-reorder-asset-id="cover"
+                  className={`w-full h-full object-contain ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
+                  style={{ touchAction: "none" }}
+                  onPointerDown={(e) => {
+                    if (!selectedNewAsset) handleReorderPointerDown("cover", e);
+                  }}
+                  onClick={(e) => {
+                    if (selectedNewAsset && coverAsset) {
+                      e.stopPropagation();
+                      performNewAssetPlacement(selectedNewAsset, { kind: "cover" });
+                    }
+                  }}
+                />
+                <div
+                  onPointerDown={(e) => {
                     e.stopPropagation();
-                    performNewAssetPlacement(selectedNewAsset, { kind: "cover" });
-                  }
-                }}
-              />
-            </div>
-            <div
-              className="absolute inset-x-0 bottom-0 flex items-center justify-center"
-              style={{ height: "20%" }}
-            >
-              {titleInput(
-                displayWidth * 0.055,
-                SCRAPBOOK.ink,
-                "focus:bg-white/60",
-              )}
-            </div>
-          </>
-        )}
+                    onFrameResizePointerDown(
+                      "cover",
+                      e,
+                      frameWidthFrac,
+                      frameHeightFrac,
+                      validPageWidth,
+                      validPageHeight,
+                      scale,
+                    );
+                  }}
+                  title={t(language, "resizeCoverFrameHint")}
+                  className="absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-indigo-500 text-white shadow-md flex items-center justify-center cursor-nwse-resize"
+                  style={{ touchAction: "none" }}
+                >
+                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <path d="M6 18L18 6M10 18h8v-8" />
+                  </svg>
+                </div>
+              </div>
+              <div
+                className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                style={{ height: "20%" }}
+              >
+                {titleInput(
+                  displayWidth * 0.055,
+                  SCRAPBOOK.ink,
+                  "focus:bg-white/60",
+                )}
+              </div>
+            </>
+          );
+        })()}
 
         {coverLayout === "full-bleed" && imageUrl && (
           <>

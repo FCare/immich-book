@@ -36,6 +36,15 @@ export interface FocalPoint {
   y: number;
 }
 
+// Manual size for a "photo-title" cover's white mat/card frame, as a
+// fraction (0-1) of the space that frame has available to it - see
+// FrontCoverStandalone.tsx/BackCoverStandalone.tsx. null means "use the
+// built-in default size".
+export interface FrameSize {
+  width: number;
+  height: number;
+}
+
 export interface GlobalConfig {
   // Page settings
   // Which printer's constraints (available sizes, bleed, one-page-per-
@@ -126,6 +135,9 @@ export interface AlbumConfig extends GlobalConfig {
   // in the book's current order.
   coverAssetId: string | null;
   coverLayout: CoverLayout;
+  // Manual size for the front cover's "photo-title" mat frame - see
+  // FrontCoverStandalone.tsx. null uses the built-in default size.
+  coverFrameSize: FrameSize | null;
   // Which photo to use on the back cover - independent of the front
   // cover photo. Null falls back to the last photo in the book's
   // current order (unless backCoverNoPhoto is set).
@@ -133,6 +145,9 @@ export interface AlbumConfig extends GlobalConfig {
   // Same layout choices as the front cover. Defaults to "photo-title" to
   // match the back cover's original (pre-layout-picker) fixed look.
   backCoverLayout: CoverLayout;
+  // Manual size for the back cover's "photo-title" card - see
+  // BackCoverStandalone.tsx. null uses the built-in default size.
+  backCoverFrameSize: FrameSize | null;
   // Explicit "no photo" - overrides the fallback-to-last-photo default
   // so a text-only (or empty) back cover is reachable, not just
   // "haven't picked one yet".
@@ -221,8 +236,10 @@ export async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     coverTitle: "",
     coverAssetId: null,
     coverLayout: "photo-title",
+    coverFrameSize: null,
     backCoverAssetId: null,
     backCoverLayout: "photo-title",
+    backCoverFrameSize: null,
     backCoverNoPhoto: false,
     backCoverText: "",
     backCoverPlainText: false,

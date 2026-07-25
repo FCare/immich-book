@@ -22,6 +22,7 @@ import {
   type CardStyle,
   type CoverLayout,
   type FocalPoint,
+  type FrameSize,
   type AlbumConfig,
   loadAlbumConfig,
   detectAlbumChanges,
@@ -839,6 +840,27 @@ function PhotoGridEditor({
   const [boundariesSentToBack, setBoundariesSentToBack] = useState<
     Set<string>
   >(new Set());
+  // Dragging a "photo-title" cover's white mat/card resize handle - same
+  // shape as boundaryDragState/liveBoundaryFraction above (a real drag,
+  // captured start state, rAF-throttled live preview, committed once on
+  // release), but for the frame's width/height fraction instead of a
+  // bento split's position.
+  const [frameResizeState, setFrameResizeState] = useState<{
+    target: "cover" | "back-cover";
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+    availWidth: number;
+    availHeight: number;
+    scale: number;
+    prevSize: FrameSize | null;
+  } | null>(null);
+  const [liveFrameSize, setLiveFrameSize] = useState<{
+    target: "cover" | "back-cover";
+    width: number;
+    height: number;
+  } | null>(null);
   const [textCardCounts, setTextCardCounts] = useState<Map<number, number>>(
     () =>
       new Map(
@@ -892,11 +914,17 @@ function PhotoGridEditor({
   const [coverLayout, setCoverLayout] = useState<CoverLayout>(
     initialConfig.coverLayout,
   );
+  const [coverFrameSize, setCoverFrameSize] = useState<FrameSize | null>(
+    initialConfig.coverFrameSize,
+  );
   const [backCoverAssetId, setBackCoverAssetId] = useState<string | null>(
     initialConfig.backCoverAssetId,
   );
   const [backCoverLayout, setBackCoverLayout] = useState<CoverLayout>(
     initialConfig.backCoverLayout,
+  );
+  const [backCoverFrameSize, setBackCoverFrameSize] = useState<FrameSize | null>(
+    initialConfig.backCoverFrameSize,
   );
   const [backCoverNoPhoto, setBackCoverNoPhoto] = useState(
     initialConfig.backCoverNoPhoto,
@@ -1171,8 +1199,10 @@ function PhotoGridEditor({
       coverTitle,
       coverAssetId,
       coverLayout,
+      coverFrameSize,
       backCoverAssetId,
       backCoverLayout,
+      backCoverFrameSize,
       backCoverNoPhoto,
       backCoverText,
       backCoverPlainText,
@@ -1215,8 +1245,10 @@ function PhotoGridEditor({
     coverTitle,
     coverAssetId,
     coverLayout,
+    coverFrameSize,
     backCoverAssetId,
     backCoverLayout,
+    backCoverFrameSize,
     backCoverNoPhoto,
     backCoverText,
     backCoverPlainText,
@@ -1541,7 +1573,9 @@ function PhotoGridEditor({
       setBoundaryOverrides,
       setAxisOverrides,
       setCoverAssetId,
+      setCoverFrameSize,
       setBackCoverAssetId,
+      setBackCoverFrameSize,
       setCoverTitle,
       setBackCoverText,
       setAssets,
@@ -1696,6 +1730,16 @@ function PhotoGridEditor({
   const backCoverFocalPoint = backCoverAsset
     ? focalPoints.get(backCoverAsset.id) ?? null
     : null;
+
+  // Resolved "photo-title" mat/card size for each cover - the live drag
+  // in progress (if any) wins over the persisted override, which wins
+  // over the component's own built-in default (passing undefined lets
+  // FrontCoverStandalone/BackCoverStandalone fall back to their own
+  // default fraction).
+  const resolvedCoverFrameSize =
+    liveFrameSize?.target === "cover" ? liveFrameSize : coverFrameSize;
+  const resolvedBackCoverFrameSize =
+    liveFrameSize?.target === "back-cover" ? liveFrameSize : backCoverFrameSize;
 
   // Prefetch focal points for every currently-placed photo (interior +
   // covers) as soon as the book's photo set changes, regardless of the
@@ -2370,6 +2414,110 @@ function PhotoGridEditor({
     };
   }, [boundaryDragState]);
 
+  // Starts a "photo-title" cover frame resize - currentWidth/Height are
+  // the frame's own already-resolved fraction (its built-in default if
+  // never overridden), passed in by the cover component itself rather
+  // than duplicated here, since each cover has its own different default
+  // size. availWidth/availHeight are that cover's raw (pre-toPoints)
+  // pixel dimensions, used below to convert a pixel drag into a fraction
+  // delta.
+  const handleFrameResizePointerDown = (
+    target: "cover" | "back-cover",
+    event: React.PointerEvent,
+    currentWidth: number,
+    currentHeight: number,
+    availWidth: number,
+    availHeight: number,
+    scale: number,
+  ) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setFrameResizeState({
+      target,
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: currentWidth,
+      startHeight: currentHeight,
+      availWidth,
+      availHeight,
+      scale,
+      prevSize: target === "cover" ? coverFrameSize : backCoverFrameSize,
+    });
+  };
+
+  // Dragging a cover frame's resize handle - same rAF-throttled live-
+  // preview pattern as the split-boundary drag above. The handle sits at
+  // the frame's bottom-right corner but the frame stays centered in its
+  // available space as it resizes, so a pixel delta maps to *twice* that
+  // in fraction terms (growing the right edge by X also grows the left
+  // edge by X to stay centered).
+  useEffect(() => {
+    if (!frameResizeState) return;
+    const {
+      target,
+      startX,
+      startY,
+      startWidth,
+      startHeight,
+      availWidth,
+      availHeight,
+      scale,
+    } = frameResizeState;
+
+    const MIN_FRAME_FRACTION = 0.3;
+    const clampFrac = (v: number) => Math.min(1, Math.max(MIN_FRAME_FRACTION, v));
+
+    let finalWidth = startWidth;
+    let finalHeight = startHeight;
+    let rafId: number | null = null;
+    let pendingEvent: PointerEvent | null = null;
+
+    const applyPendingMove = () => {
+      rafId = null;
+      if (!pendingEvent) return;
+      const dxScreen = pendingEvent.clientX - startX;
+      const dyScreen = pendingEvent.clientY - startY;
+      const dxPt = ((dxScreen / scale) * 2) / toPoints(availWidth || 1);
+      const dyPt = ((dyScreen / scale) * 2) / toPoints(availHeight || 1);
+      finalWidth = clampFrac(startWidth + dxPt);
+      finalHeight = clampFrac(startHeight + dyPt);
+      setLiveFrameSize({ target, width: finalWidth, height: finalHeight });
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      pendingEvent = event;
+      if (rafId === null) rafId = requestAnimationFrame(applyPendingMove);
+    };
+
+    const handlePointerUp = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      const newSize = { width: finalWidth, height: finalHeight };
+      if (target === "cover") setCoverFrameSize(newSize);
+      else setBackCoverFrameSize(newSize);
+      setHistory((prev) => [
+        {
+          type: "resize-cover-frame",
+          target,
+          prevSize: frameResizeState.prevSize,
+          newSize,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
+      setLiveFrameSize(null);
+      setFrameResizeState(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [frameResizeState]);
+
   // Group page photos by logical page number - matches the numbering
   // already used for pageCaptions/the "Page X of Y" UI: in combined mode
   // each physical (spread) page holds two logical pages side by side,
@@ -2630,8 +2778,10 @@ function PhotoGridEditor({
                     coverTitle,
                     coverAssetId,
                     coverLayout,
+                    coverFrameSize,
                     backCoverAssetId,
                     backCoverLayout,
+                    backCoverFrameSize,
                     backCoverNoPhoto,
                     backCoverText,
                     backCoverPlainText,
@@ -2788,10 +2938,12 @@ function PhotoGridEditor({
         spineWidth,
         separatedCover,
         backCoverLayout,
+        backCoverFrameSize,
         backCoverText,
         backCoverPlainText,
         fontSize,
         coverLayout,
+        coverFrameSize,
         coverTitle,
         pageLayout,
         showCover,
@@ -3618,6 +3770,8 @@ function PhotoGridEditor({
               previewWidth={previewWidth}
               coverAsset={coverAsset}
               coverFocalPoint={coverFocalPoint}
+              coverFrameSize={resolvedCoverFrameSize}
+              onFrameResizePointerDown={handleFrameResizePointerDown}
               immichConfig={immichConfig}
               swapFirstId={swapFirstId}
               coverTitle={coverTitle}
@@ -4510,6 +4664,8 @@ function PhotoGridEditor({
               selectedNewAsset={selectedNewAsset}
               backCoverAsset={backCoverAsset}
               backCoverFocalPoint={backCoverFocalPoint}
+              backCoverFrameSize={resolvedBackCoverFrameSize}
+              onFrameResizePointerDown={handleFrameResizePointerDown}
               pageBackground={pageBackground}
               handleReorderPointerDown={handleReorderPointerDown}
               performNewAssetPlacement={performNewAssetPlacement}

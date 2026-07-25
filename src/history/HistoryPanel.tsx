@@ -357,6 +357,9 @@ export function HistoryPanel({
                     case "flip-split-axis":
                       description = t(language, "historyFlipSplitAxis");
                       break;
+                    case "resize-cover-frame":
+                      description = t(language, "historyResizeCoverFrame");
+                      break;
                   }
 
                   return (

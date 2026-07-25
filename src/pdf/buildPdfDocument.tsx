@@ -1,7 +1,7 @@
 import type { AlbumResponseDto, AssetResponseDto } from "@immich/sdk";
 import { Document, Page, Image, View, Text, StyleSheet } from "@react-pdf/renderer";
 import { mmToPixels, type Page as LayoutPage } from "../utils/pageLayout";
-import type { PageBackground, CardStyle, CoverLayout, FocalPoint } from "../config/albumConfig";
+import type { PageBackground, CardStyle, CoverLayout, FocalPoint, FrameSize } from "../config/albumConfig";
 import {
   SCRAPBOOK,
   PAGE_BACKGROUNDS,
@@ -286,6 +286,11 @@ export interface BuildPdfDocumentParams {
   // Smart-crop focal point per asset id (see computeFocalPointFromAsset
   // in PhotoGrid.tsx) - null means checked, no face found.
   focalPoints: Map<string, FocalPoint | null>;
+  // Manual "photo-title" cover mat/card size - see
+  // FrontCoverStandalone.tsx/BackCoverStandalone.tsx. null uses each
+  // one's own built-in default size.
+  coverFrameSize: FrameSize | null;
+  backCoverFrameSize: FrameSize | null;
 }
 
 // Builds the actual PDF document element from photo Blobs fetched ahead
@@ -330,6 +335,8 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
     showDates,
     cardCaptions,
     focalPoints,
+    coverFrameSize,
+    backCoverFrameSize,
   } = params;
 
   const coverPageWidth = toPoints(validPageWidth);
@@ -450,8 +457,8 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               );
             }
 
-            const cardWidth = coverPageWidth * 0.42;
-            const cardHeight = coverPageHeight * 0.3;
+            const cardWidth = coverPageWidth * (backCoverFrameSize?.width ?? 0.42);
+            const cardHeight = coverPageHeight * (backCoverFrameSize?.height ?? 0.3);
             const cardTop = (coverPageHeight - cardHeight) / 2;
             const cardLeft = (coverPageWidth - cardWidth) / 2;
             const frameInset = Math.max(4, cardWidth * 0.045);
@@ -661,53 +668,68 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
         </View>
       )}
 
-      {coverLayout === "photo-title" && coverImageBlob && (
-        <>
-          <View
-            style={{
-              position: "absolute",
-              top: coverPageHeight * 0.08,
-              left: coverPageWidth * 0.08,
-              width: coverPageWidth * 0.84,
-              height: coverPageHeight * 0.68,
-              backgroundColor: SCRAPBOOK.mat,
-            }}
-          >
-            <PdfPhotoImage
-              src={coverImageBlob}
-              top={coverPageWidth * 0.02}
-              left={coverPageWidth * 0.02}
-              containerWidth={coverPageWidth * 0.8}
-              containerHeight={coverPageHeight * 0.64}
-              focalPoint={coverFocalPoint}
-            />
-          </View>
-          <View
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: coverPageHeight * 0.2,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Text
+      {coverLayout === "photo-title" && coverImageBlob && (() => {
+        const frameWidthFrac = coverFrameSize?.width ?? 0.84;
+        const frameHeightFrac = coverFrameSize?.height ?? 0.68;
+        const availTopFrac = 0.08;
+        const availHeightFrac = 0.68;
+        const frameLeft = coverPageWidth * ((1 - frameWidthFrac) / 2);
+        const frameTop =
+          coverPageHeight * (availTopFrac + (availHeightFrac - frameHeightFrac) / 2);
+        const frameWidth = coverPageWidth * frameWidthFrac;
+        const frameHeight = coverPageHeight * frameHeightFrac;
+        // Even-looking mat border regardless of the frame's own aspect
+        // ratio - see the identical fix (and its rationale) in
+        // FrontCoverStandalone.tsx.
+        const matPadding = Math.min(frameWidth, frameHeight) * 0.03;
+        return (
+          <>
+            <View
               style={{
-                fontFamily: "Caveat",
-                fontWeight: 600,
-                fontSize: coverPageWidth * 0.055,
-                color: SCRAPBOOK.ink,
-                textAlign: "center",
+                position: "absolute",
+                top: frameTop,
+                left: frameLeft,
+                width: frameWidth,
+                height: frameHeight,
+                backgroundColor: SCRAPBOOK.mat,
               }}
             >
-              {coverTitle || album.albumName}
-            </Text>
-          </View>
-        </>
-      )}
+              <PdfPhotoImage
+                src={coverImageBlob}
+                top={matPadding}
+                left={matPadding}
+                containerWidth={frameWidth - matPadding * 2}
+                containerHeight={frameHeight - matPadding * 2}
+                focalPoint={coverFocalPoint}
+              />
+            </View>
+            <View
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: coverPageHeight * 0.2,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: "Caveat",
+                  fontWeight: 600,
+                  fontSize: coverPageWidth * 0.055,
+                  color: SCRAPBOOK.ink,
+                  textAlign: "center",
+                }}
+              >
+                {coverTitle || album.albumName}
+              </Text>
+            </View>
+          </>
+        );
+      })()}
 
       {coverLayout === "full-bleed" && coverImageBlob && (
         <>
@@ -862,53 +884,65 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
           </View>
         )}
 
-        {coverLayout === "photo-title" && coverImageBlob && (
-          <>
-            <View
-              style={{
-                position: "absolute",
-                top: coverPageHeight * 0.08,
-                left: coverPageWidth * 0.08,
-                width: coverPageWidth * 0.84,
-                height: coverPageHeight * 0.68,
-                backgroundColor: SCRAPBOOK.mat,
-              }}
-            >
-              <PdfPhotoImage
-                src={coverImageBlob}
-                top={coverPageWidth * 0.02}
-                left={coverPageWidth * 0.02}
-                containerWidth={coverPageWidth * 0.8}
-                containerHeight={coverPageHeight * 0.64}
-                focalPoint={coverFocalPoint}
-              />
-            </View>
-            <View
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: coverPageHeight * 0.2,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text
+        {coverLayout === "photo-title" && coverImageBlob && (() => {
+          const frameWidthFrac = coverFrameSize?.width ?? 0.84;
+          const frameHeightFrac = coverFrameSize?.height ?? 0.68;
+          const availTopFrac = 0.08;
+          const availHeightFrac = 0.68;
+          const frameLeft = coverPageWidth * ((1 - frameWidthFrac) / 2);
+          const frameTop =
+            coverPageHeight * (availTopFrac + (availHeightFrac - frameHeightFrac) / 2);
+          const frameWidth = coverPageWidth * frameWidthFrac;
+          const frameHeight = coverPageHeight * frameHeightFrac;
+          const matPadding = Math.min(frameWidth, frameHeight) * 0.03;
+          return (
+            <>
+              <View
                 style={{
-                  fontFamily: "Caveat",
-                  fontWeight: 600,
-                  fontSize: coverPageWidth * 0.055,
-                  color: SCRAPBOOK.ink,
-                  textAlign: "center",
+                  position: "absolute",
+                  top: frameTop,
+                  left: frameLeft,
+                  width: frameWidth,
+                  height: frameHeight,
+                  backgroundColor: SCRAPBOOK.mat,
                 }}
               >
-                {coverTitle || album.albumName}
-              </Text>
-            </View>
-          </>
-        )}
+                <PdfPhotoImage
+                  src={coverImageBlob}
+                  top={matPadding}
+                  left={matPadding}
+                  containerWidth={frameWidth - matPadding * 2}
+                  containerHeight={frameHeight - matPadding * 2}
+                  focalPoint={coverFocalPoint}
+                />
+              </View>
+              <View
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: coverPageHeight * 0.2,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: "Caveat",
+                    fontWeight: 600,
+                    fontSize: coverPageWidth * 0.055,
+                    color: SCRAPBOOK.ink,
+                    textAlign: "center",
+                  }}
+                >
+                  {coverTitle || album.albumName}
+                </Text>
+              </View>
+            </>
+          );
+        })()}
 
         {coverLayout === "full-bleed" && coverImageBlob && (
           <>
@@ -1650,8 +1684,8 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             // Card mounted flat (no tilt/tape), centered on the whole
             // page, so it reads as a closing note rather than another
             // scrapbook page.
-            const cardWidth = coverPageWidth * 0.42;
-            const cardHeight = coverPageHeight * 0.3;
+            const cardWidth = coverPageWidth * (backCoverFrameSize?.width ?? 0.42);
+            const cardHeight = coverPageHeight * (backCoverFrameSize?.height ?? 0.3);
             const cardTop = (coverPageHeight - cardHeight) / 2;
             const cardLeft = (coverPageWidth - cardWidth) / 2;
             const frameInset = Math.max(4, cardWidth * 0.045);

@@ -1,6 +1,6 @@
 import type { AssetResponseDto } from "@immich/sdk";
 import type { Dispatch, SetStateAction } from "react";
-import type { FocalPoint } from "../config/albumConfig";
+import type { FocalPoint, FrameSize } from "../config/albumConfig";
 
 // History of operations for undo functionality
 export type HistoryOperation =
@@ -159,6 +159,17 @@ export type HistoryOperation =
       prevAxis: "vertical" | "horizontal" | undefined;
       newAxis: "vertical" | "horizontal";
       timestamp: number;
+    }
+  | {
+      // Manual resize of a "photo-title" cover's white mat/card frame -
+      // see FrontCoverStandalone.tsx/BackCoverStandalone.tsx. prevSize is
+      // null when the frame had never been resized before (the built-in
+      // default size was in effect).
+      type: "resize-cover-frame";
+      target: "cover" | "back-cover";
+      prevSize: FrameSize | null;
+      newSize: FrameSize;
+      timestamp: number;
     };
 
 // Baseline snapshot captured by "flatten" - everything a Reset All
@@ -193,7 +204,9 @@ export interface UseEditHistoryParams {
     SetStateAction<Map<string, "vertical" | "horizontal">>
   >;
   setCoverAssetId: Dispatch<SetStateAction<string | null>>;
+  setCoverFrameSize: Dispatch<SetStateAction<FrameSize | null>>;
   setBackCoverAssetId: Dispatch<SetStateAction<string | null>>;
+  setBackCoverFrameSize: Dispatch<SetStateAction<FrameSize | null>>;
   setCoverTitle: Dispatch<SetStateAction<string>>;
   setBackCoverText: Dispatch<SetStateAction<string>>;
   setAssets: Dispatch<SetStateAction<AssetResponseDto[]>>;
@@ -238,7 +251,9 @@ export function useEditHistory(params: UseEditHistoryParams) {
     setBoundaryOverrides,
     setAxisOverrides,
     setCoverAssetId,
+    setCoverFrameSize,
     setBackCoverAssetId,
+    setBackCoverFrameSize,
     setCoverTitle,
     setBackCoverText,
     setAssets,
@@ -398,6 +413,11 @@ export function useEditHistory(params: UseEditHistoryParams) {
           }
           return next;
         });
+        break;
+
+      case "resize-cover-frame":
+        if (lastOp.target === "cover") setCoverFrameSize(lastOp.prevSize);
+        else setBackCoverFrameSize(lastOp.prevSize);
         break;
 
       case "edit-text-card":
@@ -698,6 +718,11 @@ export function useEditHistory(params: UseEditHistoryParams) {
             }
             return next;
           });
+          break;
+
+        case "resize-cover-frame":
+          if (op.target === "cover") setCoverFrameSize(op.prevSize);
+          else setBackCoverFrameSize(op.prevSize);
           break;
 
         case "edit-text-card":

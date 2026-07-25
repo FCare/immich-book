@@ -2,9 +2,14 @@ import type { Dispatch, SetStateAction } from "react";
 import type { AssetResponseDto } from "@immich/sdk";
 import type { ImmichConfig } from "../../types";
 import { t, type Language } from "../../i18n";
-import type { CoverLayout, FocalPoint, PageBackground } from "../../config/albumConfig";
+import type { CoverLayout, FocalPoint, FrameSize, PageBackground } from "../../config/albumConfig";
 import type { HistoryOperation } from "../../history/editHistory";
 import { focalPointToCss, pageBackgroundCss, SCRAPBOOK, toPoints, type NewAssetTarget } from "../PhotoGrid";
+
+// Default "photo-title" card size, as a fraction of the full page - same
+// as before this was made resizable.
+const DEFAULT_BACK_COVER_FRAME_WIDTH = 0.42;
+const DEFAULT_BACK_COVER_FRAME_HEIGHT = 0.3;
 
 export interface BackCoverStandaloneProps {
   validPageWidth: number;
@@ -20,6 +25,16 @@ export interface BackCoverStandaloneProps {
   selectedNewAsset: AssetResponseDto | null;
   backCoverAsset: AssetResponseDto | null;
   backCoverFocalPoint: FocalPoint | null;
+  backCoverFrameSize: FrameSize | null;
+  onFrameResizePointerDown: (
+    target: "cover" | "back-cover",
+    e: React.PointerEvent,
+    currentWidth: number,
+    currentHeight: number,
+    availWidth: number,
+    availHeight: number,
+    scale: number,
+  ) => void;
   pageBackground: PageBackground;
   handleReorderPointerDown: (id: string, e: React.PointerEvent, croppable?: boolean) => void;
   performNewAssetPlacement: (
@@ -46,6 +61,8 @@ export function BackCoverStandalone({
   selectedNewAsset,
   backCoverAsset,
   backCoverFocalPoint,
+  backCoverFrameSize,
+  onFrameResizePointerDown,
   pageBackground,
   handleReorderPointerDown,
   performNewAssetPlacement,
@@ -237,8 +254,10 @@ export function BackCoverStandalone({
 
             // Card mounted flat (no tilt), centered on the
             // whole page, so it reads as a closing note.
-            const cardWidth = displayWidth * 0.42;
-            const cardHeight = displayHeight * 0.3;
+            const cardWidth =
+              displayWidth * (backCoverFrameSize?.width ?? DEFAULT_BACK_COVER_FRAME_WIDTH);
+            const cardHeight =
+              displayHeight * (backCoverFrameSize?.height ?? DEFAULT_BACK_COVER_FRAME_HEIGHT);
             const cardTop = (displayHeight - cardHeight) / 2;
             const cardLeft = (displayWidth - cardWidth) / 2;
             const frameInset = Math.max(4, cardWidth * 0.045);
@@ -315,6 +334,27 @@ export function BackCoverStandalone({
                     color: SCRAPBOOK.ink,
                   }}
                 />
+                <div
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onFrameResizePointerDown(
+                      "back-cover",
+                      e,
+                      backCoverFrameSize?.width ?? DEFAULT_BACK_COVER_FRAME_WIDTH,
+                      backCoverFrameSize?.height ?? DEFAULT_BACK_COVER_FRAME_HEIGHT,
+                      validPageWidth,
+                      validPageHeight,
+                      scale,
+                    );
+                  }}
+                  title={t(language, "resizeCoverFrameHint")}
+                  className="absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-indigo-500 text-white shadow-md flex items-center justify-center cursor-nwse-resize"
+                  style={{ touchAction: "none" }}
+                >
+                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <path d="M6 18L18 6M10 18h8v-8" />
+                  </svg>
+                </div>
               </div>
             );
           })()}
