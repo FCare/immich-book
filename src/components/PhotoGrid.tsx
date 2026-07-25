@@ -590,10 +590,13 @@ function PhotoGridEditor({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [pdfProgress, setPdfProgress] = useState<{
-    done: number;
-    total: number;
-  } | null>(null);
+  // Two shapes: a "done/total" step count for the image-fetch and
+  // per-chunk render phases (discrete steps), and a "percent" fraction
+  // for the merge phase (a single request whose progress is measured in
+  // bytes transferred, not steps).
+  const [pdfProgress, setPdfProgress] = useState<
+    { done: number; total: number } | { percent: number } | null
+  >(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
@@ -2426,14 +2429,15 @@ function PhotoGridEditor({
         // Generate two PDFs: one for cover, one for interior
         const coverBlob = await pdf(buildPdfDocument({ ...pdfDocumentBaseParams, imageBlobs, pdfType: 'cover' })).toBlob();
         const interiorChunks = await buildInteriorChunkBlobs();
-        // No numeric count for this leg - it's one request to the
-        // backend, not a series of steps - but still clear the stale
-        // "N/N" so the button doesn't look stuck while it runs.
-        setPdfProgress(null);
-        const interiorBlob =
-          interiorChunks.length === 1
-            ? interiorChunks[0]
-            : await mergePdfBlobs(interiorChunks);
+        let interiorBlob: Blob;
+        if (interiorChunks.length === 1) {
+          interiorBlob = interiorChunks[0];
+        } else {
+          setPdfProgress({ percent: 0 });
+          interiorBlob = await mergePdfBlobs(interiorChunks, (fraction) =>
+            setPdfProgress({ percent: fraction }),
+          );
+        }
 
         // Download both files
         const albumSlug = album.albumName.replace(/[^a-z0-9]/gi, '-').toLowerCase();
@@ -2483,10 +2487,15 @@ function PhotoGridEditor({
             ).toBlob(),
           );
         }
-        // Clear the stale "N/N" chunk count before the (single) merge
-        // request, which has no per-step count of its own to show.
-        setPdfProgress(null);
-        const blob = parts.length === 1 ? parts[0] : await mergePdfBlobs(parts);
+        let blob: Blob;
+        if (parts.length === 1) {
+          blob = parts[0];
+        } else {
+          setPdfProgress({ percent: 0 });
+          blob = await mergePdfBlobs(parts, (fraction) =>
+            setPdfProgress({ percent: fraction }),
+          );
+        }
         setPdfUrl(URL.createObjectURL(blob));
       }
       
@@ -3599,7 +3608,9 @@ function PhotoGridEditor({
                   {isGeneratingPdf && <PdfSpinner />}
                   {isGeneratingPdf
                     ? pdfProgress
-                      ? `${t(language, "generating")} ${pdfProgress.done}/${pdfProgress.total}`
+                      ? "percent" in pdfProgress
+                        ? `${t(language, "generating")} ${Math.round(pdfProgress.percent * 100)}%`
+                        : `${t(language, "generating")} ${pdfProgress.done}/${pdfProgress.total}`
                       : t(language, "generating")
                     : t(language, "generatePdf")}
                 </button>
