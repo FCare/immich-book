@@ -799,6 +799,12 @@ function PhotoGridEditor({
   const [boundaryOverrides, setBoundaryOverrides] = useState<
     Map<string, number>
   >(() => new Map(Object.entries(initialConfig.boundaryOverrides)));
+  // Manual bento split-axis flips (stacked <-> side-by-side), same
+  // keying as boundaryOverrides - see the double-click handler on each
+  // boundary handle below.
+  const [axisOverrides, setAxisOverrides] = useState<
+    Map<string, "vertical" | "horizontal">
+  >(() => new Map(Object.entries(initialConfig.axisOverrides)));
   // The boundary currently being dragged, if any - a live React state
   // (unlike the crop-pan drag) because moving one boundary must reflow
   // every affected cell's rect, not just one image's CSS position.
@@ -824,6 +830,15 @@ function PhotoGridEditor({
     path: string;
     fraction: number;
   } | null>(null);
+  // Boundaries the user has right-clicked to send behind whichever other
+  // boundary currently overlaps them - two split lines can land at (or
+  // get magnet-snapped to) the exact same spot, and without this,
+  // whichever one happens to render on top would be the only one ever
+  // reachable again by pointer. Purely a transient view concern (not
+  // part of the book's saved state).
+  const [boundariesSentToBack, setBoundariesSentToBack] = useState<
+    Set<string>
+  >(new Set());
   const [textCardCounts, setTextCardCounts] = useState<Map<number, number>>(
     () =>
       new Map(
@@ -1141,6 +1156,7 @@ function PhotoGridEditor({
       cardCaptions: Object.fromEntries(cardCaptions),
       focalPoints: Object.fromEntries(focalPoints),
       boundaryOverrides: Object.fromEntries(boundaryOverrides),
+      axisOverrides: Object.fromEntries(axisOverrides),
       textCardCounts: Object.fromEntries(textCardCounts),
       textCardContents: Object.fromEntries(textCardContents),
       slotOverrides: Object.fromEntries(slotOverrides),
@@ -1188,6 +1204,7 @@ function PhotoGridEditor({
     cardCaptions,
     focalPoints,
     boundaryOverrides,
+    axisOverrides,
     showCover,
     separatedCover,
     spineWidth,
@@ -1522,6 +1539,7 @@ function PhotoGridEditor({
       setCardCaptions,
       setFocalPoints,
       setBoundaryOverrides,
+      setAxisOverrides,
       setCoverAssetId,
       setBackCoverAssetId,
       setCoverTitle,
@@ -1731,6 +1749,7 @@ function PhotoGridEditor({
       textCardCounts,
       slotOverrides,
       boundaryOverrides: effectiveBoundaryOverrides,
+      axisOverrides,
     });
   }, [
     interiorAssets,
@@ -1745,6 +1764,7 @@ function PhotoGridEditor({
     textCardCounts,
     slotOverrides,
     effectiveBoundaryOverrides,
+    axisOverrides,
   ]);
 
   // Swaps two cards outright, wherever they are: same page swaps their
@@ -2094,6 +2114,7 @@ function PhotoGridEditor({
             cardCaptions: Object.fromEntries(cardCaptions),
             focalPoints: Object.fromEntries(focalPoints),
             boundaryOverrides: Object.fromEntries(boundaryOverrides),
+            axisOverrides: Object.fromEntries(axisOverrides),
             textCardCounts: Object.fromEntries(textCardCounts),
             textCardContents: Object.fromEntries(textCardContents),
             slotOverrides: Object.fromEntries(slotOverrides),
@@ -2136,6 +2157,7 @@ function PhotoGridEditor({
             cardCaptions: Object.fromEntries(cardCaptions),
             focalPoints: Object.fromEntries(focalPoints),
             boundaryOverrides: Object.fromEntries(boundaryOverrides),
+            axisOverrides: Object.fromEntries(axisOverrides),
             textCardCounts: Object.fromEntries(textCardCounts),
             textCardContents: Object.fromEntries(textCardContents),
             slotOverrides: Object.fromEntries(slotOverrides),
@@ -2388,16 +2410,23 @@ function PhotoGridEditor({
   const renderStyleSwitcher = (logicalPageNumber: number) => {
     const currentCount = pageCounts.get(logicalPageNumber) ?? null;
     const currentText = textCardCounts.get(logicalPageNumber) ?? 0;
+    // While in "Auto", the +/- buttons need to switch to manual starting
+    // from however many slots are actually on the page right now (this
+    // page's current photo+text-card count), not from a hardcoded 1 -
+    // otherwise the very first click looked like it reset the page to a
+    // near-empty layout instead of nudging it by one.
+    const autoCount =
+      pages.find((p) => p.pageNumber === logicalPageNumber)?.photos.length ??
+      1;
 
     const decrementPhotos = () => {
-      if (currentCount === null) return;
-      if (currentCount <= 1) handleSetPageCount(logicalPageNumber, null);
-      else handleSetPageCount(logicalPageNumber, currentCount - 1);
+      const base = currentCount ?? autoCount;
+      if (base <= 1) handleSetPageCount(logicalPageNumber, null);
+      else handleSetPageCount(logicalPageNumber, base - 1);
     };
     const incrementPhotos = () => {
-      if (currentCount === null) handleSetPageCount(logicalPageNumber, 1);
-      else if (currentCount < 12)
-        handleSetPageCount(logicalPageNumber, currentCount + 1);
+      const base = currentCount ?? autoCount;
+      if (base < 12) handleSetPageCount(logicalPageNumber, base + 1);
     };
     const decrementText = () =>
       handleSetTextCardCount(logicalPageNumber, Math.max(0, currentText - 1));
@@ -2448,11 +2477,7 @@ function PhotoGridEditor({
             <circle cx="9" cy="9" r="2" />
             <path d="M21 15l-5-5L5 21" />
           </svg>
-          <button
-            onClick={decrementPhotos}
-            disabled={currentCount === null}
-            className={stepBtn}
-          >
+          <button onClick={decrementPhotos} className={stepBtn}>
             –
           </button>
           <span className="text-xs font-semibold text-gray-600 dark:text-gray-300 tabular-nums w-9 text-center">
@@ -2596,6 +2621,7 @@ function PhotoGridEditor({
                     cardCaptions: Object.fromEntries(cardCaptions),
                     focalPoints: Object.fromEntries(focalPoints),
                     boundaryOverrides: Object.fromEntries(boundaryOverrides),
+                    axisOverrides: Object.fromEntries(axisOverrides),
                     textCardCounts: Object.fromEntries(textCardCounts),
                     textCardContents: Object.fromEntries(textCardContents),
                     slotOverrides: Object.fromEntries(slotOverrides),
@@ -3547,7 +3573,7 @@ function PhotoGridEditor({
               appears below once ready, rather than replacing this editor. */}
           <div
             ref={previewContainerRef}
-            className="space-y-8 pb-8 px-4 sm:px-16 pt-6 max-w-full"
+            className="space-y-8 pb-8 px-4 sm:px-16 pt-6 max-w-full prevent-native-drag-select"
           >
           {showCover && separatedCover && (
             <CoverSpread
@@ -4308,6 +4334,7 @@ function PhotoGridEditor({
                                   cardCaptions: Object.fromEntries(cardCaptions),
                                   focalPoints: Object.fromEntries(focalPoints),
                                   boundaryOverrides: Object.fromEntries(boundaryOverrides),
+                                  axisOverrides: Object.fromEntries(axisOverrides),
                                   textCardCounts: Object.fromEntries(textCardCounts),
                                   textCardContents: Object.fromEntries(textCardContents),
                                   slotOverrides: Object.fromEntries(slotOverrides),
@@ -4338,18 +4365,28 @@ function PhotoGridEditor({
                     );
                   })}
 
-                  {/* Draggable bento split boundaries - invisible hit-
-                      target strips; click, drag, release to resize a
-                      page's photo tiling (same photos, different
-                      shapes) instead of accepting the auto layout.
-                      Magnet-snaps to other boundaries on the same page
-                      while dragging (see the boundaryDragState effect). */}
+                  {/* Draggable bento split boundaries - a small icon at
+                      the midpoint of each boundary is the only clickable
+                      target (not the full line), so two boundaries can
+                      only ever compete for the same click if their
+                      icons land exactly on top of each other, not just
+                      anywhere along their length. Click-drag-release to
+                      resize (same photos, different shapes) instead of
+                      accepting the auto layout; magnet-snaps to other
+                      boundaries on the same page while dragging (see the
+                      boundaryDragState effect); double-click flips this
+                      boundary's orientation (stacked <-> side-by-side);
+                      right-click sends it behind another icon
+                      overlapping it. */}
                   {page.splits.map((split) => {
                     const isVertical = split.axis === "vertical";
                     const lineOffset = isVertical
                       ? split.rect.x + split.rect.width * split.fraction
                       : split.rect.y + split.rect.height * split.fraction;
-                    const HANDLE_HIT_PT = 12;
+                    const midOffset = isVertical
+                      ? split.rect.y + split.rect.height / 2
+                      : split.rect.x + split.rect.width / 2;
+                    const ICON_PT = 22;
                     const isDraggingThis =
                       boundaryDragState?.path === split.path;
                     return (
@@ -4371,36 +4408,84 @@ function PhotoGridEditor({
                             prevFraction: boundaryOverrides.get(split.path),
                           });
                         }}
-                        className={`absolute z-20 group ${isVertical ? "cursor-col-resize" : "cursor-row-resize"}`}
+                        onDoubleClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const newAxis: "vertical" | "horizontal" =
+                            isVertical ? "horizontal" : "vertical";
+                          setAxisOverrides((prev) => {
+                            const next = new Map(prev);
+                            next.set(split.path, newAxis);
+                            return next;
+                          });
+                          setHistory((prev) => [
+                            {
+                              type: "flip-split-axis",
+                              path: split.path,
+                              prevAxis: axisOverrides.get(split.path),
+                              newAxis,
+                              timestamp: Date.now(),
+                            },
+                            ...prev,
+                          ]);
+                        }}
+                        onContextMenu={(e) => {
+                          // Two boundary icons can end up exactly on top
+                          // of each other (e.g. snapped together) -
+                          // right-click toggles which one is on top, so
+                          // the other one becomes reachable again
+                          // instead of being permanently shadowed.
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setBoundariesSentToBack((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(split.path)) next.delete(split.path);
+                            else next.add(split.path);
+                            return next;
+                          });
+                        }}
+                        title={t(language, "flipBoundaryHint")}
+                        className={`absolute rounded-full flex items-center justify-center bg-indigo-500 text-white shadow-md transition-opacity hover:opacity-100 ${
+                          isDraggingThis ? "opacity-100" : "opacity-60"
+                        } ${
+                          boundariesSentToBack.has(split.path)
+                            ? "z-10"
+                            : "z-20"
+                        } ${isVertical ? "cursor-col-resize" : "cursor-row-resize"}`}
                         style={
                           isVertical
                             ? {
-                                left: `${toPoints(lineOffset) - HANDLE_HIT_PT / 2}px`,
-                                top: `${toPoints(split.rect.y)}px`,
-                                width: `${HANDLE_HIT_PT}px`,
-                                height: `${toPoints(split.rect.height)}px`,
+                                left: `${toPoints(lineOffset) - ICON_PT / 2}px`,
+                                top: `${toPoints(midOffset) - ICON_PT / 2}px`,
+                                width: `${ICON_PT}px`,
+                                height: `${ICON_PT}px`,
                                 touchAction: "none",
                               }
                             : {
-                                top: `${toPoints(lineOffset) - HANDLE_HIT_PT / 2}px`,
-                                left: `${toPoints(split.rect.x)}px`,
-                                height: `${HANDLE_HIT_PT}px`,
-                                width: `${toPoints(split.rect.width)}px`,
+                                top: `${toPoints(lineOffset) - ICON_PT / 2}px`,
+                                left: `${toPoints(midOffset) - ICON_PT / 2}px`,
+                                width: `${ICON_PT}px`,
+                                height: `${ICON_PT}px`,
                                 touchAction: "none",
                               }
                         }
                       >
-                        <div
-                          className={`absolute bg-indigo-500 transition-opacity ${
-                            isDraggingThis
-                              ? "opacity-100"
-                              : "opacity-0 group-hover:opacity-70"
-                          } ${
-                            isVertical
-                              ? "left-1/2 top-0 bottom-0 w-0.5 -translate-x-1/2"
-                              : "top-1/2 left-0 right-0 h-0.5 -translate-y-1/2"
-                          }`}
-                        />
+                        <svg
+                          viewBox="0 0 24 24"
+                          width="13"
+                          height="13"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          {isVertical ? (
+                            <path d="M8 7l-5 5 5 5M16 7l5 5-5 5" />
+                          ) : (
+                            <path d="M7 8l5-5 5 5M7 16l5 5 5-5" />
+                          )}
+                        </svg>
                       </div>
                     );
                   })}

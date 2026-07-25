@@ -94,9 +94,15 @@ export interface LayoutOptions {
   // Manual override of a bento split's position, keyed by SplitInfo.path
   // (stable across re-layouts as long as the same photos land on the
   // same side of that split) - lets a user drag a boundary between two
-  // cells instead of accepting the auto-computed fraction. The axis
-  // itself is never overridden, only where the line sits along it.
+  // cells instead of accepting the auto-computed fraction.
   boundaryOverrides?: Map<string, number>;
+  // Manual override of a bento split's axis (stacked vs side-by-side),
+  // same keying as boundaryOverrides - lets a user "flip" a boundary
+  // instead of only sliding it along the auto-picked axis, which is the
+  // only way to e.g. turn two stacked portrait photos into two side-by-
+  // side ones (or vice versa) when the auto layout picked the axis they
+  // didn't want.
+  axisOverrides?: Map<string, "vertical" | "horizontal">;
 }
 
 // Deterministic pseudo-random number in [0, 1) from a string seed - stable
@@ -227,11 +233,14 @@ function splitFitError(
 //
 // `fractionOverrides`, keyed by the same `path` this function seeds its
 // own randomness with, lets a user-dragged boundary (see SplitInfo) pin
-// one split node's fraction instead of the auto-computed one - the axis
-// itself is left alone (still whichever the aspect-ratio-fit math
-// picks), only *where* the line sits along it is overridden. Every split
-// node visited is also recorded into `splits` (mutated in place) so the
-// caller can render a draggable handle for each one.
+// one split node's fraction instead of the auto-computed one - by
+// default the axis itself is left alone (whichever the aspect-ratio-fit
+// math picks), only *where* the line sits along it is overridden, unless
+// `axisOverrides` also forces this node to the other axis (a user
+// "flipping" a boundary from stacked to side-by-side or back - see
+// SplitInfo). Every split node visited is also recorded into `splits`
+// (mutated in place) so the caller can render a draggable handle for
+// each one.
 function splitRect(
   rect: Rect,
   items: LayoutItem[],
@@ -240,6 +249,7 @@ function splitRect(
   path: string,
   forceTimeline: boolean,
   fractionOverrides: Map<string, number> | undefined,
+  axisOverrides: Map<string, "vertical" | "horizontal"> | undefined,
   splits: SplitInfo[],
 ): PhotoBox[] {
   if (items.length === 1) {
@@ -292,7 +302,12 @@ function splitRect(
   const vError = splitFitError(rect, spacing, true, vFraction, r1, r2);
   const hError = splitFitError(rect, spacing, false, hFraction, r1, r2);
   const jitter = (seededRandom(path + "-axis") - 0.5) * 0.15; // avoid rigid ties
-  const splitVertically = vError + jitter <= hError;
+  const autoSplitVertically = vError + jitter <= hError;
+  const axisOverride = axisOverrides?.get(path);
+  const splitVertically =
+    axisOverride !== undefined
+      ? axisOverride === "vertical"
+      : autoSplitVertically;
   const autoFraction = splitVertically ? vFraction : hFraction;
   const override = fractionOverrides?.get(path);
   const fraction =
@@ -336,8 +351,8 @@ function splitRect(
   }
 
   return [
-    ...splitRect(firstRect, firstItems, spacing, config, path + "A", forceTimeline, fractionOverrides, splits),
-    ...splitRect(secondRect, secondItems, spacing, config, path + "B", forceTimeline, fractionOverrides, splits),
+    ...splitRect(firstRect, firstItems, spacing, config, path + "A", forceTimeline, fractionOverrides, axisOverrides, splits),
+    ...splitRect(secondRect, secondItems, spacing, config, path + "B", forceTimeline, fractionOverrides, axisOverrides, splits),
   ];
 }
 
@@ -515,6 +530,7 @@ function layoutBentoPage(
   textCardCount: number,
   forceTimeline: boolean,
   fractionOverrides: Map<string, number> | undefined,
+  axisOverrides: Map<string, "vertical" | "horizontal"> | undefined,
 ): { photos: PhotoBox[]; consumed: number; splits: SplitInfo[] } {
   const seedBase = `bento-${pageNumber}-v${variant}`;
   let totalSlots: number;
@@ -560,6 +576,7 @@ function layoutBentoPage(
     seedBase,
     forceTimeline,
     fractionOverrides,
+    axisOverrides,
     splits,
   );
   return { photos: equalizeNearMatchingRows(photos, spacing), consumed, splits };
@@ -586,6 +603,7 @@ export function calculatePageLayout(
     textCardCounts,
     slotOverrides,
     boundaryOverrides,
+    axisOverrides,
   } = options;
 
   const pageDimensions = { width: pageWidth, height: pageHeight };
@@ -616,6 +634,7 @@ export function calculatePageLayout(
       textCardCount,
       forceTimeline || false,
       boundaryOverrides,
+      axisOverrides,
     );
 
     // A manual slot override wins outright over the auto-computed

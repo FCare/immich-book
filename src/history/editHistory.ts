@@ -148,6 +148,17 @@ export type HistoryOperation =
       prevFraction: number | undefined;
       newFraction: number;
       timestamp: number;
+    }
+  | {
+      // Manual bento split-axis flip (stacked <-> side-by-side) - see
+      // SplitInfo in pageLayout.ts. prevAxis is undefined when this
+      // boundary had never been flipped before (the auto-computed axis
+      // was in effect).
+      type: "flip-split-axis";
+      path: string;
+      prevAxis: "vertical" | "horizontal" | undefined;
+      newAxis: "vertical" | "horizontal";
+      timestamp: number;
     };
 
 // Baseline snapshot captured by "flatten" - everything a Reset All
@@ -178,6 +189,9 @@ export interface UseEditHistoryParams {
   setCardCaptions: Dispatch<SetStateAction<Map<string, string>>>;
   setFocalPoints: Dispatch<SetStateAction<Map<string, FocalPoint | null>>>;
   setBoundaryOverrides: Dispatch<SetStateAction<Map<string, number>>>;
+  setAxisOverrides: Dispatch<
+    SetStateAction<Map<string, "vertical" | "horizontal">>
+  >;
   setCoverAssetId: Dispatch<SetStateAction<string | null>>;
   setBackCoverAssetId: Dispatch<SetStateAction<string | null>>;
   setCoverTitle: Dispatch<SetStateAction<string>>;
@@ -222,6 +236,7 @@ export function useEditHistory(params: UseEditHistoryParams) {
     setCardCaptions,
     setFocalPoints,
     setBoundaryOverrides,
+    setAxisOverrides,
     setCoverAssetId,
     setBackCoverAssetId,
     setCoverTitle,
@@ -368,6 +383,18 @@ export function useEditHistory(params: UseEditHistoryParams) {
             next.delete(lastOp.path);
           } else {
             next.set(lastOp.path, lastOp.prevFraction);
+          }
+          return next;
+        });
+        break;
+
+      case "flip-split-axis":
+        setAxisOverrides((prev) => {
+          const next = new Map(prev);
+          if (lastOp.prevAxis === undefined) {
+            next.delete(lastOp.path);
+          } else {
+            next.set(lastOp.path, lastOp.prevAxis);
           }
           return next;
         });
@@ -656,6 +683,18 @@ export function useEditHistory(params: UseEditHistoryParams) {
               next.delete(op.path);
             } else {
               next.set(op.path, op.prevFraction);
+            }
+            return next;
+          });
+          break;
+
+        case "flip-split-axis":
+          setAxisOverrides((prev) => {
+            const next = new Map(prev);
+            if (op.prevAxis === undefined) {
+              next.delete(op.path);
+            } else {
+              next.set(op.path, op.prevAxis);
             }
             return next;
           });

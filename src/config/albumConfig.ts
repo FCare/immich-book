@@ -84,6 +84,9 @@ export interface AlbumConfig extends GlobalConfig {
   // pageLayout.ts) - the fraction the user dragged that boundary to,
   // overriding the auto-computed one.
   boundaryOverrides: Record<string, number>;
+  // Manual bento split-axis flip, same keying as boundaryOverrides - lets
+  // a user turn a stacked boundary into a side-by-side one (or back).
+  axisOverrides: Record<string, "vertical" | "horizontal">;
   // How many photo slots on a page are turned into text cards (0-3),
   // keyed by logical page number.
   textCardCounts: Record<number, number>;
@@ -203,6 +206,7 @@ export async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     cardCaptions: {},
     focalPoints: {},
     boundaryOverrides: {},
+    axisOverrides: {},
     textCardCounts: {},
     textCardContents: {},
     slotOverrides: {},

@@ -8,6 +8,20 @@
 @tailwind utilities;
 
 @layer base {
+  /* This app leans entirely on custom pointer-event drag/click handling
+     (crop panning, split-boundary dragging, card reordering - see
+     PhotoGrid.tsx's own comment on why native HTML5 drag was abandoned)
+     with its own visual feedback (rings, opacity, highlight lines) for
+     every one of those gestures - the browser's native tap-highlight
+     flash on every pointerdown (its color follows the OS/browser theme,
+     which can render as a translucent orange/amber flash depending on
+     the user's system) is pure visual noise on top of that, never the
+     only feedback for anything here.
+   */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
   body {
     @apply bg-gray-200 text-gray-900;
     font-family:
@@ -63,6 +77,24 @@
 
   .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background-color: rgba(75, 85, 99, 0.7);
+  }
+
+  /* The book preview is one big surface of custom pointer-drag gestures
+     (card reorder/swap, crop panning, split-boundary resize) - without
+     this, dragging across it can start the browser's own native text/
+     element selection instead of (or alongside) the custom drag,
+     painting its selection-highlight color across whatever the pointer
+     crosses. Re-enabled on actual text inputs so captions/titles/spine
+     text stay normally editable/selectable. */
+  .prevent-native-drag-select {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .prevent-native-drag-select input,
+  .prevent-native-drag-select textarea {
+    -webkit-user-select: text;
+    user-select: text;
   }
 }
 

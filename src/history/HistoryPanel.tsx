@@ -354,6 +354,9 @@ export function HistoryPanel({
                     case "drag-split-boundary":
                       description = t(language, "historyDragSplitBoundary");
                       break;
+                    case "flip-split-axis":
+                      description = t(language, "historyFlipSplitAxis");
+                      break;
                   }
 
                   return (
