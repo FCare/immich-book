@@ -112,6 +112,16 @@ export const PAGE_BACKGROUNDS: Record<
   blush: { label: "Blush paper", base: "#F6E9E5", texture: "blob", accent: "#C4897A" },
   charcoal: { label: "Charcoal paper", base: "#E9E6E1", texture: "blob", accent: "#6B6156" },
 
+  // Same base colors as the paper-grain family above, flat (no texture) -
+  // for matching a solid color elsewhere (e.g. a Flexilivre spine) without
+  // the grain showing through.
+  "kraft-plain": { label: "Kraft", base: "#C9A97E", texture: "none", accent: "" },
+  "cream-plain": { label: "Cream", base: "#F8F1E4", texture: "none", accent: "" },
+  "sage-plain": { label: "Sage", base: "#E7ECDF", texture: "none", accent: "" },
+  "dusk-blue-plain": { label: "Dusk blue", base: "#E5EBF3", texture: "none", accent: "" },
+  "blush-plain": { label: "Blush", base: "#F6E9E5", texture: "none", accent: "" },
+  "charcoal-plain": { label: "Charcoal", base: "#E9E6E1", texture: "none", accent: "" },
+
   // Fine dot grid, planner/bullet-journal style.
   dots: { label: "Dot grid", base: "#FBF7EF", texture: "dots", accent: SCRAPBOOK.ink },
   "sage-dots": { label: "Sage dot grid", base: "#EFF3EA", texture: "dots", accent: "#6F8259" },
@@ -131,7 +141,18 @@ export const PAGE_BACKGROUNDS: Record<
 
 // Named groups purely for the <optgroup> picker - doesn't affect layout.
 export const PAGE_BACKGROUND_GROUPS: { label: string; keys: PageBackground[] }[] = [
-  { label: "Plain", keys: ["white"] },
+  {
+    label: "Plain",
+    keys: [
+      "white",
+      "kraft-plain",
+      "cream-plain",
+      "sage-plain",
+      "dusk-blue-plain",
+      "blush-plain",
+      "charcoal-plain",
+    ],
+  },
   {
     label: "Paper grain",
     keys: ["kraft", "cream", "sage", "dusk-blue", "blush", "charcoal"],
