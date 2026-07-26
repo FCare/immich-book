@@ -20,6 +20,32 @@ const staticStyles = StyleSheet.create({
   },
 });
 
+// The full-bleed cover's bottom fade-to-black scrim (see below) used to
+// be approximated with a stack of flat-opacity bands, since react-pdf's
+// own <Svg> gradients are avoided elsewhere in this file (see
+// PdfPageBackground's comment) - but a stepped approximation always
+// reads as visible stripes once printed, no matter how many bands.
+// Rendering a real canvas gradient to a PNG and embedding it as a plain
+// <Image> sidesteps that entirely: it's pixel-smooth, and <Image> never
+// hit the z-order/overflow bugs that were specific to <Svg> content.
+// Computed once at module load and reused for every cover in every PDF
+// generated this session, since it's always the same black-to-transparent
+// fade regardless of the actual cover photo.
+function verticalFadeToBlackDataUri(maxOpacity: number): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 512;
+  const ctx = canvas.getContext("2d")!;
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
+  gradient.addColorStop(1, `rgba(0, 0, 0, ${maxOpacity})`);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
+}
+
+const COVER_SCRIM_DATA_URI = verticalFadeToBlackDataUri(0.55);
+
 // Plain Views instead of <Svg>/<Rect>/<Circle> (see PhotoGrid.tsx's
 // pageBackgroundCss for the web equivalent) - react-pdf appears to run
 // vector (Svg) drawing through a different path than regular View/Text
@@ -563,7 +589,8 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                   : {}),
               }}
             />
-            <View
+            <Image
+              src={COVER_SCRIM_DATA_URI}
               style={{
                 position: "absolute",
                 left: 0,
@@ -571,22 +598,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 width: coverPageWidth,
                 height: coverScrimHeight,
               }}
-            >
-              {Array.from({ length: 10 }, (_, i) => (
-                <View
-                  key={i}
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: (coverScrimHeight * i) / 10,
-                    width: coverPageWidth,
-                    height: coverScrimHeight / 10 + 0.5,
-                    backgroundColor: "#000000",
-                    opacity: (0.55 * (i + 1)) / 10,
-                  }}
-                />
-              ))}
-            </View>
+            />
             {!!backCoverText && (
               <View
                 style={{
@@ -750,7 +762,8 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 : {}),
             }}
           />
-          <View
+          <Image
+            src={COVER_SCRIM_DATA_URI}
             style={{
               position: "absolute",
               left: 0,
@@ -758,22 +771,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               width: coverPageWidth,
               height: coverScrimHeight,
             }}
-          >
-            {Array.from({ length: 10 }, (_, i) => (
-              <View
-                key={i}
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  top: (coverScrimHeight * i) / 10,
-                  width: coverPageWidth,
-                  height: coverScrimHeight / 10 + 0.5,
-                  backgroundColor: "#000000",
-                  opacity: (0.55 * (i + 1)) / 10,
-                }}
-              />
-            ))}
-          </View>
+          />
           <View
             style={{
               position: "absolute",
@@ -966,7 +964,8 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             {/* Approximates a top-to-bottom fade with stacked bands
                 rather than an Svg gradient - see PdfPageBackground's
                 comment for why Svg is avoided here. */}
-            <View
+            <Image
+              src={COVER_SCRIM_DATA_URI}
               style={{
                 position: "absolute",
                 left: 0,
@@ -974,22 +973,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 width: coverPageWidth,
                 height: coverScrimHeight,
               }}
-            >
-              {Array.from({ length: 10 }, (_, i) => (
-                <View
-                  key={i}
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: (coverScrimHeight * i) / 10,
-                    width: coverPageWidth,
-                    height: coverScrimHeight / 10 + 0.5,
-                    backgroundColor: "#000000",
-                    opacity: (0.55 * (i + 1)) / 10,
-                  }}
-                />
-              ))}
-            </View>
+            />
             <View
               style={{
                 position: "absolute",
@@ -1762,7 +1746,8 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             />
             {!!backCoverText && (
               <>
-                <View
+                <Image
+                  src={COVER_SCRIM_DATA_URI}
                   style={{
                     position: "absolute",
                     left: 0,
@@ -1770,22 +1755,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                     width: coverPageWidth,
                     height: coverScrimHeight,
                   }}
-                >
-                  {Array.from({ length: 10 }, (_, i) => (
-                    <View
-                      key={i}
-                      style={{
-                        position: "absolute",
-                        left: 0,
-                        top: (coverScrimHeight * i) / 10,
-                        width: coverPageWidth,
-                        height: coverScrimHeight / 10 + 0.5,
-                        backgroundColor: "#000000",
-                        opacity: (0.55 * (i + 1)) / 10,
-                      }}
-                    />
-                  ))}
-                </View>
+                />
                 <View
                   style={{
                     position: "absolute",
