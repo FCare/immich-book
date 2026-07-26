@@ -10,8 +10,6 @@ import { ToggleSwitch } from "../ToggleSwitch";
 
 export interface SidebarPresentationSettingsProps {
   language: Language;
-  forceTimeline: boolean;
-  setForceTimeline: (next: boolean) => void;
   showDates: boolean;
   setShowDates: (next: boolean) => void;
   showCaptions: boolean;
@@ -26,8 +24,6 @@ export interface SidebarPresentationSettingsProps {
 
 export function SidebarPresentationSettings({
   language,
-  forceTimeline,
-  setForceTimeline,
   showDates,
   setShowDates,
   showCaptions,
@@ -42,11 +38,6 @@ export function SidebarPresentationSettings({
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <ToggleSwitch
-          checked={forceTimeline}
-          onChange={setForceTimeline}
-          label={t(language, "forceTimeline")}
-        />
         <ToggleSwitch
           checked={showDates}
           onChange={setShowDates}

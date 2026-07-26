@@ -57,7 +57,6 @@ export interface GlobalConfig {
   // Layout settings
   spacing: number;
   filterVideos: boolean;
-  forceTimeline: boolean;
   // Bleed ("fond perdu") - optional border around the trim size, filled
   // with the page background, for print production.
   bleedEnabled: boolean;
@@ -170,7 +169,6 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   margin: 118,
   spacing: 20,
   filterVideos: true,
-  forceTimeline: false,
   bleedEnabled: false,
   bleed: mmToPixels(3),
   showDates: true,
@@ -314,7 +312,6 @@ export async function saveAlbumConfig(albumId: string, config: AlbumConfig, asse
       margin: config.margin,
       spacing: config.spacing,
       filterVideos: config.filterVideos,
-      forceTimeline: config.forceTimeline,
       bleedEnabled: config.bleedEnabled,
       bleed: config.bleed,
       showDates: config.showDates,

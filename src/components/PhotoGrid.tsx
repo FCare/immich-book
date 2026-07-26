@@ -648,7 +648,6 @@ function PhotoGridEditor({
   const [spacing, setSpacing] = useState(initialConfig.spacing);
   // Never filter videos - simpler UX
   const filterVideos = false;
-  const [forceTimeline, setForceTimeline] = useState(initialConfig.forceTimeline);
   // Bleed ("fond perdu") - an optional border around the trim size,
   // filled with the page background, so a print shop trimming the book
   // doesn't reveal a white edge. Off by default since most digital/home
@@ -1165,7 +1164,6 @@ function PhotoGridEditor({
       margin,
       spacing,
       filterVideos: false, // Never filter videos - simpler UX
-      forceTimeline,
       bleedEnabled,
       bleed,
       showDates,
@@ -1215,7 +1213,6 @@ function PhotoGridEditor({
     margin,
     spacing,
     filterVideos,
-    forceTimeline,
     bleedEnabled,
     bleed,
     showDates,
@@ -1265,9 +1262,10 @@ function PhotoGridEditor({
       setIsLoading(true);
       setError(null);
       
-      // Respect album's sort order preference (asc = oldest first, desc = newest first)
-      const albumOrder = album.order || "desc";
-      
+      // Always oldest first - a photobook should read as a chronological
+      // story regardless of the source album's own sort setting in Immich.
+      const albumOrder = "asc";
+
       // Step 1: Get all time buckets for this album
       const timebuckets = await getTimeBuckets({
         albumId: album.id,
@@ -1706,7 +1704,6 @@ function PhotoGridEditor({
       pageHeight: validPageHeight,
       margin: layoutMargin,
       spacing: validSpacing,
-      forceTimeline,
       layoutVariants,
       pageCounts,
       textCardCounts,
@@ -1720,7 +1717,6 @@ function PhotoGridEditor({
     validSpacing,
     validPageWidth,
     validPageHeight,
-    forceTimeline,
     layoutVariants,
     pageCounts,
     textCardCounts,
@@ -2066,7 +2062,7 @@ function PhotoGridEditor({
         setTimeout(() => {
           const config: AlbumConfig = {
             printerId, pageWidth, pageHeight, margin, spacing,
-            filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
+            filterVideos, bleedEnabled, bleed, showDates, showCaptions,
             fontSize, pageBackground, cardStyle, customOrdering,
             layoutVariants: Object.fromEntries(layoutVariants),
             pageCounts: Object.fromEntries(pageCounts),
@@ -2109,7 +2105,7 @@ function PhotoGridEditor({
         setTimeout(() => {
           const config: AlbumConfig = {
             printerId, pageWidth, pageHeight, margin, spacing,
-            filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
+            filterVideos, bleedEnabled, bleed, showDates, showCaptions,
             fontSize, pageBackground, cardStyle, customOrdering,
             layoutVariants: Object.fromEntries(layoutVariants),
             pageCounts: Object.fromEntries(pageCounts),
@@ -2620,7 +2616,6 @@ function PhotoGridEditor({
                     margin,
                     spacing,
                     filterVideos,
-                    forceTimeline,
                     bleedEnabled,
                     bleed,
                     showDates,
@@ -3394,8 +3389,6 @@ function PhotoGridEditor({
           {settingsTab === "presentation" && (
             <SidebarPresentationSettings
               language={language}
-              forceTimeline={forceTimeline}
-              setForceTimeline={setForceTimeline}
               showDates={showDates}
               setShowDates={setShowDates}
               showCaptions={showCaptions}
@@ -4318,7 +4311,7 @@ function PhotoGridEditor({
                               setTimeout(() => {
                                 const config: AlbumConfig = {
                                   printerId, pageWidth, pageHeight, margin, spacing,
-                                  filterVideos, forceTimeline, bleedEnabled, bleed, showDates, showCaptions,
+                                  filterVideos, bleedEnabled, bleed, showDates, showCaptions,
                                   fontSize, pageBackground, cardStyle, customOrdering,
                                   layoutVariants: Object.fromEntries(layoutVariants),
                                   pageCounts: Object.fromEntries(pageCounts),

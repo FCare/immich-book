@@ -68,7 +68,6 @@ export interface LayoutOptions {
   pageHeight: number; // in pixels
   margin: number; // in pixels
   spacing: number; // in pixels
-  forceTimeline?: boolean; // preserve chronological order instead of grouping by aspect ratio
   // Bumping a page's variant reshuffles its bento arrangement (same
   // photos, different split pattern) without changing anything else -
   // lets a user "try another layout" per page.
@@ -170,16 +169,12 @@ interface Rect {
 interface SplitConfig {
   minCount: number;
   maxCount: number;
-  ratioMin: number;
-  ratioMax: number;
 }
 
 // Bento: fewer, larger tiles for a clean magazine feel.
 const BENTO_CONFIG: SplitConfig = {
   minCount: 2,
   maxCount: 4,
-  ratioMin: 0.25,
-  ratioMax: 0.75,
 };
 
 function averageAspectRatio(items: LayoutItem[]): number {
@@ -223,12 +218,15 @@ function splitFitError(
   return Math.abs(Math.log(w1 / h1 / r1)) + Math.abs(Math.log(w2 / h2 / r2));
 }
 
-// Recursively split a rectangle to tile it exactly among the given assets.
-// The axis and split fraction are chosen to match the actual aspect ratios
-// of the photos being placed - a group of landscape photos gets wide
-// cells, a group of portraits gets tall ones - instead of a shape picked
-// independently of the content. Zero wasted space, and (thanks to
-// clampFraction) never a degenerate cell.
+// Recursively split a rectangle to tile it exactly among the given assets,
+// always in their given (chronological) order - the first half of `items`
+// lands on one side of the split, the second half on the other, so a
+// photobook's page-by-page progression never reorders photos out of
+// sequence for the sake of a tidier mosaic. The axis and split fraction
+// are still chosen to match the two groups' actual aspect ratios - a
+// landscape-heavy half gets a wide cell, a portrait-heavy half gets a tall
+// one - instead of a shape picked independently of the content. Zero
+// wasted space, and (thanks to clampFraction) never a degenerate cell.
 //
 // `fractionOverrides`, keyed by the same `path` this function seeds its
 // own randomness with, lets a user-dragged boundary (see SplitInfo) pin
@@ -244,9 +242,7 @@ function splitRect(
   rect: Rect,
   items: LayoutItem[],
   spacing: number,
-  config: SplitConfig,
   path: string,
-  forceTimeline: boolean,
   fractionOverrides: Map<string, number> | undefined,
   axisOverrides: Map<string, "vertical" | "horizontal"> | undefined,
   splits: SplitInfo[],
@@ -255,35 +251,9 @@ function splitRect(
     return [{ id: items[0].id, asset: items[0].asset, ...rect }];
   }
 
-  let firstItems: LayoutItem[];
-  let secondItems: LayoutItem[];
-
-  if (forceTimeline) {
-    // Preserve chronological order: split items in sequence, not by aspect ratio
-    const firstCount = Math.max(1, Math.floor(items.length / 2));
-    firstItems = items.slice(0, firstCount);
-    secondItems = items.slice(firstCount);
-  } else {
-    // Group photos by aspect ratio so each side of the split is shape-
-    // homogeneous - which side is "first" alternates for variety.
-    const sorted = [...items].sort(
-      (a, b) => itemAspectRatio(a) - itemAspectRatio(b),
-    );
-    const countRatio =
-      config.ratioMin +
-      seededRandom(path + "-count") * (config.ratioMax - config.ratioMin);
-    const firstCount = Math.max(
-      1,
-      Math.min(items.length - 1, Math.round(items.length * countRatio)),
-    );
-    const portraitFirst = seededRandom(path + "-side") < 0.5;
-    firstItems = portraitFirst
-      ? sorted.slice(0, firstCount)
-      : sorted.slice(-firstCount);
-    secondItems = portraitFirst
-      ? sorted.slice(firstCount)
-      : sorted.slice(0, sorted.length - firstCount);
-  }
+  const firstCount = Math.max(1, Math.floor(items.length / 2));
+  const firstItems = items.slice(0, firstCount);
+  const secondItems = items.slice(firstCount);
 
   const r1 = averageAspectRatio(firstItems);
   const r2 = averageAspectRatio(secondItems);
@@ -350,8 +320,8 @@ function splitRect(
   }
 
   return [
-    ...splitRect(firstRect, firstItems, spacing, config, path + "A", forceTimeline, fractionOverrides, axisOverrides, splits),
-    ...splitRect(secondRect, secondItems, spacing, config, path + "B", forceTimeline, fractionOverrides, axisOverrides, splits),
+    ...splitRect(firstRect, firstItems, spacing, path + "A", fractionOverrides, axisOverrides, splits),
+    ...splitRect(secondRect, secondItems, spacing, path + "B", fractionOverrides, axisOverrides, splits),
   ];
 }
 
@@ -527,7 +497,6 @@ function layoutBentoPage(
   variant: number,
   forcedCount: number | undefined,
   textCardCount: number,
-  forceTimeline: boolean,
   fractionOverrides: Map<string, number> | undefined,
   axisOverrides: Map<string, "vertical" | "horizontal"> | undefined,
 ): { photos: PhotoBox[]; consumed: number; splits: SplitInfo[] } {
@@ -536,11 +505,10 @@ function layoutBentoPage(
   if (forcedCount !== undefined) {
     totalSlots = Math.max(1, forcedCount);
   } else {
-    // Deliberately independent of `variant` - the "shuffle" (reroll)
-    // button only bumps `variant` to get a different split/tiling of the
-    // same photos; it must never change how many photos land on the
-    // page, so this seed can't include it the way `seedBase` (used for
-    // the actual split below) does.
+    // Deliberately independent of `variant` - bumping `variant` gets a
+    // different split/tiling of the same photos, and must never change how
+    // many photos land on the page, so this seed can't include it the way
+    // `seedBase` (used for the actual split below) does.
     const seed = seededRandom(`count-bento-${scramblePageNumber(pageNumber)}`);
     totalSlots =
       BENTO_CONFIG.minCount +
@@ -571,9 +539,7 @@ function layoutBentoPage(
     contentRect,
     items,
     spacing,
-    BENTO_CONFIG,
     seedBase,
-    forceTimeline,
     fractionOverrides,
     axisOverrides,
     splits,
@@ -596,7 +562,6 @@ export function calculatePageLayout(
     pageHeight,
     margin,
     spacing,
-    forceTimeline,
     layoutVariants,
     pageCounts,
     textCardCounts,
@@ -631,7 +596,6 @@ export function calculatePageLayout(
       variant,
       forcedCount,
       textCardCount,
-      forceTimeline || false,
       boundaryOverrides,
       axisOverrides,
     );
