@@ -572,14 +572,23 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
 
         {backCoverLayout === "full-bleed" && backCoverImageBlob && (
           <>
+            {/* This panel sits at the left/outer edge of the separated-
+                cover spread, with the spine immediately to its right - so
+                the image (and its scrim below) bleed past the true page
+                edge on the top/left/bottom, but stop exactly at the trim
+                line on the right, where the spine begins. Without this,
+                a bleed-inclusive PDF still shows a sliver of plain page
+                background at the physical edge whenever the printer's
+                trim lands anywhere within its own tolerance, instead of
+                photo all the way to the edge. */}
             <Image
               src={backCoverImageBlob}
               style={{
                 position: "absolute",
-                top: 0,
-                left: 0,
-                width: coverPageWidth,
-                height: coverPageHeight,
+                top: -bleedPt,
+                left: -bleedPt,
+                width: coverPageWidth + bleedPt,
+                height: coverPageHeight + bleedPt * 2,
                 objectFit: "cover",
                 ...(backCoverFocalPoint
                   ? {
@@ -593,10 +602,10 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               src={COVER_SCRIM_DATA_URI}
               style={{
                 position: "absolute",
-                left: 0,
-                bottom: 0,
-                width: coverPageWidth,
-                height: coverScrimHeight,
+                left: -bleedPt,
+                bottom: -bleedPt,
+                width: coverPageWidth + bleedPt,
+                height: coverScrimHeight + bleedPt,
               }}
             />
             {!!backCoverText && (
@@ -745,14 +754,20 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
 
       {coverLayout === "full-bleed" && coverImageBlob && (
         <>
+          {/* This panel sits at the right/outer edge of the separated-
+              cover spread, with the spine immediately to its left - see
+              the matching comment in renderBackCoverContent for why the
+              image (and its scrim below) bleed past the true page edge
+              on the top/right/bottom, but stop exactly at the trim line
+              on the left, where the spine begins. */}
           <Image
             src={coverImageBlob}
             style={{
               position: "absolute",
-              top: 0,
+              top: -bleedPt,
               left: 0,
-              width: coverPageWidth,
-              height: coverPageHeight,
+              width: coverPageWidth + bleedPt,
+              height: coverPageHeight + bleedPt * 2,
               objectFit: "cover",
               ...(coverFocalPoint
                 ? {
@@ -767,9 +782,9 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             style={{
               position: "absolute",
               left: 0,
-              bottom: 0,
-              width: coverPageWidth,
-              height: coverScrimHeight,
+              bottom: -bleedPt,
+              width: coverPageWidth + bleedPt,
+              height: coverScrimHeight + bleedPt,
             }}
           />
           <View
@@ -944,14 +959,20 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
 
         {coverLayout === "full-bleed" && coverImageBlob && (
           <>
+            {/* The image (and its scrim below) bleed past the trim size
+                on all four sides, matching the bled page this Page itself
+                is sized to - otherwise a bleed-inclusive PDF still shows
+                a sliver of plain page background at the physical edge
+                whenever the printer's trim lands anywhere within its own
+                tolerance, instead of photo all the way to the edge. */}
             <Image
               src={coverImageBlob}
               style={{
                 position: "absolute",
-                top: 0,
-                left: 0,
-                width: coverPageWidth,
-                height: coverPageHeight,
+                top: -bleedPt,
+                left: -bleedPt,
+                width: coverPageWidth + bleedPt * 2,
+                height: coverPageHeight + bleedPt * 2,
                 objectFit: "cover",
                 ...(coverFocalPoint
                   ? {
@@ -961,17 +982,14 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                   : {}),
               }}
             />
-            {/* Approximates a top-to-bottom fade with stacked bands
-                rather than an Svg gradient - see PdfPageBackground's
-                comment for why Svg is avoided here. */}
             <Image
               src={COVER_SCRIM_DATA_URI}
               style={{
                 position: "absolute",
-                left: 0,
-                bottom: 0,
-                width: coverPageWidth,
-                height: coverScrimHeight,
+                left: -bleedPt,
+                bottom: -bleedPt,
+                width: coverPageWidth + bleedPt * 2,
+                height: coverScrimHeight + bleedPt,
               }}
             />
             <View
@@ -1086,6 +1104,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
       // Convert page dimensions from 300 DPI to 72 DPI
       const pageWidth = toPoints(pageData.width);
       const pageHeight = toPoints(pageData.height);
+      const marginPt = toPoints(validMargin);
       const pageBleedWidth = pageWidth + bleedPt * 2;
       const pageBleedHeight = pageHeight + bleedPt * 2;
       return (
@@ -1308,23 +1327,50 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               dateStripHeight + captionStripHeight;
 
             if (cardStyle === "clean") {
+              const cardLeft = toPoints(photoBox.x);
+              const cardTop = toPoints(photoBox.y);
+              // "Clean" cards butt edge-to-edge against their neighbors
+              // (no mat/border), so a card sitting flush against the
+              // page's own margin reads as intentionally full-bleed -
+              // same reasoning as the covers' full-bleed photo (see
+              // buildPdfDocument's cover blocks): extend it past the
+              // trim size on whichever sides touch the page edge, or a
+              // bleed-inclusive PDF still shows a sliver of plain page
+              // background there once trimmed. A caption/date strip
+              // covers the card's own bottom edge, so that side is left
+              // alone rather than bleeding a photo edge behind text.
+              const EDGE_EPS = 0.5;
+              const bleedLeft =
+                cardLeft <= marginPt + EDGE_EPS ? bleedPt : 0;
+              const bleedTop = cardTop <= marginPt + EDGE_EPS ? bleedPt : 0;
+              const bleedRight =
+                cardLeft + width >= pageWidth - marginPt - EDGE_EPS
+                  ? bleedPt
+                  : 0;
+              const bleedBottom =
+                bottomStripHeight === 0 &&
+                cardTop + height >= pageHeight - marginPt - EDGE_EPS
+                  ? bleedPt
+                  : 0;
               return (
                 <View
                   key={photoBox.id}
                   style={{
                     position: "absolute",
-                    left: toPoints(photoBox.x),
-                    top: toPoints(photoBox.y),
+                    left: cardLeft,
+                    top: cardTop,
                     width,
                     height,
                   }}
                 >
                   <PdfPhotoImage
                     src={imageBlob}
-                    top={0}
-                    left={0}
-                    containerWidth={width}
-                    containerHeight={height - bottomStripHeight}
+                    top={-bleedTop}
+                    left={-bleedLeft}
+                    containerWidth={width + bleedLeft + bleedRight}
+                    containerHeight={
+                      height - bottomStripHeight + bleedTop + bleedBottom
+                    }
                     focalPoint={cardFocalPoint}
                   />
                   {!!cardCaption && (
@@ -1727,14 +1773,17 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
 
         {backCoverLayout === "full-bleed" && backCoverImageBlob && (
           <>
+            {/* Bleeds past the trim size on all four sides, matching the
+                bled page this Page itself is sized to - see the matching
+                comment on the front cover's full-bleed Image. */}
             <Image
               src={backCoverImageBlob}
               style={{
                 position: "absolute",
-                top: 0,
-                left: 0,
-                width: coverPageWidth,
-                height: coverPageHeight,
+                top: -bleedPt,
+                left: -bleedPt,
+                width: coverPageWidth + bleedPt * 2,
+                height: coverPageHeight + bleedPt * 2,
                 objectFit: "cover",
                 ...(backCoverFocalPoint
                   ? {
@@ -1750,10 +1799,10 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                   src={COVER_SCRIM_DATA_URI}
                   style={{
                     position: "absolute",
-                    left: 0,
-                    bottom: 0,
-                    width: coverPageWidth,
-                    height: coverScrimHeight,
+                    left: -bleedPt,
+                    bottom: -bleedPt,
+                    width: coverPageWidth + bleedPt * 2,
+                    height: coverScrimHeight + bleedPt,
                   }}
                 />
                 <View

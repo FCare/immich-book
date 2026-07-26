@@ -187,6 +187,21 @@ export function SidebarPresentationSettings({
             </div>
           ))}
         </div>
+        {/* Hex code of the selected background's base color - handy for
+            matching it elsewhere, e.g. picking the same color for a
+            Flexilivre-style separated cover's spine. */}
+        <div className="flex items-center gap-2 mt-2.5">
+          <div
+            className="w-5 h-5 rounded-full ring-1 ring-inset ring-black/10 dark:ring-white/10 flex-none"
+            style={{ backgroundColor: PAGE_BACKGROUNDS[pageBackground].base }}
+          />
+          <span className="text-xs font-mono text-gray-500 dark:text-gray-400 select-all">
+            {PAGE_BACKGROUNDS[pageBackground].base}
+          </span>
+          <span className="text-[11px] text-gray-400 dark:text-gray-500">
+            {t(language, "pageBackgroundColorHint")}
+          </span>
+        </div>
       </div>
     </div>
   );

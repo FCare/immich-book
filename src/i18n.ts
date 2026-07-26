@@ -44,7 +44,8 @@ export const translations = {
     fontSize: "Taille de police",
     cardStyle: "Style de carte",
     pageBackground: "Fond de page",
-    
+    pageBackgroundColorHint: "couleur principale - pour assortir une tranche ou une couverture",
+
     // Cover settings
     showCover: "Afficher la couverture",
     includeCoverPage: "Inclure la page de couverture",
@@ -245,7 +246,8 @@ export const translations = {
     fontSize: "Font Size",
     cardStyle: "Card Style",
     pageBackground: "Page Background",
-    
+    pageBackgroundColorHint: "main color - to match a spine or a cover",
+
     // Cover settings
     showCover: "Show Cover",
     includeCoverPage: "Include cover page",
