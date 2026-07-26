@@ -3,10 +3,21 @@ import type { AssetResponseDto } from "@immich/sdk";
 import type { ImmichConfig } from "../types";
 import { t, type Language } from "../i18n";
 import type { Page } from "../utils/pageLayout";
-import type { CardStyle, PageBackground } from "../config/albumConfig";
-import { pageBackgroundCss } from "./PhotoGrid";
+import type {
+  CardStyle,
+  CoverLayout,
+  FrameSize,
+  PageBackground,
+} from "../config/albumConfig";
+import { pageBackgroundCss, SCRAPBOOK } from "./PhotoGrid";
 
 export const PAGE_THUMB_WIDTH = 56;
+
+// Same defaults as FrontCoverStandalone.tsx/BackCoverStandalone.tsx -
+// keeps the "photo-title" thumbnail's card the same shape as the real
+// one when the user hasn't resized it.
+const DEFAULT_COVER_FRAME: FrameSize = { width: 0.84, height: 0.68 };
+const DEFAULT_BACK_COVER_FRAME: FrameSize = { width: 0.42, height: 0.3 };
 
 // "Scrapbook" cards sit inset from their own bento box (a mat border,
 // tilt, tape - see the real page render in PhotoGrid.tsx), leaving the
@@ -22,6 +33,10 @@ export interface PageNavRailProps {
   showCover: boolean;
   coverAsset: AssetResponseDto | null;
   backCoverAsset: AssetResponseDto | null;
+  coverLayout: CoverLayout;
+  backCoverLayout: CoverLayout;
+  coverFrameSize: FrameSize | null;
+  backCoverFrameSize: FrameSize | null;
   missingAssetIds: Set<string>;
   immichConfig: ImmichConfig;
   language: Language;
@@ -170,6 +185,9 @@ const CoverThumbButton = memo(
     anchor,
     assetId,
     isMissing,
+    layout,
+    frameSize,
+    defaultFrame,
     aspectRatio,
     title,
     label,
@@ -179,12 +197,103 @@ const CoverThumbButton = memo(
     anchor: string;
     assetId: string | null;
     isMissing: boolean;
+    layout: CoverLayout;
+    frameSize: FrameSize | null;
+    defaultFrame: FrameSize;
     aspectRatio: string;
     title: string;
     label: string;
     immichConfig: ImmichConfig;
     pageBackground: PageBackground;
   }) {
+    const missingMark = assetId && isMissing && <MissingPhotoMark />;
+    const photoSrc = assetId && !isMissing
+      ? `${immichConfig.baseUrl}/assets/${assetId}/thumbnail?size=thumbnail`
+      : null;
+
+    // "photo-title" mounts the photo on a small centered card, not full
+    // bleed - mirroring that here (instead of always filling the whole
+    // thumbnail) is the difference between a thumbnail that looks like
+    // the real cover and one that just looks wrong for that layout.
+    let content;
+    if (layout === "full-bleed") {
+      content = photoSrc ? (
+        <img
+          src={photoSrc}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          fetchPriority="low"
+          className="absolute inset-0 w-full h-full object-cover"
+          onError={(e) => {
+            e.currentTarget.style.visibility = "hidden";
+          }}
+        />
+      ) : (
+        missingMark || (
+          <span className="absolute inset-0 flex items-center justify-center text-[8px] text-gray-400 dark:text-gray-500 text-center px-1 leading-tight">
+            {label}
+          </span>
+        )
+      );
+    } else if (layout === "photo-title") {
+      const { width, height } = frameSize ?? defaultFrame;
+      const cardWidthPx = PAGE_THUMB_WIDTH * width;
+      // Same formula as FrontCoverStandalone.tsx/BackCoverStandalone.tsx
+      // (a pixel-based mat border, floored at 4px so it doesn't vanish
+      // at small sizes) - matters more than usual here, since the real
+      // card can be this small too.
+      const insetFrac = Math.max(4, cardWidthPx * 0.045) / cardWidthPx;
+      // The real card also reserves a caption strip below the photo,
+      // whether or not there's a caption - approximated as a fixed
+      // fraction rather than threading the actual text size through,
+      // since at this scale a caption is never legible anyway.
+      const captionFrac = 0.18;
+      content = (
+        <div
+          className="absolute shadow-sm"
+          style={{
+            top: `${((1 - height) / 2) * 100}%`,
+            left: `${((1 - width) / 2) * 100}%`,
+            width: `${width * 100}%`,
+            height: `${height * 100}%`,
+            backgroundColor: SCRAPBOOK.mat,
+          }}
+        >
+          {(photoSrc || missingMark) && (
+            <div
+              className="absolute overflow-hidden"
+              style={{
+                top: `${insetFrac * 100}%`,
+                left: `${insetFrac * 100}%`,
+                right: `${insetFrac * 100}%`,
+                bottom: `${(insetFrac + captionFrac) * 100}%`,
+              }}
+            >
+              {photoSrc ? (
+                <img
+                  src={photoSrc}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  fetchPriority="low"
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    e.currentTarget.style.visibility = "hidden";
+                  }}
+                />
+              ) : (
+                missingMark
+              )}
+            </div>
+          )}
+        </div>
+      );
+    } else {
+      // "text-only" never mounts a photo, whether or not one is assigned.
+      content = null;
+    }
+
     return (
       <button
         onClick={() => scrollToAnchor(anchor)}
@@ -196,25 +305,7 @@ const CoverThumbButton = memo(
           ...pageBackgroundCss(pageBackground),
         }}
       >
-        {assetId && !isMissing ? (
-          <img
-            src={`${immichConfig.baseUrl}/assets/${assetId}/thumbnail?size=thumbnail`}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            fetchPriority="low"
-            className="absolute inset-0 w-full h-full object-cover"
-            onError={(e) => {
-              e.currentTarget.style.visibility = "hidden";
-            }}
-          />
-        ) : assetId && isMissing ? (
-          <MissingPhotoMark />
-        ) : (
-          <span className="absolute inset-0 flex items-center justify-center text-[8px] text-gray-400 dark:text-gray-500 text-center px-1 leading-tight">
-            {label}
-          </span>
-        )}
+        {content}
       </button>
     );
   },
@@ -224,6 +315,8 @@ const CoverThumbButton = memo(
   (prev, next) =>
     prev.assetId === next.assetId &&
     prev.isMissing === next.isMissing &&
+    prev.layout === next.layout &&
+    prev.frameSize === next.frameSize &&
     prev.aspectRatio === next.aspectRatio &&
     prev.pageBackground === next.pageBackground,
 );
@@ -239,6 +332,10 @@ export function PageNavRail({
   showCover,
   coverAsset,
   backCoverAsset,
+  coverLayout,
+  backCoverLayout,
+  coverFrameSize,
+  backCoverFrameSize,
   missingAssetIds,
   immichConfig,
   language,
@@ -271,6 +368,9 @@ export function PageNavRail({
             anchor="cover"
             assetId={coverAsset?.id ?? null}
             isMissing={!!coverAsset && missingAssetIds.has(coverAsset.id)}
+            layout={coverLayout}
+            frameSize={coverFrameSize}
+            defaultFrame={DEFAULT_COVER_FRAME}
             aspectRatio={thumbAspectRatio}
             title={t(language, "cover")}
             label={t(language, "cover")}
@@ -306,6 +406,9 @@ export function PageNavRail({
             isMissing={
               !!backCoverAsset && missingAssetIds.has(backCoverAsset.id)
             }
+            layout={backCoverLayout}
+            frameSize={backCoverFrameSize}
+            defaultFrame={DEFAULT_BACK_COVER_FRAME}
             aspectRatio={thumbAspectRatio}
             title={t(language, "backCoverLabel")}
             label={t(language, "backCoverLabel")}

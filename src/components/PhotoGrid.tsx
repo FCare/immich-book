@@ -1615,14 +1615,17 @@ function PhotoGridEditor({
   }, [defaultFilteredAssets, customOrdering]);
 
   // Cover photo - explicit pick if the user made one, otherwise the
-  // book's first photo in its current order.
+  // book's first photo in its current order. The fallback skips photos
+  // flagged missing/set-aside - those were pulled out of the active book
+  // on purpose, so they shouldn't silently resurface as the cover just
+  // because they happen to sit first/last in the order.
   const coverAsset = useMemo(() => {
     if (coverAssetId) {
       const picked = filteredAssets.find((a) => a.id === coverAssetId);
       if (picked) return picked;
     }
-    return filteredAssets[0] ?? null;
-  }, [filteredAssets, coverAssetId]);
+    return filteredAssets.find((a) => !missingAssetIds.has(a.id)) ?? null;
+  }, [filteredAssets, coverAssetId, missingAssetIds]);
 
   // Back cover photo - explicit pick if the user made one, otherwise the
   // book's last photo in its current order. Independent of the front
@@ -1632,8 +1635,11 @@ function PhotoGridEditor({
       const picked = filteredAssets.find((a) => a.id === backCoverAssetId);
       if (picked) return picked;
     }
-    return filteredAssets[filteredAssets.length - 1] ?? null;
-  }, [filteredAssets, backCoverAssetId]);
+    for (let i = filteredAssets.length - 1; i >= 0; i--) {
+      if (!missingAssetIds.has(filteredAssets[i].id)) return filteredAssets[i];
+    }
+    return null;
+  }, [filteredAssets, backCoverAssetId, missingAssetIds]);
 
   // Interior pages leave out the cover/back-cover photos when the user
   // opts in - otherwise each one prints twice (once on its cover, again
@@ -4744,6 +4750,10 @@ function PhotoGridEditor({
         showCover={showCover}
         coverAsset={coverAsset}
         backCoverAsset={backCoverAsset}
+        coverLayout={coverLayout}
+        backCoverLayout={backCoverLayout}
+        coverFrameSize={resolvedCoverFrameSize}
+        backCoverFrameSize={resolvedBackCoverFrameSize}
         missingAssetIds={missingAssetIds}
         immichConfig={immichConfig}
         language={language}

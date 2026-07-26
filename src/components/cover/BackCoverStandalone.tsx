@@ -198,7 +198,6 @@ export function BackCoverStandalone({
         )}
 
         {backCoverLayout === "photo-title" &&
-          (backCoverAsset || backCoverText !== "") &&
           (() => {
             const imageUrl = backCoverAsset
               ? `${immichConfig.baseUrl}/assets/${backCoverAsset.id}/thumbnail?size=preview`
