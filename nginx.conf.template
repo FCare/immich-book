@@ -32,16 +32,6 @@ server {
         proxy_read_timeout 180s;
     }
 
-    # Proxy to the local LLM (thebrain, OpenAI-compatible llama.cpp server)
-    # for page caption generation. Reached directly on the internal Docker
-    # network - no public exposure, no auth needed (same reasoning as the
-    # Immich proxy above: the edge is already gated by Voight-Kampff).
-    location /llm/ {
-        proxy_pass http://thebrain:8000/;
-        proxy_set_header Host $host;
-        proxy_read_timeout 120s;
-    }
-
     # Proxy to the photobook storage backend - saved page styles,
     # captions, ordering etc. per album, so a photobook can be resumed
     # from any device rather than being tied to one browser's storage.

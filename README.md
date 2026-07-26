@@ -13,24 +13,27 @@ A web application that generates print-ready photo books from your Immich albums
 
 ### Layout & Customization
 
-- Three composition styles per page - **Bento** (varied-size tiles matched to each photo's aspect ratio), **Columns** (Pinterest-style masonry), **Collage** (denser Bento variant) - assigned automatically, overridable per page, with a shuffle control to reroll the arrangement
+- Three composition styles per page - **Bento** (varied-size tiles matched to each photo's aspect ratio), **Columns** (Pinterest-style masonry), **Collage** (denser Bento variant) - assigned automatically, overridable per page
+- Draggable bento split boundaries with magnetic snap, per-split axis flip, resizable photo frames
 - Force how many photos land on a given page
 - Page dimensions in millimeters, with A4/Square format presets, or fully custom
-- Combine pages mode for dual-page spreads
+- Per-printer profiles (see below) with their own trim sizes, bleed, and page-count constraints
 - Per-album configuration with global fallback
+- Full undo/redo history of edits
 
 ### Photo Presentation
 
-- Polaroid-style photo cards (mat, soft shadow, mild tilt, washi tape)
-- Drag & drop to reorder photos
+- Polaroid, scrapbook and clean (edge-to-edge) card styles
+- Drag & drop to reorder photos, or set a placed photo aside to pull it back into the unplaced list without losing your layout
 - Optional date badge per photo
-- Optional user-written caption per photo (only cards with a caption use the extra space)
-- LLM-generated page captions from the Immich descriptions of the photos on that page (via a local model, proxied server-side), editable, alternating top/bottom placement
+- Optional user-written caption per photo (only cards with a caption use the extra space), and an editable per-page caption band
+- Textured or flat page backgrounds, with the background's hex code shown for matching a cover/spine color
+- Front/back cover with photo+title, full-bleed, or text-only layouts, and an optional separated cover for printers that need one
 
 ### Preview & Export
 
-- Live preview, automatically scaled to fit the window
-- Page break indicator in combined mode
+- Live preview, automatically scaled to fit the window, with a page thumbnail navigation rail (cover/back-cover anchors pinned, scrollable interior pages)
+- Printer-accurate bleed ("fond perdu"): bled photos extend past the trim edge so print-shop cutting tolerance never reveals a background sliver
 - High-quality PDF export using @react-pdf/renderer
 
 ## Getting Started
@@ -59,17 +62,22 @@ You will need:
 
 ### Deployment
 
-This fork is meant to be deployed with Docker, behind a reverse proxy that reaches your Immich server on the same internal network:
+This app is meant to be deployed with Docker, behind a reverse proxy that reaches your Immich server on the same internal network.
+
+**Read [INTEGRATION.md](INTEGRATION.md) first** - this app has no authentication of its own and expects a trusted upstream reverse proxy to provide it. Deploying it without that layer means anyone who can reach it has full access to every stored photobook.
 
 ```bash
 git clone <this-repository>
 cd immich-book
+cp .env.example .env
 ```
 
-Put your Immich API key in `.env`:
+Fill in `.env` (see `.env.example` for what each variable does):
 
 ```bash
 IMMICH_API_KEY=your-immich-api-key
+IMMICH_SERVER_URL=https://your-immich-server.example.com
+EXTERNAL_NETWORK=name-of-your-existing-docker-network
 ```
 
 Then build and run:
@@ -79,18 +87,15 @@ docker compose build
 docker compose up -d
 ```
 
-`nginx.conf.template` proxies `/api/` to `immich_server:2283` (adjust the container name/port to match your Immich deployment) and injects `IMMICH_API_KEY` server-side. `docker-compose.yml` sets `VITE_IMMICH_PROXY_TARGET` as a build arg - the app auto-connects through the proxy on load, no manual entry.
-
-If you also want LLM-generated page captions, point the `/llm/` proxy location in `nginx.conf.template` at an OpenAI-compatible chat completions endpoint on your network.
+`nginx.conf.template` proxies `/api/` to `immich_server:2283` (adjust the container name/port to match your Immich deployment) and injects `IMMICH_API_KEY` server-side. `docker-compose.yml` passes `IMMICH_SERVER_URL` through as the `VITE_IMMICH_PROXY_TARGET` build arg - the app auto-connects through the proxy on load, no manual entry.
 
 ### Using Immich Book
 
 1. **Select an Album** - browse your albums, click one to open it
-2. **Configure Page Layout** - page format/dimensions, combine pages, spacing, dates, captions
-3. **Adjust individual pages** - switch a page's style (Bento/Columns/Collage), shuffle its arrangement, force its photo count
-4. **Customize photos** - drag & drop to reorder, add a per-photo caption
-5. **Generate page captions** - click "Generate captions" to have the local LLM summarize each page's photo descriptions, then edit as needed
-6. **Generate PDF** - click "Generate PDF" to preview, use the PDF viewer toolbar to download
+2. **Configure Page Layout** - printer profile, page format/dimensions, spacing, dates, captions
+3. **Adjust individual pages** - switch a page's style (Bento/Columns/Collage), drag split boundaries, force its photo count
+4. **Customize photos** - drag & drop to reorder, add a per-photo caption, set a photo aside if you're not sure where it belongs yet
+5. **Generate PDF** - click "Generate PDF" to preview, use the PDF viewer toolbar to download
 
 ## Development
 

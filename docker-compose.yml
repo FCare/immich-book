@@ -5,7 +5,7 @@ services:
     build:
       context: .
       args:
-        - VITE_IMMICH_PROXY_TARGET=https://photos.caronboulme.fr
+        - VITE_IMMICH_PROXY_TARGET=${IMMICH_SERVER_URL:?Set IMMICH_SERVER_URL in .env}
     container_name: immich-book-frontend
     restart: unless-stopped
     environment:
@@ -13,7 +13,7 @@ services:
     depends_on:
       - immich-book-backend
     networks:
-      - ansible
+      - proxy
 
   immich-book-backend:
     build:
@@ -23,11 +23,15 @@ services:
     volumes:
       - immich-book-data:/data
     networks:
-      - ansible
+      - proxy
 
 networks:
-  ansible:
+  # Must already exist and be reachable by whatever sits in front of this
+  # stack (reverse proxy, Immich server) - see INTEGRATION.md. Point
+  # EXTERNAL_NETWORK at that network's real name; it isn't created here.
+  proxy:
     external: true
+    name: ${EXTERNAL_NETWORK:-immich-book_proxy}
 
 volumes:
   immich-book-data:

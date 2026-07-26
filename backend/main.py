@@ -37,11 +37,12 @@ def init_db():
             print("Migrating photobooks table: adding assets_snapshot column")
             conn.execute("ALTER TABLE photobooks ADD COLUMN assets_snapshot TEXT")
         
-        # Migration: add user_id column and duplicate existing data for both "Sophie Boulme" and "admin"
+        # Migration: add user_id column, attributing any pre-existing
+        # (pre-multi-user) photobooks to a single default account
         if "user_id" not in columns:
             print("Migrating photobooks table: adding user_id column")
             conn.execute("ALTER TABLE photobooks ADD COLUMN user_id TEXT")
-            
+
             # Drop old primary key and create new composite primary key
             # SQLite doesn't support DROP PRIMARY KEY, so we need to recreate the table
             print("Recreating photobooks table with composite primary key (user_id, album_id)")
@@ -58,24 +59,22 @@ def init_db():
                 )
                 """
             )
-            
-            # Duplicate existing photobooks for both Sophie Boulme and admin
+
+            DEFAULT_MIGRATED_USER_ID = "admin"
             conn.execute(
                 """
                 INSERT INTO photobooks (user_id, album_id, config, assets_snapshot, updated_at)
-                SELECT 'Sophie Boulme', album_id, config, assets_snapshot, updated_at FROM photobooks_old
-                """
-            )
-            conn.execute(
-                """
-                INSERT INTO photobooks (user_id, album_id, config, assets_snapshot, updated_at)
-                SELECT 'admin', album_id, config, assets_snapshot, updated_at FROM photobooks_old
-                """
+                SELECT ?, album_id, config, assets_snapshot, updated_at FROM photobooks_old
+                """,
+                (DEFAULT_MIGRATED_USER_ID,),
             )
             conn.execute("DROP TABLE photobooks_old")
-            
-            photobook_count = conn.execute("SELECT COUNT(*) FROM photobooks WHERE user_id = 'Sophie Boulme'").fetchone()[0]
-            print(f"Migration complete: duplicated {photobook_count} photobooks for 'Sophie Boulme' and 'admin'")
+
+            photobook_count = conn.execute(
+                "SELECT COUNT(*) FROM photobooks WHERE user_id = ?",
+                (DEFAULT_MIGRATED_USER_ID,),
+            ).fetchone()[0]
+            print(f"Migration complete: attributed {photobook_count} photobooks to '{DEFAULT_MIGRATED_USER_ID}'")
         
         conn.execute(
             """
