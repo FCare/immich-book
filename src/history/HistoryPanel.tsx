@@ -363,6 +363,9 @@ export function HistoryPanel({
                     case "set-aside-photo":
                       description = t(language, "historySetAsidePhoto");
                       break;
+                    case "insert-page":
+                      description = `${t(language, "historyInsertPage")} ${op.pageNumber}`;
+                      break;
                   }
 
                   return (

@@ -266,6 +266,71 @@ export function captionAtBottom(logicalPageNumber: number): boolean {
   return logicalPageNumber % 2 === 0;
 }
 
+// Inserting a brand new page at `fromPageNumber` (see handleInsertPageAt)
+// pushes every existing page at/after that point one number further back
+// - every page-number-keyed override has to move with its page, or it
+// would silently re-apply to whatever page now sits at its old number.
+function shiftPageKeyedMap<V>(
+  map: Map<number, V>,
+  fromPageNumber: number,
+): Map<number, V> {
+  const next = new Map<number, V>();
+  map.forEach((value, pageNumber) => {
+    next.set(pageNumber >= fromPageNumber ? pageNumber + 1 : pageNumber, value);
+  });
+  return next;
+}
+
+// SplitInfo.path (see pageLayout.ts) embeds its page number as
+// "bento-{N}-v{variant}<A/B branch>" instead of using it as a plain map
+// key - these two pick that number out and rewrite it in place.
+function bentoPathPageNumber(path: string): number | null {
+  const match = path.match(/^bento-(\d+)-/);
+  return match ? Number(match[1]) : null;
+}
+function withBentoPageNumber(path: string, pageNumber: number): string {
+  return path.replace(/^bento-\d+-/, `bento-${pageNumber}-`);
+}
+
+// Same shift as shiftPageKeyedMap, for the bento split-boundary/axis
+// override maps.
+function shiftBentoPathKeyedMap<V>(
+  map: Map<string, V>,
+  fromPageNumber: number,
+): Map<string, V> {
+  const next = new Map<string, V>();
+  map.forEach((value, path) => {
+    const pageNumber = bentoPathPageNumber(path);
+    if (pageNumber !== null && pageNumber >= fromPageNumber) {
+      next.set(withBentoPageNumber(path, pageNumber + 1), value);
+    } else {
+      next.set(path, value);
+    }
+  });
+  return next;
+}
+
+// Same shift again, for text card contents - keyed by the card's synthetic
+// id ("text-{pageNumber}-{index}", see layoutBentoPage in pageLayout.ts).
+function shiftTextCardKeyedMap<V>(
+  map: Map<string, V>,
+  fromPageNumber: number,
+): Map<string, V> {
+  const next = new Map<string, V>();
+  map.forEach((value, cardId) => {
+    const match = cardId.match(/^text-(\d+)-(.*)$/);
+    if (match) {
+      const pageNumber = Number(match[1]);
+      if (pageNumber >= fromPageNumber) {
+        next.set(`text-${pageNumber + 1}-${match[2]}`, value);
+        return;
+      }
+    }
+    next.set(cardId, value);
+  });
+  return next;
+}
+
 export interface PageFormat {
   // Which product line this belongs to (e.g. "Photo Book", "Livre de
   // poche") - printers with more than one category get a category
@@ -1808,6 +1873,22 @@ function PhotoGridEditor({
     axisOverrides,
   ]);
 
+  // Backs the "pages with missing photos" panel - missingAssetIds can be
+  // non-empty while still containing zero *interior-page* photos (e.g.
+  // a set-aside/missing cover or back-cover photo, which isn't part of
+  // `pages` at all), so the panel's own visibility has to key off this
+  // instead of missingAssetIds.size directly - otherwise it shows with
+  // nothing underneath the header.
+  const pagesWithMissingPhotos = useMemo(
+    () =>
+      pages.filter((page) =>
+        page.photos.some(
+          (photo) => photo.asset && missingAssetIds.has(photo.asset.id),
+        ),
+      ),
+    [pages, missingAssetIds],
+  );
+
   // Swaps two cards outright, wherever they are: same page swaps their
   // slot assignment directly (the auto layout's aspect-ratio-driven
   // grouping doesn't otherwise respect a specific drop position - see
@@ -2078,6 +2159,232 @@ function PhotoGridEditor({
       { type: "set-aside-photo", assetId, timestamp: Date.now() },
       ...prev,
     ]);
+  };
+
+  // Creates a brand new page holding exactly the selected photo - either
+  // one still waiting in the "unused photos" strip, or one already placed
+  // elsewhere in the book being relocated - at an arbitrary point between
+  // pages (afterPageNumber 0 = before the very first page, or the only
+  // option when the book is currently empty). Every page-number-keyed
+  // override for pages at/after the insertion point shifts up by one to
+  // make room; the full "before" state of those maps is captured in the
+  // history entry so undo can restore it exactly, rather than trying to
+  // reverse the shift key-by-key (see the "insert-page" HistoryOperation).
+  const handleInsertPageAt = (afterPageNumber: number) => {
+    const isNewPhoto = !!selectedNewAsset;
+    const placedAssetId =
+      !isNewPhoto &&
+      swapFirstId &&
+      swapFirstId !== "cover" &&
+      swapFirstId !== "back-cover" &&
+      !swapFirstId.startsWith("text-")
+        ? swapFirstId
+        : null;
+    const asset = isNewPhoto
+      ? selectedNewAsset
+      : placedAssetId
+        ? (filteredAssets.find((a) => a.id === placedAssetId) ?? null)
+        : null;
+    if (!asset) return;
+
+    const newPageNumber = afterPageNumber + 1;
+    const anchorAssetId =
+      pages
+        .find((p) => p.pageNumber === newPageNumber)
+        ?.photos.find((ph) => ph.asset && !ph.id.startsWith("text-"))?.asset
+        ?.id ?? null;
+    // Only meaningful when relocating an already-placed photo: the page
+    // it's currently sitting on, so its own count can be pinned down by
+    // one - otherwise it would keep auto-consuming its old count and
+    // silently steal whatever asset now sits at the vacated slot instead
+    // of leaving that spot for the new page.
+    const sourcePage = !isNewPhoto
+      ? (pages.find((p) => p.photos.some((ph) => ph.asset?.id === asset.id)) ?? null)
+      : null;
+
+    const prevAssets = assets;
+    const updatedAssets = isNewPhoto
+      ? [...assets]
+      : assets.filter((a) => a.id !== asset.id);
+    let insertIndex: number;
+    if (!anchorAssetId) {
+      insertIndex = updatedAssets.length;
+    } else if (anchorAssetId === asset.id) {
+      // The anchor (the page's current first photo) IS the photo being
+      // moved - it's already exactly where it needs to go, so reinsert it
+      // at its own original position instead of searching for an id that
+      // no longer exists post-removal (which would otherwise fall
+      // through to "end of book").
+      insertIndex = assets.findIndex((a) => a.id === asset.id);
+    } else {
+      const found = updatedAssets.findIndex((a) => a.id === anchorAssetId);
+      insertIndex = found === -1 ? updatedAssets.length : found;
+    }
+    updatedAssets.splice(insertIndex, 0, asset);
+
+    const prevPageCounts = Object.fromEntries(pageCounts);
+    const prevTextCardCounts = Object.fromEntries(textCardCounts);
+    const prevLayoutVariants = Object.fromEntries(layoutVariants);
+    const prevSlotOverrides = Object.fromEntries(slotOverrides);
+    const prevBoundaryOverrides = Object.fromEntries(boundaryOverrides);
+    const prevAxisOverrides = Object.fromEntries(axisOverrides);
+    const prevPageCaptions = Object.fromEntries(pageCaptions);
+    const prevTextCardContents = Object.fromEntries(textCardContents);
+
+    const nextPageCounts = shiftPageKeyedMap(pageCounts, newPageNumber);
+    nextPageCounts.set(newPageNumber, 1);
+    const nextTextCardCounts = shiftPageKeyedMap(textCardCounts, newPageNumber);
+    const nextLayoutVariants = shiftPageKeyedMap(layoutVariants, newPageNumber);
+    const nextSlotOverrides = shiftPageKeyedMap(slotOverrides, newPageNumber);
+    const nextBoundaryOverrides = shiftBentoPathKeyedMap(boundaryOverrides, newPageNumber);
+    const nextAxisOverrides = shiftBentoPathKeyedMap(axisOverrides, newPageNumber);
+    const nextPageCaptions = shiftPageKeyedMap(pageCaptions, newPageNumber);
+    const nextTextCardContents = shiftTextCardKeyedMap(textCardContents, newPageNumber);
+
+    // The plain shift above is enough for pages that were never touched,
+    // but it isn't enough to keep their bento arrangement looking the
+    // same: layoutBentoPage's own auto-computed split pattern and slot
+    // count are seeded from the page's number itself (see
+    // layoutBentoPage/splitRect in pageLayout.ts), so a page that had no
+    // explicit override at all would otherwise silently reshuffle the
+    // moment its number changes underneath it. Baking each affected
+    // page's CURRENT computed geometry (split fractions/axes, per-slot
+    // asset assignment, total/text-card counts) as explicit overrides at
+    // its new number freezes its exact appearance, whether or not the
+    // user had customized it before - this is a superset of the plain
+    // shift for any page that still exists in the current layout, so it
+    // simply overwrites those entries.
+    for (const page of pages) {
+      if (page.pageNumber < newPageNumber) continue;
+      const newNum = page.pageNumber + 1;
+      const isSourcePage = sourcePage?.pageNumber === page.pageNumber;
+      // The source page's own content just changed (one photo fewer) -
+      // its geometry legitimately needs to recompute fresh for that, so
+      // only its slot count is pinned (one less than before); every other
+      // page's content is untouched, so its exact geometry is baked too.
+      nextPageCounts.set(newNum, page.photos.length - (isSourcePage ? 1 : 0));
+      nextTextCardCounts.set(newNum, page.photos.filter((ph) => !ph.asset).length);
+      if (isSourcePage) continue;
+      // Text-card ids embed their own page number ("text-{N}-{index}",
+      // see layoutBentoPage) - has to be rewritten to the new number too,
+      // or this slot override won't match the new page's natural ids at
+      // all (a real asset's id doesn't embed a page number, so those need
+      // no rewriting).
+      nextSlotOverrides.set(
+        newNum,
+        page.photos.map((ph) =>
+          ph.asset ? ph.id : ph.id.replace(/^text-\d+-/, `text-${newNum}-`),
+        ),
+      );
+      for (const split of page.splits) {
+        const newPath = withBentoPageNumber(split.path, newNum);
+        nextBoundaryOverrides.set(newPath, split.fraction);
+        nextAxisOverrides.set(newPath, split.axis);
+      }
+    }
+    // The source page sits *before* the insertion point (its own number
+    // never shifts) - the loop above only walks pages at/after that
+    // point, so it needs the same one-fewer-slot pin applied separately.
+    if (sourcePage && sourcePage.pageNumber < newPageNumber) {
+      nextPageCounts.set(sourcePage.pageNumber, sourcePage.photos.length - 1);
+      nextTextCardCounts.set(
+        sourcePage.pageNumber,
+        sourcePage.photos.filter((ph) => !ph.asset).length,
+      );
+    }
+
+    setAssets(updatedAssets);
+    setPageCounts(nextPageCounts);
+    setTextCardCounts(nextTextCardCounts);
+    setLayoutVariants(nextLayoutVariants);
+    setSlotOverrides(nextSlotOverrides);
+    setBoundaryOverrides(nextBoundaryOverrides);
+    setAxisOverrides(nextAxisOverrides);
+    setPageCaptions(nextPageCaptions);
+    setTextCardContents(nextTextCardContents);
+
+    if (isNewPhoto) {
+      setNewAssets((prev) => prev.filter((a) => a.id !== asset.id));
+      setSetAsideAssetIds((prev) => {
+        if (!prev.has(asset.id)) return prev;
+        const next = new Set(prev);
+        next.delete(asset.id);
+        return next;
+      });
+    }
+    setSelectedNewAsset(null);
+    setSwapFirstId(null);
+
+    setHistory((prev) => [
+      {
+        type: "insert-page",
+        pageNumber: newPageNumber,
+        asset,
+        wasNew: isNewPhoto,
+        prevAssets,
+        prevPageCounts,
+        prevTextCardCounts,
+        prevLayoutVariants,
+        prevSlotOverrides,
+        prevBoundaryOverrides,
+        prevAxisOverrides,
+        prevPageCaptions,
+        prevTextCardContents,
+        timestamp: Date.now(),
+      },
+      ...prev,
+    ]);
+
+    setTimeout(() => {
+      const config: AlbumConfig = {
+        printerId,
+        pageWidth,
+        pageHeight,
+        margin,
+        spacing,
+        filterVideos: false, // Never filter videos - simpler UX
+        bleedEnabled,
+        bleed,
+        showDates,
+        showCaptions,
+        fontSize,
+        pageBackground,
+        cardStyle,
+        customOrdering,
+        layoutVariants: Object.fromEntries(nextLayoutVariants),
+        pageCounts: Object.fromEntries(nextPageCounts),
+        pageCaptions: Object.fromEntries(nextPageCaptions),
+        cardCaptions: Object.fromEntries(cardCaptions),
+        focalPoints: Object.fromEntries(focalPoints),
+        boundaryOverrides: Object.fromEntries(nextBoundaryOverrides),
+        axisOverrides: Object.fromEntries(nextAxisOverrides),
+        textCardCounts: Object.fromEntries(nextTextCardCounts),
+        textCardContents: Object.fromEntries(nextTextCardContents),
+        slotOverrides: Object.fromEntries(nextSlotOverrides),
+        manuallyMovedIds: Array.from(manuallyMovedIds),
+        setAsideAssetIds: Array.from(setAsideAssetIds),
+        showCover: true, // Always true - simpler UX
+        separatedCover,
+        spineWidth,
+        spineColor,
+        spineTextColor,
+        spineTextSize,
+        spineTitle,
+        coverTitle,
+        coverTextSize,
+        coverAssetId,
+        coverLayout,
+        coverFrameSize,
+        backCoverAssetId,
+        backCoverLayout,
+        backCoverFrameSize,
+        backCoverText,
+        backCoverTextSize,
+        backCoverPlainText,
+        excludeCoverPhotosFromPages: true, // Always true - simpler UX
+      };
+      saveAlbumConfig(album.id, config, updatedAssets);
+    }, 100);
   };
 
   // Single entry point for placing a "new photo" (from the top panel,
@@ -2556,6 +2863,36 @@ function PhotoGridEditor({
   // Calculate total logical pages for display purposes
   const totalLogicalPages = pages.length;
 
+  // Whether there's currently a photo armed that "Ajouter une page ici"
+  // could place - either an unused one (selectedNewAsset) or an already-
+  // placed one picked via the same click-to-arm gesture as a card swap
+  // (swapFirstId), excluding the non-photo targets that id can also mean
+  // (cover, back cover, a text card).
+  const canInsertPage =
+    !!selectedNewAsset ||
+    (!!swapFirstId &&
+      swapFirstId !== "cover" &&
+      swapFirstId !== "back-cover" &&
+      !swapFirstId.startsWith("text-"));
+
+  // Thin divider control dropped between two pages (or before the first
+  // one, or as the only content when the book is still empty) that
+  // creates a whole new page for whichever photo is currently armed - see
+  // handleInsertPageAt. Only rendered while a photo is actually armed,
+  // same condition as the "Ajouter ici" per-page button.
+  const renderAddPageHere = (afterPageNumber: number) => {
+    if (!canInsertPage) return null;
+    return (
+      <button
+        onClick={() => handleInsertPageAt(afterPageNumber)}
+        title={t(language, "addPageHere")}
+        className="w-full flex items-center justify-center py-2 my-1 rounded-lg border border-dashed border-green-400 dark:border-green-600 text-xs font-semibold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-500/10 hover:bg-green-100 dark:hover:bg-green-500/20 transition-colors"
+      >
+        {t(language, "addPageHere")}
+      </button>
+    );
+  };
+
   // Floating pill toolbar for per-page layout controls - shuffle the
   // bento arrangement, force a photo count, or swap some slots for text
   // cards. Icon + stepper rather than a row of bordered buttons/selects,
@@ -2786,11 +3123,6 @@ function PhotoGridEditor({
     );
   };
 
-  // Generate one short LLM caption per page from the Immich descriptions of
-  // the photos grouped on that page (thebrain, proxied server-side at
-  // /llm/ - see nginx.conf.template). Explicit action rather than automatic:
-  // this hits a shared local GPU and results are meant to be reviewed/edited
-  // before printing, not regenerated on every layout tweak.
   if (isLoading || isDetectingChanges) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
@@ -3650,6 +3982,20 @@ function PhotoGridEditor({
                     e.preventDefault();
                   }
                 }}
+                onWheel={(e) => {
+                  // A plain mouse wheel only ever reports deltaY, which
+                  // wouldn't scroll a horizontal-only strip by default -
+                  // and a trackpad's two-finger swipe can report either
+                  // axis depending on the gesture's direction. Take
+                  // whichever axis actually moved.
+                  const el = newAssetsScrollRef.current;
+                  if (!el) return;
+                  const delta =
+                    Math.abs(e.deltaX) > Math.abs(e.deltaY)
+                      ? e.deltaX
+                      : e.deltaY;
+                  el.scrollLeft += delta;
+                }}
                 className="flex gap-3 overflow-x-auto custom-scrollbar pb-2"
               >
                   {newAssets.map((asset) => {
@@ -3790,6 +4136,8 @@ function PhotoGridEditor({
             />
             </div>
           )}
+
+          {renderAddPageHere(0)}
 
           {pages.map((page) => {
             // Scale down to match PDF dimensions (72 DPI from 300 DPI)
@@ -4638,6 +4986,7 @@ function PhotoGridEditor({
                   })}
                 </div>
                   </div>
+                {renderAddPageHere(page.pageNumber)}
               </div>
             );
           })}
@@ -4693,7 +5042,7 @@ function PhotoGridEditor({
         </div> {/* Close scrollable wrapper */}
 
         {/* Bottom Panel - Pages with Placeholders */}
-        {missingAssetIds.size > 0 && (
+        {pagesWithMissingPhotos.length > 0 && (
           <div
             ref={missingPagesScrollRef}
             onPointerDown={(e) =>
@@ -4713,12 +5062,7 @@ function PhotoGridEditor({
                   {t(language, "pagesWithPlaceholders")}:
                 </span>
                 <div className="flex flex-wrap gap-3">
-                  {pages
-                    .filter(page =>
-                      page.photos.some(photo =>
-                        photo.asset && missingAssetIds.has(photo.asset.id)
-                      )
-                    )
+                  {pagesWithMissingPhotos
                     .map(page => (
                       <div key={page.pageNumber} className="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
                         <PageThumbButton

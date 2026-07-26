@@ -178,6 +178,29 @@ export type HistoryOperation =
       type: "set-aside-photo";
       assetId: string;
       timestamp: number;
+    }
+  | {
+      // Inserting a brand new page at an arbitrary point (see
+      // handleInsertPageAt in PhotoGrid.tsx) shifts every page-number-keyed
+      // override for pages at/after the insertion point up by one, which
+      // isn't cheaply reversible key-by-key - so this stores a full
+      // snapshot of every such map from just before the insert and undo
+      // simply restores it wholesale, the same way "Reset All"'s
+      // FlattenedState does.
+      type: "insert-page";
+      pageNumber: number;
+      asset: AssetResponseDto;
+      wasNew: boolean;
+      prevAssets: AssetResponseDto[];
+      prevPageCounts: Record<number, number>;
+      prevTextCardCounts: Record<number, number>;
+      prevLayoutVariants: Record<number, number>;
+      prevSlotOverrides: Record<number, string[]>;
+      prevBoundaryOverrides: Record<string, number>;
+      prevAxisOverrides: Record<string, "vertical" | "horizontal">;
+      prevPageCaptions: Record<number, string>;
+      prevTextCardContents: Record<string, string>;
+      timestamp: number;
     };
 
 // Baseline snapshot captured by "flatten" - everything a Reset All
@@ -440,6 +463,31 @@ export function useEditHistory(params: UseEditHistoryParams) {
           return next;
         });
         setNewAssets((prev) => prev.filter((a) => a.id !== lastOp.assetId));
+        break;
+
+      case "insert-page":
+        setAssets(() => lastOp.prevAssets);
+        if (lastOp.wasNew) {
+          setNewAssets((prev) => [...prev, lastOp.asset]);
+        }
+        setPageCounts(
+          () => new Map(Object.entries(lastOp.prevPageCounts).map(([k, v]) => [Number(k), v])),
+        );
+        setTextCardCounts(
+          () => new Map(Object.entries(lastOp.prevTextCardCounts).map(([k, v]) => [Number(k), v])),
+        );
+        setLayoutVariants(
+          () => new Map(Object.entries(lastOp.prevLayoutVariants).map(([k, v]) => [Number(k), v])),
+        );
+        setSlotOverrides(
+          () => new Map(Object.entries(lastOp.prevSlotOverrides).map(([k, v]) => [Number(k), v])),
+        );
+        setBoundaryOverrides(() => new Map(Object.entries(lastOp.prevBoundaryOverrides)));
+        setAxisOverrides(() => new Map(Object.entries(lastOp.prevAxisOverrides)));
+        setPageCaptions(
+          () => new Map(Object.entries(lastOp.prevPageCaptions).map(([k, v]) => [Number(k), v])),
+        );
+        setTextCardContents(() => new Map(Object.entries(lastOp.prevTextCardContents)));
         break;
 
       case "edit-text-card":
@@ -747,6 +795,31 @@ export function useEditHistory(params: UseEditHistoryParams) {
             return next;
           });
           setNewAssets((prev) => prev.filter((a) => a.id !== op.assetId));
+          break;
+
+        case "insert-page":
+          setAssets(() => op.prevAssets);
+          if (op.wasNew) {
+            setNewAssets((prev) => [...prev, op.asset]);
+          }
+          setPageCounts(
+            () => new Map(Object.entries(op.prevPageCounts).map(([k, v]) => [Number(k), v])),
+          );
+          setTextCardCounts(
+            () => new Map(Object.entries(op.prevTextCardCounts).map(([k, v]) => [Number(k), v])),
+          );
+          setLayoutVariants(
+            () => new Map(Object.entries(op.prevLayoutVariants).map(([k, v]) => [Number(k), v])),
+          );
+          setSlotOverrides(
+            () => new Map(Object.entries(op.prevSlotOverrides).map(([k, v]) => [Number(k), v])),
+          );
+          setBoundaryOverrides(() => new Map(Object.entries(op.prevBoundaryOverrides)));
+          setAxisOverrides(() => new Map(Object.entries(op.prevAxisOverrides)));
+          setPageCaptions(
+            () => new Map(Object.entries(op.prevPageCaptions).map(([k, v]) => [Number(k), v])),
+          );
+          setTextCardContents(() => new Map(Object.entries(op.prevTextCardContents)));
           break;
 
         case "edit-text-card":

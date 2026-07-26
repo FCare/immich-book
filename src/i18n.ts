@@ -87,7 +87,6 @@ export const translations = {
     generating: "Génération...",
     downloadPdf: "Télécharger le PDF",
     printWith: "Imprimer ce livre photo chez",
-    generateCaptions: "Générer les légendes",
     flatten: "Mettre à plat",
     history: "Historique",
     undoLastAction: "Annuler la dernière action",
@@ -159,7 +158,6 @@ export const translations = {
     
     // Errors
     pdfError: "Erreur lors de la génération du PDF",
-    captionError: "Erreur lors de la génération des légendes",
     fetchError: "photos n'ont pas pu être récupérées et sont absentes du PDF - essayez de générer à nouveau.",
     
     // Sidebar
@@ -198,10 +196,12 @@ export const translations = {
     setAsidePhoto: "Mettre de côté",
 
     // New photos
-    newPhotosToPlace: "Nouvelles photos à placer",
+    newPhotosToPlace: "Photos inutilisées",
     setAsCover: "Définir comme couverture",
     setAsBackCover: "Définir comme 4ème de couverture",
     addHere: "+ Ajouter ici",
+    addPageHere: "+ Ajouter une page ici",
+    historyInsertPage: "Ajout de la page",
     loadingPhotos: "Chargement des photos...",
     analyzingChanges: "Analyse des changements...",
   },
@@ -291,7 +291,6 @@ export const translations = {
     generating: "Generating...",
     downloadPdf: "Download PDF",
     printWith: "Print this photo book with",
-    generateCaptions: "Generate Captions",
     flatten: "Flatten",
     history: "History",
     undoLastAction: "Undo Last Action",
@@ -363,7 +362,6 @@ export const translations = {
     
     // Errors
     pdfError: "Failed to generate PDF",
-    captionError: "Failed to generate captions",
     fetchError: "photos couldn't be fetched and are missing from the PDF - try generating again.",
     
     // Sidebar
@@ -402,10 +400,12 @@ export const translations = {
     setAsidePhoto: "Set aside",
 
     // New photos
-    newPhotosToPlace: "New photos to place",
+    newPhotosToPlace: "Unused photos",
     setAsCover: "Set as cover",
     setAsBackCover: "Set as back cover",
     addHere: "+ Add here",
+    addPageHere: "+ Add a page here",
+    historyInsertPage: "Inserted page",
     loadingPhotos: "Loading photos...",
     analyzingChanges: "Analyzing changes...",
   },
