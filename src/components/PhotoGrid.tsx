@@ -14,7 +14,6 @@ import {
   mmToPixels,
   pixelsToMm,
   naturalAspectRatio,
-  type Page,
 } from "../utils/pageLayout";
 import type { ImmichConfig } from "../types";
 import { t, type Language } from "../i18n";
@@ -1349,79 +1348,6 @@ function PhotoGridEditor({
     }
   };
 
-  // Reroll a page's bento arrangement - same photos (the photo COUNT
-  // seed in pageLayout.ts is deliberately independent of `variant`, so
-  // this never changes how many photos are on the page), different
-  // split pattern. Tries several candidate variants and keeps the first
-  // one whose resulting tile shapes actually differ from the current
-  // layout, rather than trusting a single random jump to land somewhere
-  // different - with few photos on a page there are only a handful of
-  // genuinely distinct tilings, so two variant numbers can coincidentally
-  // produce the same one.
-  const handleShuffleLayout = (logicalPageNumber: number) => {
-    const prevVariant = layoutVariants.get(logicalPageNumber) || 0;
-
-    const shapeSignature = (page: Page | undefined) =>
-      page
-        ? page.photos
-            .map((b) => `${Math.round(b.width)}x${Math.round(b.height)}`)
-            .join(",")
-        : null;
-    const prevSignature = shapeSignature(
-      pages.find((p) => p.pageNumber === logicalPageNumber),
-    );
-
-    const MAX_ATTEMPTS = 30;
-    let newVariant = prevVariant;
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      const candidateVariant =
-        prevVariant + Math.floor(Math.random() * 100) + 10 + attempt;
-      const candidatePages = calculatePageLayout(interiorAssets, {
-        pageWidth: validPageWidth,
-        pageHeight: validPageHeight,
-        margin: layoutMargin,
-        spacing: validSpacing,
-        forceTimeline,
-        layoutVariants: new Map(layoutVariants).set(
-          logicalPageNumber,
-          candidateVariant,
-        ),
-        pageCounts,
-        textCardCounts,
-        slotOverrides,
-      });
-      newVariant = candidateVariant;
-      const candidateSignature = shapeSignature(
-        candidatePages.find((p) => p.pageNumber === logicalPageNumber),
-      );
-      // A signature of null means the page itself has vanished (e.g. no
-      // photos left) - can't compare shapes, just accept and stop. A
-      // single-photo page only ever has one possible shape, so this
-      // will exhaust MAX_ATTEMPTS and fall back to the last try, which
-      // is fine (nothing else *could* look different).
-      if (candidateSignature === null || candidateSignature !== prevSignature) {
-        break;
-      }
-    }
-
-    setLayoutVariants((prev) => {
-      const next = new Map(prev);
-      next.set(logicalPageNumber, newVariant);
-      return next;
-    });
-    // Record in history
-    setHistory((prev) => [
-      {
-        type: "shuffle-layout",
-        pageNumber: logicalPageNumber,
-        prevVariant,
-        newVariant,
-        timestamp: Date.now(),
-      },
-      ...prev,
-    ]);
-  };
-
   // Force (or, with null, stop forcing) how many photos land on a page
   const handleSetPageCount = (
     logicalPageNumber: number,
@@ -2549,25 +2475,6 @@ function PhotoGridEditor({
 
     return (
       <div className="inline-flex items-center gap-0.5 px-1.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-sm">
-        <button
-          onClick={() => handleShuffleLayout(logicalPageNumber)}
-          title={t(language, "shufflePageLayout")}
-          className="w-7 h-7 rounded-full flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/20 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width="15"
-            height="15"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
-          </svg>
-        </button>
-
-        {divider}
-
         <span
           className="flex items-center gap-1 pl-1"
           title="Photos on this page"
