@@ -37,6 +37,8 @@ import { SidebarCoverSettings } from "./sidebar/SidebarCoverSettings";
 import { FrontCoverStandalone } from "./cover/FrontCoverStandalone";
 import { BackCoverStandalone } from "./cover/BackCoverStandalone";
 import { CoverSpread } from "./cover/CoverSpread";
+import { PageNavRail, PageThumbButton, PAGE_THUMB_WIDTH, pageSignature } from "./PageNavRail";
+import { useDragToScroll } from "../hooks/useDragToScroll";
 import {
   type HistoryOperation,
   type FlattenedState,
@@ -1089,13 +1091,23 @@ function PhotoGridEditor({
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [previewWidth, setPreviewWidth] = useState(0);
 
+  // Click-and-drag-to-scroll for the "new photos to place" strip (only
+  // when the drag starts on empty space between thumbnails - each
+  // thumbnail already drags-to-place via handleReorderPointerDown) and
+  // the "pages with missing photos" panel.
+  const newAssetsScrollRef = useRef<HTMLDivElement>(null);
+  const newAssetsDragScroll = useDragToScroll("x");
+  const missingPagesScrollRef = useRef<HTMLDivElement>(null);
+  const missingPagesDragScroll = useDragToScroll("y");
+
   useEffect(() => {
     const updateWidth = () => {
       const sidebarWidth = sidebarCollapsed ? 64 : 320; // w-16 : w-80
       const historyWidth = historyCollapsed ? 64 : 320; // w-16 : w-80
+      const navRailWidth = 96; // w-24, see PageNavRail
       const padding = 128; // px-16 on both sides + extra margin
       const safetyMargin = 100; // Extra safety to prevent overflow
-      const availableWidth = window.innerWidth - sidebarWidth - historyWidth - padding - safetyMargin;
+      const availableWidth = window.innerWidth - sidebarWidth - historyWidth - navRailWidth - padding - safetyMargin;
       setPreviewWidth(Math.max(400, availableWidth)); // Minimum 400px
     };
     
@@ -3621,7 +3633,19 @@ function PhotoGridEditor({
               <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
                 {t(language, "newPhotosToPlace")}: {newAssets.length}
               </span>
-              <div className="flex gap-3 overflow-x-auto custom-scrollbar pb-2">
+              <div
+                ref={newAssetsScrollRef}
+                onPointerDown={(e) =>
+                  newAssetsDragScroll.onPointerDown(e, newAssetsScrollRef.current, { restrictToSelf: true })
+                }
+                onClickCapture={(e) => {
+                  if (newAssetsDragScroll.consumeDrag()) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                  }
+                }}
+                className="flex gap-3 overflow-x-auto custom-scrollbar pb-2"
+              >
                   {newAssets.map((asset) => {
                     const imageLoaded = loadedNewAssetIds.has(asset.id);
                     return (
@@ -3691,6 +3715,7 @@ function PhotoGridEditor({
             className="space-y-8 pb-8 px-4 sm:px-16 pt-6 max-w-full prevent-native-drag-select"
           >
           {showCover && separatedCover && (
+            <div data-page-number="cover" data-page-nav-alt="back-cover">
             <CoverSpread
               validPageWidth={validPageWidth}
               validPageHeight={validPageHeight}
@@ -3727,10 +3752,12 @@ function PhotoGridEditor({
               setCoverTitle={setCoverTitle}
               coverTextSize={coverTextSize}
             />
+            </div>
           )}
 
 
           {showCover && !separatedCover && (
+            <div data-page-number="cover">
             <FrontCoverStandalone
               validPageWidth={validPageWidth}
               validPageHeight={validPageHeight}
@@ -3755,6 +3782,7 @@ function PhotoGridEditor({
               handleReorderPointerDown={handleReorderPointerDown}
               performNewAssetPlacement={performNewAssetPlacement}
             />
+            </div>
           )}
 
           {pages.map((page) => {
@@ -4609,6 +4637,7 @@ function PhotoGridEditor({
           })}
 
           {showCover && !separatedCover && (
+            <div data-page-number="back-cover">
             <BackCoverStandalone
               validPageWidth={validPageWidth}
               validPageHeight={validPageHeight}
@@ -4633,6 +4662,7 @@ function PhotoGridEditor({
               backCoverPlainText={backCoverPlainText}
               backCoverTextSize={backCoverTextSize}
             />
+            </div>
           )}
         </div>
 
@@ -4658,7 +4688,19 @@ function PhotoGridEditor({
 
         {/* Bottom Panel - Pages with Placeholders */}
         {missingAssetIds.size > 0 && (
-          <div className="flex-none border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-lg pt-4 z-10 overflow-y-auto custom-scrollbar" style={{ maxHeight: '140px' }}>
+          <div
+            ref={missingPagesScrollRef}
+            onPointerDown={(e) =>
+              missingPagesDragScroll.onPointerDown(e, missingPagesScrollRef.current)
+            }
+            onClickCapture={(e) => {
+              if (missingPagesDragScroll.consumeDrag()) {
+                e.stopPropagation();
+                e.preventDefault();
+              }
+            }}
+            className="flex-none border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-lg pt-4 z-10 overflow-y-auto custom-scrollbar cursor-grab active:cursor-grabbing"
+            style={{ maxHeight: '140px' }}>
             <div className="px-4 pb-4">
               <div className="flex flex-col gap-3">
                 <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
@@ -4666,65 +4708,48 @@ function PhotoGridEditor({
                 </span>
                 <div className="flex flex-wrap gap-3">
                   {pages
-                    .filter(page => 
-                      page.photos.some(photo => 
+                    .filter(page =>
+                      page.photos.some(photo =>
                         photo.asset && missingAssetIds.has(photo.asset.id)
                       )
                     )
-                    .map(page => {
-                      // Get up to 4 photos from this page for thumbnail
-                      const thumbnailPhotos = page.photos.slice(0, 4).filter(p => p.asset);
-                      
-                      return (
-                        <button
-                          key={page.pageNumber}
-                          onClick={() => {
-                            const element = document.querySelector(`[data-page-number="${page.pageNumber}"]`);
-                            element?.scrollIntoView({ behavior: "smooth", block: "center" });
-                          }}
-                          className="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                        >
-                          <div className="w-20 h-24 bg-gray-200 dark:bg-gray-700 rounded border-2 border-red-400 dark:border-red-600 overflow-hidden relative">
-                            {thumbnailPhotos.length > 0 ? (
-                              <div className={`grid h-full ${thumbnailPhotos.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-0.5`}>
-                                {thumbnailPhotos.map((photo, idx) => {
-                                  if (!photo.asset) return null; // Safety guard
-                                  const isMissing = missingAssetIds.has(photo.asset.id);
-                                  return (
-                                    <div key={idx} className="relative bg-gray-300 dark:bg-gray-600">
-                                      {isMissing ? (
-                                        <div className="absolute inset-0 flex items-center justify-center bg-gray-400 dark:bg-gray-600">
-                                          <span className="text-red-500 text-xl font-bold">✕</span>
-                                        </div>
-                                      ) : (
-                                        <img
-                                          src={`${immichConfig.baseUrl}/assets/${photo.asset.id}/thumbnail?size=preview`}
-                                          alt=""
-                                          className="w-full h-full object-cover"
-                                        />
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-center h-full">
-                                <span className="text-xs text-gray-500 dark:text-gray-400">Empty</span>
-                              </div>
-                            )}
-                          </div>
-                          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                            Page {page.pageNumber}
-                          </span>
-                        </button>
-                      );
-                    })}
+                    .map(page => (
+                      <div key={page.pageNumber} className="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                        <PageThumbButton
+                          pageNumber={page.pageNumber}
+                          signature={pageSignature(page, missingAssetIds)}
+                          photos={page.photos}
+                          scale={PAGE_THUMB_WIDTH / (pages[0]?.width ?? 1)}
+                          aspectRatio={`${pages[0]?.width ?? 1} / ${pages[0]?.height ?? 1}`}
+                          title={`${t(language, "pageOf")} ${page.pageNumber}`}
+                          immichConfig={immichConfig}
+                          pageBackground={pageBackground}
+                          cardStyle={cardStyle}
+                          missingAssetIds={missingAssetIds}
+                        />
+                        <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                          {t(language, "pageOf")} {page.pageNumber}
+                        </span>
+                      </div>
+                    ))}
                 </div>
               </div>
             </div>
           </div>
         )}
       </main>
+
+      <PageNavRail
+        pages={pages}
+        showCover={showCover}
+        coverAsset={coverAsset}
+        backCoverAsset={backCoverAsset}
+        missingAssetIds={missingAssetIds}
+        immichConfig={immichConfig}
+        language={language}
+        pageBackground={pageBackground}
+        cardStyle={cardStyle}
+      />
 
       <HistoryPanel
         history={history}
