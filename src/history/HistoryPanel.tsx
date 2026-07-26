@@ -360,6 +360,9 @@ export function HistoryPanel({
                     case "resize-cover-frame":
                       description = t(language, "historyResizeCoverFrame");
                       break;
+                    case "set-aside-photo":
+                      description = t(language, "historySetAsidePhoto");
+                      break;
                   }
 
                   return (

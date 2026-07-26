@@ -292,6 +292,11 @@ export interface Printer {
   // width/height become chip-only and spreads are disabled. PDF Libre
   // keeps every field freely editable, as before.
   constrained: boolean;
+  // How many interior pages a submitted file must be a multiple of -
+  // books are printed and bound in sheets, not single leaves, so most
+  // binderies require at least an even count; some (Flexilivre: 4, see
+  // below) need a stricter multiple. Defaults to 2 (even) when unset.
+  interiorPageMultiple?: number;
   note?: string;
 }
 
@@ -332,6 +337,9 @@ export const PRINTERS: Printer[] = [
     ],
     bleedMm: 5,
     constrained: true,
+    // Confirmed via Flexilivre's own file-prep docs: interior page count
+    // must be a multiple of 4.
+    interiorPageMultiple: 4,
   },
   {
     id: "blurb",
@@ -909,6 +917,12 @@ function PhotoGridEditor({
   );
   // Missing photo placeholders - asset IDs that were in the photobook but removed from album
   const [missingAssetIds, setMissingAssetIds] = useState<Set<string>>(new Set());
+  // Subset of missingAssetIds the user explicitly "set aside" (still in
+  // the Immich album, unlike the rest of missingAssetIds) - tracked
+  // separately purely so it can be persisted and restored on reload; see
+  // setAsideAssetIds in albumConfig.ts.
+  const [setAsideAssetIds, setSetAsideAssetIds] = useState<Set<string>>(new Set());
+  const setAsideRestoredRef = useRef(false);
   const [changesDetected, setChangesDetected] = useState(false);
   const [isDetectingChanges, setIsDetectingChanges] = useState(true);
   // New photos - assets in the album but not in the photobook yet
@@ -1111,7 +1125,7 @@ function PhotoGridEditor({
       .then(({ missingAssets, newAssetIds }) => {
         console.log(`Album changes: ${newAssetIds.length} new, ${missingAssets.length} missing`);
         setIsDetectingChanges(false); // Detection complete
-        
+
         if (missingAssets.length > 0) {
           // There are missing photos - this is a real change
           setChangesDetected(true);
@@ -1157,6 +1171,31 @@ function PhotoGridEditor({
           // Remove new photos from the main assets array (they stay in newAssets panel until placed)
           setAssets(prev => prev.filter(a => !newAssetIds.includes(a.id)));
           console.log(`${newPhotos.length} new photos available for placement`);
+        }
+
+        // Restore previously "set aside" photos (see setAsideAssetIds in
+        // albumConfig.ts) - unlike a real Immich deletion, these are
+        // still present in `assets` right now, so they'd otherwise look
+        // like completely normal photos again on this reload. Applied
+        // last (and merged, not replaced) so it always wins regardless
+        // of whatever the branches above just did to missingAssetIds/
+        // newAssets for real Immich-side changes.
+        if (!setAsideRestoredRef.current && initialConfig.setAsideAssetIds.length > 0) {
+          setAsideRestoredRef.current = true;
+          const idsToRestore = initialConfig.setAsideAssetIds;
+          setMissingAssetIds(prev => {
+            const next = new Set(prev);
+            idsToRestore.forEach(id => next.add(id));
+            return next;
+          });
+          setSetAsideAssetIds(new Set(idsToRestore));
+          setNewAssets(prev => {
+            const alreadyThere = new Set(prev.map(a => a.id));
+            const toMove = assets.filter(
+              a => idsToRestore.includes(a.id) && !alreadyThere.has(a.id),
+            );
+            return toMove.length > 0 ? [...prev, ...toMove] : prev;
+          });
         }
       })
       .catch(err => {
@@ -1204,6 +1243,7 @@ function PhotoGridEditor({
       textCardContents: Object.fromEntries(textCardContents),
       slotOverrides: Object.fromEntries(slotOverrides),
       manuallyMovedIds: Array.from(manuallyMovedIds),
+      setAsideAssetIds: Array.from(setAsideAssetIds),
       showCover: true, // Always true - simpler UX
       separatedCover,
       spineWidth,
@@ -1272,6 +1312,7 @@ function PhotoGridEditor({
     textCardContents,
     slotOverrides,
     manuallyMovedIds,
+    setAsideAssetIds,
     isPageWidthValid,
     isPageHeightValid,
     isMarginValid,
@@ -1523,6 +1564,7 @@ function PhotoGridEditor({
       setAssets,
       setNewAssets,
       setMissingAssetIds,
+      setSetAsideAssetIds,
       setFlattenedState,
       setShowFlattenConfirmation,
       setShowResetConfirmation,
@@ -1725,6 +1767,7 @@ function PhotoGridEditor({
       pageHeight: validPageHeight,
       margin: layoutMargin,
       spacing: validSpacing,
+      pageCountMultiple: selectedPrinter.interiorPageMultiple ?? 2,
       layoutVariants,
       pageCounts,
       textCardCounts,
@@ -1738,6 +1781,7 @@ function PhotoGridEditor({
     validSpacing,
     validPageWidth,
     validPageHeight,
+    selectedPrinter.interiorPageMultiple,
     layoutVariants,
     pageCounts,
     textCardCounts,
@@ -1989,6 +2033,35 @@ function PhotoGridEditor({
       : { kind: "interior-swap", asset };
   };
 
+  // Pulls a currently-placed photo out of the layout into the "photos to
+  // place" pool, leaving a placeholder hole in its old slot - same
+  // visual treatment as a photo detected missing from Immich (see
+  // missingAssetIds), but for a photo the user still wants in the book,
+  // just not in that exact spot right now. Unlike a real deletion, the
+  // asset itself is untouched in `assets` (same slot, same layout math),
+  // only its rendering and its availability in the "new photos" pool
+  // change.
+  const handleSetAsidePhoto = (assetId: string) => {
+    const asset = filteredAssets.find((a) => a.id === assetId);
+    if (!asset) return;
+    setSwapFirstId(null);
+    setMissingAssetIds((prev) => {
+      const next = new Set(prev);
+      next.add(assetId);
+      return next;
+    });
+    setSetAsideAssetIds((prev) => {
+      const next = new Set(prev);
+      next.add(assetId);
+      return next;
+    });
+    setNewAssets((prev) => [...prev.filter((a) => a.id !== assetId), asset]);
+    setHistory((prev) => [
+      { type: "set-aside-photo", assetId, timestamp: Date.now() },
+      ...prev,
+    ]);
+  };
+
   // Single entry point for placing a "new photo" (from the top panel,
   // not yet part of the book) onto a cover/back-cover/interior slot.
   // Every click handler that offers this action calls ONLY this
@@ -2008,6 +2081,17 @@ function PhotoGridEditor({
   const applyNewAssetPlacement = () => {
     if (!newAssetPlacementConfirmation) return;
     const { newAsset, target } = newAssetPlacementConfirmation;
+
+    // Whatever is being placed is leaving the "new photos" pool for a
+    // real slot - if it got there via "set aside" rather than being
+    // freshly added to the Immich album, that bookkeeping is now stale
+    // and would otherwise wrongly re-apply on the next reload.
+    setSetAsideAssetIds((prev) => {
+      if (!prev.has(newAsset.id)) return prev;
+      const next = new Set(prev);
+      next.delete(newAsset.id);
+      return next;
+    });
 
     switch (target.kind) {
       case "cover": {
@@ -4366,6 +4450,29 @@ function PhotoGridEditor({
                           />
                         )}
 
+                        {/* Set aside - pulls this photo into the "photos
+                            to place" pool, leaving a placeholder hole in
+                            its slot (same look as a missing photo). Only
+                            for real, present photos - a missing one
+                            already has its own delete button, and
+                            placement mode has its own click handling. */}
+                        {!isMissingPhoto && !selectedNewAsset && (
+                          <button
+                            className="absolute top-2 right-2 w-6 h-6 bg-gray-900/70 hover:bg-indigo-600 text-white rounded-full shadow-lg z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleSetAsidePhoto(asset.id);
+                            }}
+                            title={t(language, "setAsidePhoto")}
+                          >
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="4" width="18" height="4" rx="1" />
+                              <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+                              <path d="M10 13h4" />
+                            </svg>
+                          </button>
+                        )}
 
                       </div>
                     );

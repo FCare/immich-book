@@ -115,6 +115,15 @@ export interface AlbumConfig extends GlobalConfig {
   // the two ids involved, unlike the old splice-based reorder it replaced
   // which could shift a neighboring card's index without moving it.
   manuallyMovedIds: string[];
+  // Photos the user has explicitly "set aside" - still part of the
+  // Immich album (unlike a real deletion), but pulled out of the layout
+  // into the "photos to place" pool, leaving a placeholder hole in their
+  // old slot (same visual treatment as a genuinely-deleted photo). Kept
+  // separate from the sync-detected "missing" set, which is never
+  // persisted (re-derived each load by comparing against Immich) - this
+  // one has to be, since a still-present photo would otherwise look
+  // identical to a normal one again on the next reload.
+  setAsideAssetIds: string[];
   // Front cover, rendered as an unnumbered page before page 1. Optional
   // and off-by-default-when-unset isn't right here - some print services
   // generate their own cover and don't want one in the submitted PDF, so
@@ -228,6 +237,7 @@ export async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     textCardContents: {},
     slotOverrides: {},
     manuallyMovedIds: [],
+    setAsideAssetIds: [],
     showCover: true,
     separatedCover: false,
     spineWidth: 10,

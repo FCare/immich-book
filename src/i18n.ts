@@ -120,6 +120,7 @@ export const translations = {
     historyDragSplitBoundary: "Déplacement d'une séparation de photos",
     historyFlipSplitAxis: "Orientation d'une séparation inversée",
     historyResizeCoverFrame: "Redimensionnement du cadre de couverture",
+    historySetAsidePhoto: "Photo mise de côté",
     flipBoundaryHint: "Glisser pour redimensionner, double-clic pour changer l'orientation, clic droit si une autre séparation la cache",
     resizeCoverFrameHint: "Glisser pour redimensionner le cadre",
     timeAgo_seconds: "s",
@@ -194,7 +195,8 @@ export const translations = {
     pagesWithPlaceholders: "Pages avec photos manquantes",
     missingPhoto: "Photo manquante",
     deletePlaceholder: "Supprimer ce placeholder",
-    
+    setAsidePhoto: "Mettre de côté",
+
     // New photos
     newPhotosToPlace: "Nouvelles photos à placer",
     setAsCover: "Définir comme couverture",
@@ -322,6 +324,7 @@ export const translations = {
     historyDragSplitBoundary: "Moved a photo boundary",
     historyFlipSplitAxis: "Flipped a boundary's orientation",
     historyResizeCoverFrame: "Resized a cover frame",
+    historySetAsidePhoto: "Set a photo aside",
     flipBoundaryHint: "Drag to resize, double-click to flip orientation, right-click if another boundary is hiding it",
     resizeCoverFrameHint: "Drag to resize the frame",
     timeAgo_seconds: "s ago",
@@ -396,7 +399,8 @@ export const translations = {
     pagesWithPlaceholders: "Pages with missing photos",
     missingPhoto: "Missing photo",
     deletePlaceholder: "Delete this placeholder",
-    
+    setAsidePhoto: "Set aside",
+
     // New photos
     newPhotosToPlace: "New photos to place",
     setAsCover: "Set as cover",

@@ -170,6 +170,14 @@ export type HistoryOperation =
       prevSize: FrameSize | null;
       newSize: FrameSize;
       timestamp: number;
+    }
+  | {
+      // Manually pulling a still-in-the-album photo out of its slot into
+      // the "photos to place" pool - see handleSetAsidePhoto in
+      // PhotoGrid.tsx. Undo restores it to a normal card in place.
+      type: "set-aside-photo";
+      assetId: string;
+      timestamp: number;
     };
 
 // Baseline snapshot captured by "flatten" - everything a Reset All
@@ -212,6 +220,7 @@ export interface UseEditHistoryParams {
   setAssets: Dispatch<SetStateAction<AssetResponseDto[]>>;
   setNewAssets: Dispatch<SetStateAction<AssetResponseDto[]>>;
   setMissingAssetIds: Dispatch<SetStateAction<Set<string>>>;
+  setSetAsideAssetIds: Dispatch<SetStateAction<Set<string>>>;
   setFlattenedState: Dispatch<SetStateAction<FlattenedState | null>>;
   setShowFlattenConfirmation: Dispatch<SetStateAction<boolean>>;
   setShowResetConfirmation: Dispatch<SetStateAction<boolean>>;
@@ -258,6 +267,7 @@ export function useEditHistory(params: UseEditHistoryParams) {
     setAssets,
     setNewAssets,
     setMissingAssetIds,
+    setSetAsideAssetIds,
     setFlattenedState,
     setShowFlattenConfirmation,
     setShowResetConfirmation,
@@ -416,6 +426,20 @@ export function useEditHistory(params: UseEditHistoryParams) {
       case "resize-cover-frame":
         if (lastOp.target === "cover") setCoverFrameSize(lastOp.prevSize);
         else setBackCoverFrameSize(lastOp.prevSize);
+        break;
+
+      case "set-aside-photo":
+        setMissingAssetIds((prev) => {
+          const next = new Set(prev);
+          next.delete(lastOp.assetId);
+          return next;
+        });
+        setSetAsideAssetIds((prev) => {
+          const next = new Set(prev);
+          next.delete(lastOp.assetId);
+          return next;
+        });
+        setNewAssets((prev) => prev.filter((a) => a.id !== lastOp.assetId));
         break;
 
       case "edit-text-card":
@@ -709,6 +733,20 @@ export function useEditHistory(params: UseEditHistoryParams) {
         case "resize-cover-frame":
           if (op.target === "cover") setCoverFrameSize(op.prevSize);
           else setBackCoverFrameSize(op.prevSize);
+          break;
+
+        case "set-aside-photo":
+          setMissingAssetIds((prev) => {
+            const next = new Set(prev);
+            next.delete(op.assetId);
+            return next;
+          });
+          setSetAsideAssetIds((prev) => {
+            const next = new Set(prev);
+            next.delete(op.assetId);
+            return next;
+          });
+          setNewAssets((prev) => prev.filter((a) => a.id !== op.assetId));
           break;
 
         case "edit-text-card":

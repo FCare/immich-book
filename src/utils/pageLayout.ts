@@ -68,6 +68,11 @@ export interface LayoutOptions {
   pageHeight: number; // in pixels
   margin: number; // in pixels
   spacing: number; // in pixels
+  // Blank pages are appended until the interior page count is a multiple
+  // of this - most binderies need at least an even count (the default,
+  // when unset), some (e.g. Flexilivre) need a stricter multiple. See
+  // Printer.interiorPageMultiple in PhotoGrid.tsx.
+  pageCountMultiple?: number;
   // Bumping a page's variant reshuffles its bento arrangement (same
   // photos, different split pattern) without changing anything else -
   // lets a user "try another layout" per page.
@@ -562,6 +567,7 @@ export function calculatePageLayout(
     pageHeight,
     margin,
     spacing,
+    pageCountMultiple = 2,
     layoutVariants,
     pageCounts,
     textCardCounts,
@@ -630,16 +636,17 @@ export function calculatePageLayout(
     pageNumber++;
   }
 
-  if (pages.length % 2 !== 0) {
+  while (pages.length % pageCountMultiple !== 0) {
     pages.push(blankPage(pages.length + 1, pageDimensions.width, pageDimensions.height));
   }
 
   return pages;
 }
 
-// A plain, photo-less page appended to keep the total page count even -
-// most print binderies require it, since a book is printed and bound in
-// sheets rather than single leaves.
+// A plain, photo-less page appended to keep the total page count a
+// multiple of pageCountMultiple - most print binderies need at least an
+// even count, since a book is printed and bound in sheets rather than
+// single leaves; some need a stricter multiple (e.g. Flexilivre: 4).
 function blankPage(pageNumber: number, width: number, height: number): Page {
   return { pageNumber, photos: [], width, height, splits: [] };
 }
