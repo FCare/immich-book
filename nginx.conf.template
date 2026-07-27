@@ -8,6 +8,12 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "no-referrer-when-downgrade" always;
 
+    # Docker's embedded DNS, with a short TTL so a proxy_pass hostname is
+    # re-resolved if the upstream container restarts and gets a new IP
+    # (a static proxy_pass hostname is otherwise resolved once at nginx
+    # startup and cached forever, causing "connection refused" 502s).
+    resolver 127.0.0.11 valid=10s;
+
     # SPA
     location / {
         try_files $uri $uri/ /index.html;
@@ -18,7 +24,8 @@ server {
     # substituted by the nginx entrypoint) and overrides whatever the
     # client sent - the key never needs to reach the browser/JS bundle.
     location /api/ {
-        proxy_pass http://immich_server:2283/api/;
+        set $immich_upstream immich_server;
+        proxy_pass http://$immich_upstream:2283/api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -36,12 +43,14 @@ server {
     # captions, ordering etc. per album, so a photobook can be resumed
     # from any device rather than being tied to one browser's storage.
     location /photobooks {
-        proxy_pass http://immich-book-backend:8000/photobooks;
+        set $book_backend immich-book-backend;
+        proxy_pass http://$book_backend:8000/photobooks;
         proxy_set_header Host $host;
     }
 
     location /globalconfig {
-        proxy_pass http://immich-book-backend:8000/globalconfig;
+        set $book_backend immich-book-backend;
+        proxy_pass http://$book_backend:8000/globalconfig;
         proxy_set_header Host $host;
     }
 
@@ -50,7 +59,8 @@ server {
     # several-hundred-page book's chunks, at full image quality), and
     # merging that much data takes longer than the other endpoints here.
     location /pdf/ {
-        proxy_pass http://immich-book-backend:8000/pdf/;
+        set $book_backend immich-book-backend;
+        proxy_pass http://$book_backend:8000/pdf/;
         proxy_set_header Host $host;
         client_max_body_size 0;
         # client_body_timeout guards the upload leg (the browser sending
