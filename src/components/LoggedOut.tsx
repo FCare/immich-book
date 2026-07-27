@@ -28,8 +28,14 @@ export default function LoggedOut() {
 
         <button
           onClick={() => {
-            // Force a full page reload to clear cache and re-authenticate
-            window.location.replace('/');
+            // Clear all cookies for this domain
+            document.cookie.split(';').forEach(c => {
+              const name = c.trim().split('=')[0];
+              document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;domain=' + window.location.hostname;
+              document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/';
+            });
+            // Force full page reload without cache
+            window.location.href = '/?t=' + Date.now();
           }}
           className="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-md"
         >
