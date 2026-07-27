@@ -5,8 +5,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import List
 
+import httpx
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pypdf import PdfWriter
 
 DB_PATH = Path("/data/photobooks.db")
@@ -81,6 +82,18 @@ def init_db():
             CREATE TABLE IF NOT EXISTS global_config (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 config TEXT NOT NULL
+            )
+            """
+        )
+
+        # Table for per-user Immich configuration
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_immich_config (
+                user_id TEXT PRIMARY KEY,
+                immich_server_url TEXT NOT NULL,
+                immich_api_key TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -281,6 +294,123 @@ async def put_global_config(request: Request):
         )
         conn.commit()
     return {"status": "ok"}
+
+
+@app.get("/user/immich-config")
+def get_user_immich_config(request: Request):
+    """Get the user's Immich server configuration."""
+    user_id = request.headers.get("x-authentik-username")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing x-authentik-username header")
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT immich_server_url, immich_api_key FROM user_immich_config WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="No Immich config for this user")
+
+    return {
+        "immichServerUrl": row[0],
+        "immichApiKey": row[1],
+    }
+
+
+@app.put("/user/immich-config")
+async def put_user_immich_config(request: Request):
+    """Set the user's Immich server configuration."""
+    user_id = request.headers.get("x-authentik-username")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing x-authentik-username header")
+
+    body = await request.body()
+    try:
+        config = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    immich_server_url = config.get("immichServerUrl")
+    immich_api_key = config.get("immichApiKey")
+
+    if not immich_server_url or not immich_api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing immichServerUrl or immichApiKey"
+        )
+
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_immich_config (user_id, immich_server_url, immich_api_key, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                immich_server_url = excluded.immich_server_url,
+                immich_api_key = excluded.immich_api_key,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, immich_server_url, immich_api_key),
+        )
+        conn.commit()
+
+    return {"status": "ok"}
+
+
+@app.api_route("/immich-proxy/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def immich_proxy(path: str, request: Request):
+    """Proxy requests to the user's configured Immich server with their API key."""
+    user_id = request.headers.get("x-authentik-username")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing x-authentik-username header")
+
+    # Get user's Immich config
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT immich_server_url, immich_api_key FROM user_immich_config WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No Immich config set. Please configure your Immich server in Settings."
+        )
+
+    immich_server_url, immich_api_key = row
+
+    # Build the upstream URL
+    upstream_url = f"{immich_server_url.rstrip('/')}/api/{path}"
+
+    # Forward query parameters
+    if request.url.query:
+        upstream_url += f"?{request.url.query}"
+
+    # Prepare headers
+    headers = dict(request.headers)
+    headers["x-api-key"] = immich_api_key
+    # Remove host header to avoid conflicts
+    headers.pop("host", None)
+
+    # Forward the request
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.request(
+                method=request.method,
+                url=upstream_url,
+                headers=headers,
+                content=await request.body(),
+                timeout=180.0,
+            )
+
+            # Stream the response back
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+            )
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=502, detail=f"Error connecting to Immich server: {str(e)}")
 
 
 @app.post("/pdf/merge")

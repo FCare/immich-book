@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { getAllAlbums, type AlbumResponseDto } from "@immich/sdk";
+import { Settings as SettingsIcon, LogOut } from "lucide-react";
 import type { ImmichConfig } from "../types";
 
 interface AlbumSelectorProps {
   immichConfig: ImmichConfig;
   onSelectAlbum: (album: AlbumResponseDto) => void;
+  onOpenSettings: () => void;
 }
 
 // Photobooks are stored server-side keyed by album id (see backend/main.py)
@@ -23,7 +25,7 @@ async function cleanupOrphanedPhotobooks(currentAlbumIds: Set<string>) {
   );
 }
 
-function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
+function AlbumSelector({ immichConfig, onSelectAlbum, onOpenSettings }: AlbumSelectorProps) {
   const [albums, setAlbums] = useState<AlbumResponseDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -162,13 +164,38 @@ function AlbumSelector({ immichConfig, onSelectAlbum }: AlbumSelectorProps) {
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
-          Select an Album
-        </h2>
-        <p className="text-gray-600 dark:text-gray-400 mt-1">
-          Choose an album to create a photo book ({albums.length} albums found)
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
+            Select an Album
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">
+            Choose an album to create a photo book ({albums.length} albums found)
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={onOpenSettings}
+            className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100
+              hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+            title="Paramètres"
+          >
+            <SettingsIcon size={24} />
+          </button>
+          <button
+            onClick={() => {
+              // Use OAuth end-session endpoint with post_logout_redirect_uri
+              const logoutUrl = new URL("https://sso.caronboulme.fr/application/o/photobook/end-session/");
+              logoutUrl.searchParams.set("post_logout_redirect_uri", `${window.location.origin}/logged-out`);
+              window.location.href = logoutUrl.toString();
+            }}
+            className="p-2 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400
+              hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+            title="Se déconnecter"
+          >
+            <LogOut size={24} />
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

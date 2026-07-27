@@ -6,15 +6,23 @@ import {
 } from "@immich/sdk";
 import AlbumSelector from "./components/AlbumSelector";
 import PhotoGrid from "./components/PhotoGrid";
+import Settings from "./components/Settings";
+import LoggedOut from "./components/LoggedOut";
 import type { ImmichConfig } from "./types";
 
 function App() {
+  // Check if we're on the logged-out page
+  if (window.location.pathname === "/logged-out") {
+    return <LoggedOut />;
+  }
+
   const [immichConfig, setImmichConfig] = useState<ImmichConfig | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [selectedAlbum, setSelectedAlbum] = useState<AlbumResponseDto | null>(
     null,
   );
   const [isLoadingAlbum, setIsLoadingAlbum] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Theme is a pure display preference with nothing to sync server-side
   // (Immich itself doesn't expose one via its API - it's a local-only
@@ -44,28 +52,35 @@ function App() {
     }
   }, []);
 
-  // Connect through the proxy - nginx injects the Immich API key
-  // server-side (see nginx.conf.template), no per-user setup needed.
+  // Connect through the backend proxy - backend injects the user's Immich API key
   useEffect(() => {
-    const proxyTarget = import.meta.env.VITE_IMMICH_PROXY_TARGET;
-    if (!proxyTarget) {
-      setConfigError(
-        "VITE_IMMICH_PROXY_TARGET is not set - check the docker-compose build args.",
-      );
-      return;
-    }
-    // No apiKey set here on purpose: the SDK would attach it as an
-    // x-api-key header, which Traefik forwards to Voight-Kampff's
-    // forwardAuth and which then takes priority over (and breaks) the
-    // valid vk_session cookie. nginx injects the real Immich key
-    // server-side instead (see nginx.conf.template).
-    const config: ImmichConfig = {
-      serverUrl: proxyTarget,
-      apiKey: "",
-      baseUrl: "/api",
-    };
-    setBaseUrl(config.baseUrl);
-    setImmichConfig(config);
+    // Check if user has configured their Immich server
+    fetch("/user/immich-config")
+      .then((res) => {
+        if (res.status === 404) {
+          // No config yet, prompt user to configure
+          setShowSettings(true);
+          setConfigError("Veuillez configurer votre serveur Immich dans les paramètres.");
+          return null;
+        }
+        if (!res.ok) throw new Error("Failed to load Immich config");
+        return res.json();
+      })
+      .then((data) => {
+        if (data) {
+          // Use the backend proxy endpoint
+          const config: ImmichConfig = {
+            serverUrl: data.immichServerUrl,
+            apiKey: "",
+            baseUrl: "/immich-proxy",
+          };
+          setBaseUrl(config.baseUrl);
+          setImmichConfig(config);
+        }
+      })
+      .catch((err) => {
+        setConfigError(err.message);
+      });
   }, []);
 
   // Load album from URL hash if specified
@@ -213,9 +228,13 @@ function App() {
           <AlbumSelector
             immichConfig={immichConfig}
             onSelectAlbum={handleAlbumSelect}
+            onOpenSettings={() => setShowSettings(true)}
           />
         )}
       </main>
+
+      {/* Settings modal */}
+      {showSettings && <Settings onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

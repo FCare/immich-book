@@ -14,6 +14,28 @@ server {
     # startup and cached forever, causing "connection refused" 502s).
     resolver 127.0.0.11 valid=10s;
 
+    # User config endpoints - proxy to backend
+    location /user/ {
+        set $book_backend immich-book-backend;
+        proxy_pass http://$book_backend:8000$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Immich proxy - backend injects user's API key
+    location /immich-proxy/ {
+        set $book_backend immich-book-backend;
+        proxy_pass http://$book_backend:8000$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 180s;
+        client_max_body_size 100M;
+    }
+
     # SPA
     location / {
         try_files $uri $uri/ /index.html;
