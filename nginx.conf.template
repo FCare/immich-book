@@ -25,7 +25,11 @@ server {
     # client sent - the key never needs to reach the browser/JS bundle.
     location /api/ {
         set $immich_upstream immich_server;
-        proxy_pass http://$immich_upstream:2283/api/;
+        # $request_uri (not a static path) because proxy_pass loses its
+        # automatic location-prefix rewriting as soon as the target host
+        # is a variable - without it, every request here would be sent
+        # upstream as a literal "/api/", regardless of the actual path.
+        proxy_pass http://$immich_upstream:2283$request_uri;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -44,13 +48,15 @@ server {
     # from any device rather than being tied to one browser's storage.
     location /photobooks {
         set $book_backend immich-book-backend;
-        proxy_pass http://$book_backend:8000/photobooks;
+        # see the /api/ location above for why $request_uri is required
+        # once proxy_pass targets a variable instead of a static host
+        proxy_pass http://$book_backend:8000$request_uri;
         proxy_set_header Host $host;
     }
 
     location /globalconfig {
         set $book_backend immich-book-backend;
-        proxy_pass http://$book_backend:8000/globalconfig;
+        proxy_pass http://$book_backend:8000$request_uri;
         proxy_set_header Host $host;
     }
 
@@ -60,7 +66,7 @@ server {
     # merging that much data takes longer than the other endpoints here.
     location /pdf/ {
         set $book_backend immich-book-backend;
-        proxy_pass http://$book_backend:8000/pdf/;
+        proxy_pass http://$book_backend:8000$request_uri;
         proxy_set_header Host $host;
         client_max_body_size 0;
         # client_body_timeout guards the upload leg (the browser sending
