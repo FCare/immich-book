@@ -107,9 +107,10 @@ def health():
 def list_photobooks(request: Request):
     """Album ids that currently have a stored photobook - used by the
     frontend to prune photobooks whose Immich album no longer exists."""
-    user_id = request.headers.get("x-vk-user")
+    # Authentik ForwardAuth injects X-Authentik-Username with the user's username
+    user_id = request.headers.get("x-authentik-username")
     if not user_id:
-        raise HTTPException(status_code=401, detail="Missing x-vk-user header")
+        raise HTTPException(status_code=401, detail="Missing x-authentik-username header")
     
     with get_db() as conn:
         rows = conn.execute("SELECT album_id FROM photobooks WHERE user_id = ?", (user_id,)).fetchall()
@@ -119,9 +120,10 @@ def list_photobooks(request: Request):
 @app.get("/photobooks/{album_id}")
 def get_photobook(album_id: str, request: Request):
     """Get photobook config only (no change detection)."""
-    user_id = request.headers.get("x-vk-user")
+    # Authentik ForwardAuth injects X-Authentik-User with the user's UUID
+    user_id = request.headers.get("x-authentik-username")
     if not user_id:
-        raise HTTPException(status_code=401, detail="Missing x-vk-user header")
+        raise HTTPException(status_code=401, detail="Missing x-authentik-username header")
     
     with get_db() as conn:
         row = conn.execute(
@@ -141,9 +143,9 @@ async def detect_changes(album_id: str, request: Request):
     
     POST body: { "currentAssetIds": ["id1", "id2", ...] }
     """
-    user_id = request.headers.get("x-vk-user")
+    user_id = request.headers.get("x-authentik-username")
     if not user_id:
-        raise HTTPException(status_code=401, detail="Missing x-vk-user header")
+        raise HTTPException(status_code=401, detail="Missing x-authentik-username header")
     
     body = await request.body()
     try:
@@ -195,9 +197,9 @@ async def detect_changes(album_id: str, request: Request):
 
 @app.put("/photobooks/{album_id}")
 async def put_photobook(album_id: str, request: Request):
-    user_id = request.headers.get("x-vk-user")
+    user_id = request.headers.get("x-authentik-username")
     if not user_id:
-        raise HTTPException(status_code=401, detail="Missing x-vk-user header")
+        raise HTTPException(status_code=401, detail="Missing x-authentik-username header")
     
     body = await request.body()
     try:
@@ -240,9 +242,9 @@ async def put_photobook(album_id: str, request: Request):
 
 @app.delete("/photobooks/{album_id}")
 def delete_photobook(album_id: str, request: Request):
-    user_id = request.headers.get("x-vk-user")
+    user_id = request.headers.get("x-authentik-username")
     if not user_id:
-        raise HTTPException(status_code=401, detail="Missing x-vk-user header")
+        raise HTTPException(status_code=401, detail="Missing x-authentik-username header")
     
     with get_db() as conn:
         conn.execute("DELETE FROM photobooks WHERE user_id = ? AND album_id = ?", (user_id, album_id))
