@@ -1,6 +1,10 @@
 import type { AlbumResponseDto, AssetResponseDto } from "@immich/sdk";
 import { Document, Page, Image, View, Text, StyleSheet } from "@react-pdf/renderer";
 import { mmToPixels, type Page as LayoutPage } from "../utils/pageLayout";
+import {
+  backCoverCardGeometry,
+  backCoverCaptionTextBoxHeight,
+} from "../utils/backCoverLayout";
 import type { PageBackground, CardStyle, CoverLayout, FocalPoint, FrameSize } from "../config/albumConfig";
 import {
   SCRAPBOOK,
@@ -396,13 +400,77 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
     : coverPageWidth;
   const separatedCoverBleedWidth = separatedCoverWidth + bleedPt * 2;
 
-  // Helper to render back cover content (reused in both standalone and separated modes)
-  const renderBackCoverContent = () => {
-    // This is a direct extraction from the standalone back cover rendering
-    // to ensure separated cover gets the same layouts
+  // The one back cover renderer, used by both the standalone back cover
+  // page and the back panel of a separated cover spread. These were two
+  // near-copies that had drifted apart from each other as well as from
+  // the web preview (different caption strip height, different mat
+  // geometry, one with a drop shadow and one without), which is how the
+  // same book's last page ended up looking different depending on which
+  // way it was exported.
+  //
+  // `bleedMode` is the only thing that legitimately differs between the
+  // two: on a separated spread the back panel sits at the outer left
+  // edge with the spine immediately to its right, so a full-bleed photo
+  // bleeds past the trim on the top/left/bottom but must stop exactly at
+  // the trim line on the right, where the spine begins. A standalone
+  // back cover page bleeds on all four sides.
+  const renderBackCoverContent = (
+    bleedMode: "all" | "outer" = "all",
+  ) => {
+    // Everything below mirrors the web preview
+    // (components/cover/BackCoverStandalone.tsx) rather than the other
+    // way round: the preview is what the user composes and signs off on,
+    // so the printed page has to look like it. Geometry comes from the
+    // shared helper both of them call, and the decorations the preview
+    // always draws (a "text-only" back cover's rules, a full-bleed one's
+    // scrim, the card's mat) are drawn here unconditionally too, instead
+    // of vanishing whenever the closing note happens to be empty.
+    const hasBackCoverText = !!backCoverText;
+    // Right edge butts against the spine on a separated cover spread, so
+    // a full-bleed photo bleeds past the trim on top/left/bottom but
+    // stops exactly at the trim line on the right - one bleed's worth of
+    // extra width there instead of two. A standalone back cover page
+    // bleeds on all four sides.
+    const bledWidth =
+      coverPageWidth + (bleedMode === "outer" ? bleedPt : bleedPt * 2);
+    const captionTextBoxHeight =
+      backCoverCaptionTextBoxHeight(backCoverTextSize);
+    // The note itself, sized and centred exactly as the preview's input
+    // is. Kept as a fixed-height box even when empty so that what sits
+    // around it (the "text-only" rules) doesn't shift.
+    const backCoverNote = (color: string, height: number) => (
+      <View
+        style={{
+          width: "100%",
+          height,
+          display: "flex",
+          // react-pdf defaults to flexDirection:"column" (unlike CSS's
+          // "row" default) - without this, alignItems/justifyContent end
+          // up swapped from what they'd mean on the web.
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {hasBackCoverText && (
+          <Text
+            style={{
+              fontFamily: "Caveat",
+              fontWeight: 500,
+              fontSize: backCoverTextSize,
+              color,
+              textAlign: "center",
+            }}
+          >
+            {backCoverText}
+          </Text>
+        )}
+      </View>
+    );
+
     return (
       <>
-        {backCoverLayout === "text-only" && !!backCoverText && (
+        {backCoverLayout === "text-only" && (
           <View
             style={{
               position: "absolute",
@@ -425,17 +493,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                 marginBottom: 16,
               }}
             />
-            <Text
-              style={{
-                fontFamily: "Caveat",
-                fontWeight: 600,
-                fontSize: backCoverTextSize,
-                color: SCRAPBOOK.ink,
-                textAlign: "center",
-              }}
-            >
-              {backCoverText}
-            </Text>
+            {backCoverNote(SCRAPBOOK.ink, captionTextBoxHeight)}
             <View
               style={{
                 width: coverPageWidth * 0.3,
@@ -449,10 +507,12 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
         )}
 
         {backCoverLayout === "photo-title" &&
-          Boolean(backCoverImageBlob || backCoverText) &&
           (() => {
             const hasImage = !!backCoverImageBlob;
-            if (!hasImage && backCoverPlainText && backCoverText) {
+            // Plain text has no photo to mount, so no card/mat either -
+            // it just sits on the page background, centered on the
+            // whole page.
+            if (!hasImage && backCoverPlainText) {
               const plainWidth = coverPageWidth * 0.7;
               return (
                 <View
@@ -468,126 +528,106 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                     justifyContent: "center",
                   }}
                 >
-                  <Text
-                    style={{
-                      fontFamily: "Caveat",
-                      fontWeight: 500,
-                      fontSize: backCoverTextSize,
-                      color: SCRAPBOOK.ink,
-                      textAlign: "center",
-                    }}
-                  >
-                    {backCoverText}
-                  </Text>
+                  {backCoverNote(SCRAPBOOK.ink, captionTextBoxHeight)}
                 </View>
               );
             }
 
-            const cardWidth = coverPageWidth * (backCoverFrameSize?.width ?? 0.42);
-            const cardHeight = coverPageHeight * (backCoverFrameSize?.height ?? 0.3);
-            const cardTop = (coverPageHeight - cardHeight) / 2;
-            const cardLeft = (coverPageWidth - cardWidth) / 2;
-            const frameInset = Math.max(4, cardWidth * 0.045);
-            const captionStripHeight = backCoverText ? backCoverTextSize * 1.6 : 0;
-
+            // Card mounted flat (no tilt/tape), centered on the whole
+            // page, so it reads as a closing note rather than another
+            // scrapbook page. The preview draws this card whenever the
+            // layout is "photo-title", empty or not, so this does too.
+            const geom = backCoverCardGeometry(
+              coverPageWidth,
+              coverPageHeight,
+              backCoverFrameSize,
+              backCoverTextSize,
+            );
             return (
               <View
                 style={{
                   position: "absolute",
-                  top: cardTop,
-                  left: cardLeft,
-                  width: cardWidth,
-                  height: cardHeight,
+                  top: geom.cardTop,
+                  left: geom.cardLeft,
+                  width: geom.cardWidth,
+                  height: geom.cardHeight,
                 }}
               >
-                {hasImage && (
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: cardWidth,
-                      height: cardHeight - captionStripHeight,
-                      backgroundColor: SCRAPBOOK.mat,
-                    }}
-                  >
-                    <View
+                {/* react-pdf has no box-shadow, so the preview's soft
+                    drop shadow is stood in for by a solid offset
+                    rectangle behind the mat. */}
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 4,
+                    left: 3,
+                    width: geom.cardWidth,
+                    height: geom.cardHeight,
+                    backgroundColor: SCRAPBOOK.shadow,
+                  }}
+                />
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: geom.cardWidth,
+                    height: geom.cardHeight,
+                    backgroundColor: SCRAPBOOK.mat,
+                  }}
+                >
+                  {hasImage && (
+                    // The whole photo, fitted inside the mat window -
+                    // NOT PdfPhotoImage's crop-to-fill. The card is a
+                    // rectangle the user resizes freely and cannot pan,
+                    // so cropping it here printed a framing they never
+                    // saw in the preview.
+                    <Image
+                      src={backCoverImageBlob}
                       style={{
                         position: "absolute",
-                        top: frameInset,
-                        left: frameInset,
-                        right: frameInset,
-                        bottom: frameInset,
-                        overflow: "hidden",
+                        top: geom.photoTop,
+                        left: geom.photoLeft,
+                        width: geom.photoWidth,
+                        height: geom.photoHeight,
+                        objectFit: "contain",
                       }}
-                    >
-                      <Image
-                        src={backCoverImageBlob}
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "cover",
-                          ...(backCoverFocalPoint
-                            ? {
-                                objectPositionX: `${backCoverFocalPoint.x * 100}%`,
-                                objectPositionY: `${backCoverFocalPoint.y * 100}%`,
-                              }
-                            : {}),
-                        }}
-                      />
-                    </View>
-                  </View>
-                )}
-                {!!backCoverText && (
+                    />
+                  )}
                   <View
                     style={{
                       position: "absolute",
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: captionStripHeight,
-                      backgroundColor: SCRAPBOOK.mat,
+                      left: geom.frameInset,
+                      width: geom.cardWidth - geom.frameInset * 2,
+                      bottom: hasImage ? geom.captionBottom : 0,
+                      height: hasImage
+                        ? geom.captionTextBoxHeight
+                        : geom.cardHeight,
                       display: "flex",
+                      flexDirection: "row",
                       alignItems: "center",
                       justifyContent: "center",
-                      paddingHorizontal: 8,
                     }}
                   >
-                    <Text
-                      style={{
-                        fontFamily: "Caveat",
-                        fontWeight: 500,
-                        fontSize: backCoverTextSize,
-                        color: SCRAPBOOK.ink,
-                        textAlign: "center",
-                      }}
-                    >
-                      {backCoverText}
-                    </Text>
+                    {backCoverNote(
+                      SCRAPBOOK.ink,
+                      hasImage ? geom.captionTextBoxHeight : geom.cardHeight,
+                    )}
                   </View>
-                )}
+                </View>
               </View>
             );
           })()}
 
         {backCoverLayout === "full-bleed" && backCoverImageBlob && (
           <>
-            {/* This panel sits at the left/outer edge of the separated-
-                cover spread, with the spine immediately to its right - so
-                the image (and its scrim below) bleed past the true page
-                edge on the top/left/bottom, but stop exactly at the trim
-                line on the right, where the spine begins. Without this,
-                a bleed-inclusive PDF still shows a sliver of plain page
-                background at the physical edge whenever the printer's
-                trim lands anywhere within its own tolerance, instead of
-                photo all the way to the edge. */}
             <Image
               src={backCoverImageBlob}
               style={{
                 position: "absolute",
                 top: -bleedPt,
                 left: -bleedPt,
-                width: coverPageWidth + bleedPt,
+                width: bledWidth,
                 height: coverPageHeight + bleedPt * 2,
                 objectFit: "cover",
                 ...(backCoverFocalPoint
@@ -598,42 +638,34 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                   : {}),
               }}
             />
+            {/* Drawn whether or not there is a note, as the preview
+                does - it is part of how a full-bleed back cover looks,
+                not just a backing for the text. */}
             <Image
               src={COVER_SCRIM_DATA_URI}
               style={{
                 position: "absolute",
                 left: -bleedPt,
                 bottom: -bleedPt,
-                width: coverPageWidth + bleedPt,
+                width: bledWidth,
                 height: coverScrimHeight + bleedPt,
               }}
             />
-            {!!backCoverText && (
-              <View
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: coverScrimHeight,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: "Caveat",
-                    fontWeight: 600,
-                    fontSize: backCoverTextSize,
-                    color: "#FFFFFF",
-                    textAlign: "center",
-                  }}
-                >
-                  {backCoverText}
-                </Text>
-              </View>
-            )}
+            <View
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: coverScrimHeight,
+                display: "flex",
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {backCoverNote("#FFFFFF", captionTextBoxHeight)}
+            </View>
           </>
         )}
       </>
@@ -1048,7 +1080,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
         >
           {/* Back Cover (left) */}
           <View style={{ width: coverPageWidth, height: coverPageHeight, position: "relative" }}>
-            {renderBackCoverContent()}
+            {renderBackCoverContent("outer")}
           </View>
 
           {/* Spine (middle) */}
@@ -1598,241 +1630,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
             height: coverPageHeight,
           }}
         >
-        {backCoverLayout === "text-only" && !!backCoverText && (
-          <View
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              paddingHorizontal: coverPageWidth * 0.1,
-            }}
-          >
-            <View
-              style={{
-                width: coverPageWidth * 0.3,
-                height: 1,
-                backgroundColor: SCRAPBOOK.ink,
-                opacity: 0.3,
-                marginBottom: 16,
-              }}
-            />
-            <Text
-              style={{
-                fontFamily: "Caveat",
-                fontWeight: 600,
-                fontSize: backCoverTextSize,
-                color: SCRAPBOOK.ink,
-                textAlign: "center",
-              }}
-            >
-              {backCoverText}
-            </Text>
-            <View
-              style={{
-                width: coverPageWidth * 0.3,
-                height: 1,
-                backgroundColor: SCRAPBOOK.ink,
-                opacity: 0.3,
-                marginTop: 16,
-              }}
-            />
-          </View>
-        )}
-
-        {backCoverLayout === "photo-title" &&
-          Boolean(backCoverImageBlob || backCoverText) &&
-          (() => {
-            const hasImage = !!backCoverImageBlob;
-            // Plain text has no photo to mount, so no card/mat either -
-            // it just sits on the page background, centered on the
-            // whole page (not the whole scrapbook card treatment).
-            if (!hasImage && backCoverPlainText && backCoverText) {
-              const plainWidth = coverPageWidth * 0.7;
-              return (
-                <View
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: (coverPageWidth - plainWidth) / 2,
-                    width: plainWidth,
-                    height: coverPageHeight,
-                    display: "flex",
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontFamily: "Caveat",
-                      fontWeight: 500,
-                      fontSize: backCoverTextSize,
-                      color: SCRAPBOOK.ink,
-                      textAlign: "center",
-                    }}
-                  >
-                    {backCoverText}
-                  </Text>
-                </View>
-              );
-            }
-
-            // Card mounted flat (no tilt/tape), centered on the whole
-            // page, so it reads as a closing note rather than another
-            // scrapbook page.
-            const cardWidth = coverPageWidth * (backCoverFrameSize?.width ?? 0.42);
-            const cardHeight = coverPageHeight * (backCoverFrameSize?.height ?? 0.3);
-            const cardTop = (coverPageHeight - cardHeight) / 2;
-            const cardLeft = (coverPageWidth - cardWidth) / 2;
-            const frameInset = Math.max(4, cardWidth * 0.045);
-            const captionStripHeight = backCoverText
-              ? backCoverTextSize * 1.6
-              : 0;
-            return (
-              <View
-                style={{
-                  position: "absolute",
-                  top: cardTop,
-                  left: cardLeft,
-                  width: cardWidth,
-                  height: cardHeight,
-                }}
-              >
-                <View
-                  style={{
-                    position: "absolute",
-                    top: 4,
-                    left: 3,
-                    width: cardWidth,
-                    height: cardHeight,
-                    backgroundColor: SCRAPBOOK.shadow,
-                  }}
-                />
-                <View
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: cardWidth,
-                    height: cardHeight,
-                    backgroundColor: SCRAPBOOK.mat,
-                  }}
-                >
-                  {backCoverImageBlob && (
-                    <PdfPhotoImage
-                      src={backCoverImageBlob}
-                      top={frameInset}
-                      left={frameInset}
-                      containerWidth={cardWidth - frameInset * 2}
-                      containerHeight={
-                        cardHeight - frameInset * 2 - captionStripHeight
-                      }
-                      focalPoint={backCoverFocalPoint}
-                    />
-                  )}
-                  {!!backCoverText && (
-                    <View
-                      style={{
-                        position: "absolute",
-                        left: frameInset,
-                        width: cardWidth - frameInset * 2,
-                        bottom: backCoverImageBlob ? frameInset * 0.3 : 0,
-                        height: backCoverImageBlob
-                          ? captionStripHeight
-                          : cardHeight,
-                        display: "flex",
-                        flexDirection: "row",
-                        alignItems: backCoverImageBlob
-                          ? "flex-end"
-                          : "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontFamily: "Caveat",
-                          fontWeight: 500,
-                          fontSize: backCoverTextSize,
-                          color: SCRAPBOOK.ink,
-                          textAlign: "center",
-                        }}
-                      >
-                        {backCoverText}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            );
-          })()}
-
-        {backCoverLayout === "full-bleed" && backCoverImageBlob && (
-          <>
-            {/* Bleeds past the trim size on all four sides, matching the
-                bled page this Page itself is sized to - see the matching
-                comment on the front cover's full-bleed Image. */}
-            <Image
-              src={backCoverImageBlob}
-              style={{
-                position: "absolute",
-                top: -bleedPt,
-                left: -bleedPt,
-                width: coverPageWidth + bleedPt * 2,
-                height: coverPageHeight + bleedPt * 2,
-                objectFit: "cover",
-                ...(backCoverFocalPoint
-                  ? {
-                      objectPositionX: `${backCoverFocalPoint.x * 100}%`,
-                      objectPositionY: `${backCoverFocalPoint.y * 100}%`,
-                    }
-                  : {}),
-              }}
-            />
-            {!!backCoverText && (
-              <>
-                <Image
-                  src={COVER_SCRIM_DATA_URI}
-                  style={{
-                    position: "absolute",
-                    left: -bleedPt,
-                    bottom: -bleedPt,
-                    width: coverPageWidth + bleedPt * 2,
-                    height: coverScrimHeight + bleedPt,
-                  }}
-                />
-                <View
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    height: coverScrimHeight,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontFamily: "Caveat",
-                      fontWeight: 600,
-                      fontSize: backCoverTextSize,
-                      color: "#FFFFFF",
-                      textAlign: "center",
-                    }}
-                  >
-                    {backCoverText}
-                  </Text>
-                </View>
-              </>
-            )}
-          </>
-        )}
+        {renderBackCoverContent("all")}
 
         </View>
       </Page>

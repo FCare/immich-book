@@ -4089,6 +4089,7 @@ function PhotoGridEditor({
               handleReorderPointerDown={handleReorderPointerDown}
               performNewAssetPlacement={performNewAssetPlacement}
               backCoverLayout={backCoverLayout}
+              backCoverPlainText={backCoverPlainText}
               backCoverText={backCoverText}
               setBackCoverText={setBackCoverText}
               backCoverTextSize={backCoverTextSize}

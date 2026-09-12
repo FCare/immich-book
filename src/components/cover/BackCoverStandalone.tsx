@@ -4,12 +4,12 @@ import type { ImmichConfig } from "../../types";
 import { t, type Language } from "../../i18n";
 import type { CoverLayout, FocalPoint, FrameSize, PageBackground } from "../../config/albumConfig";
 import type { HistoryOperation } from "../../history/editHistory";
+import {
+  backCoverCardGeometry,
+  DEFAULT_BACK_COVER_FRAME_WIDTH,
+  DEFAULT_BACK_COVER_FRAME_HEIGHT,
+} from "../../utils/backCoverLayout";
 import { focalPointToCss, pageBackgroundCss, SCRAPBOOK, toPoints, type NewAssetTarget } from "../PhotoGrid";
-
-// Default "photo-title" card size, as a fraction of the full page - same
-// as before this was made resizable.
-const DEFAULT_BACK_COVER_FRAME_WIDTH = 0.42;
-const DEFAULT_BACK_COVER_FRAME_HEIGHT = 0.3;
 
 export interface BackCoverStandaloneProps {
   validPageWidth: number;
@@ -179,8 +179,12 @@ export function BackCoverStandalone({
           >
             <div
               style={{
-                width: "30%",
-                height: 2,
+                // 30% of the page, and a 1pt hairline - the PDF's own
+                // rule, which this "30%" used to resolve against the
+                // container's already 10%-inset box instead (24% of the
+                // page), at twice the thickness.
+                width: displayWidth * 0.3,
+                height: 1,
                 backgroundColor: SCRAPBOOK.ink,
                 opacity: 0.3,
               }}
@@ -188,8 +192,12 @@ export function BackCoverStandalone({
             {backCoverTextInput(backCoverTextSize, SCRAPBOOK.ink)}
             <div
               style={{
-                width: "30%",
-                height: 2,
+                // 30% of the page, and a 1pt hairline - the PDF's own
+                // rule, which this "30%" used to resolve against the
+                // container's already 10%-inset box instead (24% of the
+                // page), at twice the thickness.
+                width: displayWidth * 0.3,
+                height: 1,
                 backgroundColor: SCRAPBOOK.ink,
                 opacity: 0.3,
               }}
@@ -252,15 +260,24 @@ export function BackCoverStandalone({
             }
 
             // Card mounted flat (no tilt), centered on the
-            // whole page, so it reads as a closing note.
-            const cardWidth =
-              displayWidth * (backCoverFrameSize?.width ?? DEFAULT_BACK_COVER_FRAME_WIDTH);
-            const cardHeight =
-              displayHeight * (backCoverFrameSize?.height ?? DEFAULT_BACK_COVER_FRAME_HEIGHT);
-            const cardTop = (displayHeight - cardHeight) / 2;
-            const cardLeft = (displayWidth - cardWidth) / 2;
-            const frameInset = Math.max(4, cardWidth * 0.045);
-            const captionStripHeight = backCoverTextSize * 1.4;
+            // whole page, so it reads as a closing note. The numbers
+            // come from the shared geometry (see
+            // utils/backCoverLayout.ts) so the PDF lays the card out
+            // exactly as it looks here.
+            const {
+              cardWidth,
+              cardHeight,
+              cardTop,
+              cardLeft,
+              frameInset,
+              captionStripHeight,
+              captionTextBoxHeight,
+            } = backCoverCardGeometry(
+              displayWidth,
+              displayHeight,
+              backCoverFrameSize,
+              backCoverTextSize,
+            );
             return (
               <div
                 className="absolute"
@@ -325,7 +342,7 @@ export function BackCoverStandalone({
                     bottom: imageUrl ? frameInset * 0.3 : 0,
                     top: imageUrl ? undefined : 0,
                     height: imageUrl
-                      ? captionStripHeight
+                      ? captionTextBoxHeight
                       : cardHeight,
                     fontFamily: "Caveat",
                     fontWeight: 500,

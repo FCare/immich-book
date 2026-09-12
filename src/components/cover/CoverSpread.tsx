@@ -5,6 +5,11 @@ import { t, type Language } from "../../i18n";
 import type { CoverLayout, FocalPoint, FrameSize, PageBackground } from "../../config/albumConfig";
 import type { HistoryOperation } from "../../history/editHistory";
 import { mmToPixels } from "../../utils/pageLayout";
+import {
+  backCoverCardGeometry,
+  DEFAULT_BACK_COVER_FRAME_WIDTH,
+  DEFAULT_BACK_COVER_FRAME_HEIGHT,
+} from "../../utils/backCoverLayout";
 import { focalPointToCss, pageBackgroundCss, SCRAPBOOK, toPoints, type NewAssetTarget } from "../PhotoGrid";
 
 export interface CoverSpreadProps {
@@ -39,6 +44,7 @@ export interface CoverSpreadProps {
     target: NewAssetTarget,
   ) => void;
   backCoverLayout: CoverLayout;
+  backCoverPlainText: boolean;
   backCoverText: string;
   setBackCoverText: (text: string) => void;
   backCoverTextSize: number;
@@ -76,6 +82,7 @@ export function CoverSpread({
   handleReorderPointerDown,
   performNewAssetPlacement,
   backCoverLayout,
+  backCoverPlainText,
   backCoverText,
   setBackCoverText,
   backCoverTextSize,
@@ -149,7 +156,26 @@ export function CoverSpread({
           }}
         >
           {backCoverLayout === "text-only" && (
-            <div className="absolute inset-0 flex items-center justify-center">
+            // The two rules framing the note were missing from this view
+            // entirely - the standalone preview and the PDF both draw
+            // them, so a separated-cover book showed a bare note here
+            // and a framed one once exported.
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center"
+              style={{
+                gap: `${16 * scale}px`,
+                paddingLeft: "10%",
+                paddingRight: "10%",
+              }}
+            >
+              <div
+                style={{
+                  width: displayWidth * scale * 0.3,
+                  height: 1,
+                  backgroundColor: SCRAPBOOK.ink,
+                  opacity: 0.3,
+                }}
+              />
               <input
                 value={backCoverText}
                 onFocus={(e) => {
@@ -175,11 +201,20 @@ export function CoverSpread({
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
                 onPointerDown={(e) => e.stopPropagation()}
-                className="text-center bg-transparent focus:outline-none rounded w-[80%] text-gray-700 dark:text-gray-300"
+                className="text-center bg-transparent focus:outline-none rounded w-[90%]"
                 style={{
                   fontFamily: "Caveat",
-                  fontWeight: 600,
+                  fontWeight: 500,
                   fontSize: `${backCoverTextSize * scale}px`,
+                  color: SCRAPBOOK.ink,
+                }}
+              />
+              <div
+                style={{
+                  width: displayWidth * scale * 0.3,
+                  height: 1,
+                  backgroundColor: SCRAPBOOK.ink,
+                  opacity: 0.3,
                 }}
               />
             </div>
@@ -188,6 +223,54 @@ export function CoverSpread({
           {backCoverLayout === "photo-title" &&
             (backCoverImageUrl || backCoverText) &&
             (() => {
+              // Plain text has no photo to mount, so no card/mat either
+              // - it just sits on the page background, centered on the
+              // whole page. Honoured by the standalone preview and by
+              // the PDF's separated-cover path; this view used to ignore
+              // it and draw the card anyway.
+              if (!backCoverImageUrl && backCoverPlainText) {
+                const plainWidth = displayWidth * scale * 0.7;
+                return (
+                  <input
+                    value={backCoverText}
+                    onFocus={(e) => {
+                      e.target.dataset.initialValue = backCoverText;
+                    }}
+                    onChange={(e) => setBackCoverText(e.target.value)}
+                    onBlur={(e) => {
+                      const prevText = e.target.dataset.initialValue || "";
+                      const newText = e.target.value.trim();
+                      if (prevText !== newText) {
+                        setHistory((prev) => [
+                          {
+                            type: "edit-back-cover-text",
+                            prevText,
+                            newText,
+                            timestamp: Date.now(),
+                          },
+                          ...prev,
+                        ]);
+                      }
+                    }}
+                    placeholder={t(language, "backCoverTextPlaceholder")}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="absolute text-center bg-transparent focus:outline-none focus:bg-white/40 rounded"
+                    style={{
+                      top: 0,
+                      left: `${(displayWidth * scale - plainWidth) / 2}px`,
+                      width: `${plainWidth}px`,
+                      height: `${displayHeight * scale}px`,
+                      fontFamily: "Caveat",
+                      fontWeight: 500,
+                      fontSize: `${backCoverTextSize * scale}px`,
+                      color: SCRAPBOOK.ink,
+                    }}
+                  />
+                );
+              }
+
               // A small centered card, matching BackCoverStandalone.tsx's
               // "photo-title" layout exactly (this used to be the front
               // cover's full mat convention instead - inconsistent with
@@ -196,14 +279,30 @@ export function CoverSpread({
               // pixel space (this component sizes its boxes down via
               // `scale` directly rather than CSS zoom, unlike the
               // standalone cover components).
-              const cardWidthFrac = backCoverFrameSize?.width ?? 0.42;
-              const cardHeightFrac = backCoverFrameSize?.height ?? 0.3;
-              const cardWidth = displayWidth * cardWidthFrac * scale;
-              const cardHeight = displayHeight * cardHeightFrac * scale;
-              const cardTop = (displayHeight * scale - cardHeight) / 2;
-              const cardLeft = (displayWidth * scale - cardWidth) / 2;
-              const frameInset = Math.max(4, cardWidth * 0.045);
-              const captionStripHeight = cardHeight * 0.22;
+              // This panel sizes its own boxes down by `scale` rather
+              // than leaving it to CSS `zoom`, so every length handed to
+              // the shared geometry has to be in that same already-
+              // scaled space. The strip under the photo used to be
+              // `cardHeight * 0.22` here - a third rule, agreeing with
+              // neither the standalone preview nor the PDF.
+              const cardWidthFrac =
+                backCoverFrameSize?.width ?? DEFAULT_BACK_COVER_FRAME_WIDTH;
+              const cardHeightFrac =
+                backCoverFrameSize?.height ?? DEFAULT_BACK_COVER_FRAME_HEIGHT;
+              const {
+                cardWidth,
+                cardHeight,
+                cardTop,
+                cardLeft,
+                frameInset,
+                captionStripHeight,
+                captionTextBoxHeight,
+              } = backCoverCardGeometry(
+                displayWidth * scale,
+                displayHeight * scale,
+                backCoverFrameSize,
+                backCoverTextSize * scale,
+              );
               return (
                 <div
                   className="absolute shadow-lg"
@@ -284,7 +383,7 @@ export function CoverSpread({
                       right: `${frameInset}px`,
                       bottom: backCoverImageUrl ? `${frameInset * 0.3}px` : undefined,
                       top: backCoverImageUrl ? undefined : 0,
-                      height: `${backCoverImageUrl ? captionStripHeight : cardHeight}px`,
+                      height: `${backCoverImageUrl ? captionTextBoxHeight : cardHeight}px`,
                       fontFamily: "Caveat",
                       fontWeight: 500,
                       fontSize: `${backCoverTextSize * scale}px`,
