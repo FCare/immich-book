@@ -36,6 +36,28 @@ server {
         client_max_body_size 100M;
     }
 
+    # index.html is the only thing that names the current hashed bundle,
+    # and those bundles are served immutable for a year (see the static
+    # asset location below) - so it must never be served from cache
+    # without revalidating. With no explicit policy a browser falls back
+    # to heuristic freshness (~10% of the document's age), which means
+    # that after a few weeks without a deploy it stops revalidating
+    # altogether and keeps loading the previous build's bundle straight
+    # from its own cache: a rebuild then appears to have had no effect at
+    # all, with nothing in the app looking broken.
+    #
+    # "no-cache" does not mean "don't store" - the browser keeps the file
+    # and only re-fetches it when it has actually changed.
+    location = /index.html {
+        # add_header is not inherited into a location that declares one
+        # of its own, so the server block's security headers have to be
+        # repeated here.
+        add_header Cache-Control "no-cache" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer-when-downgrade" always;
+    }
+
     # SPA
     location / {
         try_files $uri $uri/ /index.html;
