@@ -19,14 +19,21 @@ import type { FrameSize } from "../config/albumConfig";
 export const DEFAULT_BACK_COVER_FRAME_WIDTH = 0.42;
 export const DEFAULT_BACK_COVER_FRAME_HEIGHT = 0.3;
 
-// The card always gives up this much of its height to the closing note,
-// whether or not there is one yet - the preview has always reserved it,
-// so reserving it is what the photo's shape is built around, and an
-// empty note stays clickable in the preview instead of collapsing.
+// How much of the card's height the closing note takes, when there is
+// one. Reserving it unconditionally leaves the mat visibly heavier at
+// the bottom than at the top (one frameInset above the photo, a
+// frameInset plus a whole empty strip below it) for a note that isn't
+// there - so an empty note gives the space back and the photo sits in
+// an even mat, the way a mounted print looks. The preview keeps the
+// note typeable regardless by overlaying a hover-only input that claims
+// no layout space, the same way the interior cards' captions work.
 const CAPTION_STRIP_FACTOR = 1.4;
 
-export function backCoverCaptionStripHeight(textSize: number): number {
-  return textSize * CAPTION_STRIP_FACTOR;
+export function backCoverCaptionStripHeight(
+  textSize: number,
+  hasText: boolean,
+): number {
+  return hasText ? textSize * CAPTION_STRIP_FACTOR : 0;
 }
 
 // The note's own box is deliberately taller than the strip it sits in:
@@ -38,7 +45,7 @@ export function backCoverCaptionStripHeight(textSize: number): number {
 // place on screen and in print. The 0.2x it overhangs the strip by
 // reaches up over the bottom of the photo, where nothing is drawn.
 export function backCoverCaptionTextBoxHeight(textSize: number): number {
-  return Math.max(backCoverCaptionStripHeight(textSize), textSize * 1.6);
+  return Math.max(backCoverCaptionStripHeight(textSize, true), textSize * 1.6);
 }
 
 export interface BackCoverCardGeometry {
@@ -47,7 +54,8 @@ export interface BackCoverCardGeometry {
   cardTop: number;
   cardLeft: number;
   frameInset: number;
-  // Height the photo gives up to the closing note.
+  // Height the photo gives up to the closing note - 0 when there is
+  // none, so the mat stays even on all four sides.
   captionStripHeight: number;
   // The photo's box inside the card, relative to the card's own corner.
   photoTop: number;
@@ -69,13 +77,14 @@ export function backCoverCardGeometry(
   pageHeight: number,
   frameSize: FrameSize | null | undefined,
   textSize: number,
+  hasText: boolean,
 ): BackCoverCardGeometry {
   const cardWidth =
     pageWidth * (frameSize?.width ?? DEFAULT_BACK_COVER_FRAME_WIDTH);
   const cardHeight =
     pageHeight * (frameSize?.height ?? DEFAULT_BACK_COVER_FRAME_HEIGHT);
   const frameInset = Math.max(4, cardWidth * 0.045);
-  const captionStripHeight = backCoverCaptionStripHeight(textSize);
+  const captionStripHeight = backCoverCaptionStripHeight(textSize, hasText);
   return {
     cardWidth,
     cardHeight,

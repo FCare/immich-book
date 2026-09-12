@@ -112,6 +112,9 @@ export function CoverSpread({
   const coverImageUrl = coverAsset
     ? `${immichConfig.baseUrl}/assets/${coverAsset.id}/thumbnail?size=preview`
     : null;
+  // A note of pure whitespace prints as nothing, so it reserves no
+  // strip under the photo either - see backCoverCaptionStripHeight.
+  const hasBackCoverText = backCoverText.trim().length > 0;
   const backCoverImageUrl = backCoverAsset
     ? `${immichConfig.baseUrl}/assets/${backCoverAsset.id}/thumbnail?size=preview`
     : null;
@@ -302,10 +305,11 @@ export function CoverSpread({
                 displayHeight * scale,
                 backCoverFrameSize,
                 backCoverTextSize * scale,
+                hasBackCoverText,
               );
               return (
                 <div
-                  className="absolute shadow-lg"
+                  className="group absolute shadow-lg"
                   style={{
                     top: `${cardTop}px`,
                     left: `${cardLeft}px`,
@@ -377,7 +381,14 @@ export function CoverSpread({
                     onClick={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
                     onPointerDown={(e) => e.stopPropagation()}
-                    className="absolute text-center bg-transparent focus:outline-none focus:bg-white/70 rounded"
+                    // See BackCoverStandalone: always mounted, and a
+                    // hover-only overlay claiming no layout space while
+                    // the note is empty.
+                    className={`absolute text-center focus:outline-none rounded transition-opacity ${
+                      hasBackCoverText
+                        ? "bg-transparent focus:bg-white/70"
+                        : "opacity-0 pointer-events-none group-hover:opacity-70 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto bg-white/80"
+                    }`}
                     style={{
                       left: `${frameInset}px`,
                       right: `${frameInset}px`,

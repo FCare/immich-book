@@ -125,6 +125,9 @@ export function BackCoverStandalone({
       }}
     />
   );
+  // A note of pure whitespace prints as nothing, so it must not reserve
+  // a strip under the photo either - see backCoverCaptionStripHeight.
+  const hasBackCoverText = backCoverText.trim().length > 0;
   const isBackCoverSwapSelected = swapFirstId === "back-cover";
   return (
     <div className="relative">
@@ -277,10 +280,11 @@ export function BackCoverStandalone({
               displayHeight,
               backCoverFrameSize,
               backCoverTextSize,
+              hasBackCoverText,
             );
             return (
               <div
-                className="absolute"
+                className="group absolute"
                 style={{
                   top: cardTop,
                   left: cardLeft,
@@ -335,7 +339,23 @@ export function BackCoverStandalone({
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
                   onPointerDown={(e) => e.stopPropagation()}
-                  className="absolute text-center bg-transparent focus:outline-none focus:bg-white/70 rounded"
+                  placeholder={t(language, "backCoverTextPlaceholder")}
+                  // Always mounted (not rendered conditionally on
+                  // hasBackCoverText) so typing the first character
+                  // doesn't swap the DOM node under the cursor and drop
+                  // focus. An empty note reserves no space now, so it
+                  // becomes a hover-only overlay sitting over the bottom
+                  // of the photo - the sidebar has no field for this
+                  // text, so it has to stay reachable somehow. Pointer
+                  // events are off while it's invisible, or it would
+                  // swallow the mousedown that starts a drag on the
+                  // photo underneath. Same pattern as the interior
+                  // cards' captions (see PhotoGrid's captionInput).
+                  className={`absolute text-center focus:outline-none rounded transition-opacity ${
+                    hasBackCoverText
+                      ? "bg-transparent focus:bg-white/70"
+                      : "opacity-0 pointer-events-none group-hover:opacity-70 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto bg-white/80"
+                  }`}
                   style={{
                     left: frameInset,
                     right: frameInset,

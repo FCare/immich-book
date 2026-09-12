@@ -425,7 +425,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
     // always draws (a "text-only" back cover's rules, a full-bleed one's
     // scrim, the card's mat) are drawn here unconditionally too, instead
     // of vanishing whenever the closing note happens to be empty.
-    const hasBackCoverText = !!backCoverText;
+    const hasBackCoverText = backCoverText.trim().length > 0;
     // Right edge butts against the spine on a separated cover spread, so
     // a full-bleed photo bleeds past the trim on top/left/bottom but
     // stops exactly at the trim line on the right - one bleed's worth of
@@ -542,6 +542,7 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
               coverPageHeight,
               backCoverFrameSize,
               backCoverTextSize,
+              hasBackCoverText,
             );
             return (
               <View
@@ -594,26 +595,28 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                       }}
                     />
                   )}
-                  <View
-                    style={{
-                      position: "absolute",
-                      left: geom.frameInset,
-                      width: geom.cardWidth - geom.frameInset * 2,
-                      bottom: hasImage ? geom.captionBottom : 0,
-                      height: hasImage
-                        ? geom.captionTextBoxHeight
-                        : geom.cardHeight,
-                      display: "flex",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    {backCoverNote(
-                      SCRAPBOOK.ink,
-                      hasImage ? geom.captionTextBoxHeight : geom.cardHeight,
-                    )}
-                  </View>
+                  {hasBackCoverText && (
+                    <View
+                      style={{
+                        position: "absolute",
+                        left: geom.frameInset,
+                        width: geom.cardWidth - geom.frameInset * 2,
+                        bottom: hasImage ? geom.captionBottom : 0,
+                        height: hasImage
+                          ? geom.captionTextBoxHeight
+                          : geom.cardHeight,
+                        display: "flex",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {backCoverNote(
+                        SCRAPBOOK.ink,
+                        hasImage ? geom.captionTextBoxHeight : geom.cardHeight,
+                      )}
+                    </View>
+                  )}
                 </View>
               </View>
             );
