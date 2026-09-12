@@ -1416,7 +1416,13 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                         width,
                         bottom: dateStripHeight,
                         height: captionStripHeight,
-                        backgroundColor: "rgba(255,255,255,0.85)",
+                        // Transparent, like the preview's caption input:
+                        // the photo is already shortened by the strip's
+                        // height, so this sits on bare page background,
+                        // not on the photo - a white panel here printed
+                        // a rectangle around the text instead of letting
+                        // the page's own colour (and its paper texture,
+                        // on the grained backgrounds) carry on through.
                         display: "flex",
                         flexDirection: "row",
                         alignItems: "center",
@@ -1444,7 +1450,8 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
                         width,
                         bottom: 0,
                         height: dateStripHeight,
-                        backgroundColor: "rgba(255,255,255,0.85)",
+                        // Transparent, for the same reason as the
+                        // caption strip above.
                         display: "flex",
                         flexDirection: "row",
                         alignItems: "center",
