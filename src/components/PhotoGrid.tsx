@@ -1064,6 +1064,17 @@ function PhotoGridEditor({
   const [reorderDragState, setReorderDragState] = useState<{
     draggedAssetId: string;
     pan?: {
+      // Which key the focal point is stored under. Usually the dragged
+      // card's own id, but the covers are dragged as the synthetic
+      // "cover"/"back-cover" (that's what the swap flow and
+      // data-reorder-asset-id use), while their focal point belongs to
+      // the photo itself - everything that reads one back looks it up
+      // by asset id. Panning a cover used to write "cover" into the
+      // map, which nothing ever read: the crop appeared to move
+      // (handlePointerMove sets objectPosition on the element directly)
+      // but was never persisted, so the PDF - and the preview after any
+      // re-render - kept the old framing.
+      focalId: string;
       imgEl: HTMLImageElement;
       startX: number;
       startY: number;
@@ -1596,10 +1607,17 @@ function PhotoGridEditor({
       const imgEl = (
         target.tagName === "IMG" ? target : target.querySelector("img")
       ) as HTMLImageElement | null;
-      if (imgEl && imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0) {
+      const focalId =
+        assetId === "cover"
+          ? coverAsset?.id
+          : assetId === "back-cover"
+            ? backCoverAsset?.id
+            : assetId;
+      if (focalId && imgEl && imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0) {
         const rect = imgEl.getBoundingClientRect();
-        const start = focalPoints.get(assetId) ?? null;
+        const start = focalPoints.get(focalId) ?? null;
         pan = {
+          focalId,
           imgEl,
           startX: event.clientX,
           startY: event.clientY,
@@ -2619,15 +2637,17 @@ function PhotoGridEditor({
 
     const handlePointerUp = () => {
       if (hasPanned) {
+        // pan.focalId, not draggedAssetId - see the pan state's comment.
+        const focalId = pan?.focalId ?? draggedAssetId;
         setFocalPoints((prev) => {
           const next = new Map(prev);
-          next.set(draggedAssetId, { x: lastFocalX, y: lastFocalY });
+          next.set(focalId, { x: lastFocalX, y: lastFocalY });
           return next;
         });
         setHistory((prev) => [
           {
             type: "pan-focal-point",
-            assetId: draggedAssetId,
+            assetId: focalId,
             prevPoint: pan?.prevPoint ?? null,
             newPoint: { x: lastFocalX, y: lastFocalY },
             timestamp: Date.now(),
