@@ -172,8 +172,8 @@ class AlbumStorage {
       const albumStore = transaction.objectStore(STORE_ALBUMS);
       const syncStore = transaction.objectStore(STORE_SYNC_STATE);
 
-      const clearAlbums = albumStore.clear();
-      const clearSync = syncStore.clear();
+      albumStore.clear();
+      syncStore.clear();
 
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);

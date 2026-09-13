@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
-  getAlbumInfo,
+  AssetOrder,
   getTimeBuckets,
   getTimeBucket,
   getFaces,
@@ -16,7 +16,7 @@ import {
   naturalAspectRatio,
 } from "../utils/pageLayout";
 import type { ImmichConfig } from "../types";
-import { t, type Language } from "../i18n";
+import { t, type Language, type translations } from "../i18n";
 import {
   type PageBackground,
   type CardStyle,
@@ -1089,10 +1089,6 @@ function PhotoGridEditor({
     };
   } | null>(null);
   // Selected photo for swapping (can be cover, back-cover, or regular photo)
-  const [selectedPhotoForSwap, setSelectedPhotoForSwap] = useState<{
-    type: 'cover' | 'back-cover' | 'photo';
-    assetId: string;
-  } | null>(null);
 
   // Armed card for click-to-swap - an alternative to dragging for two
   // cards that are far apart (different pages, off the visible area). A
@@ -1146,7 +1142,7 @@ function PhotoGridEditor({
   }, [history, album.id]);
 
   // Flattened reference state - the baseline for Reset All
-  const [flattenedState, setFlattenedState] = useState<FlattenedState | null>(null);
+  const [, setFlattenedState] = useState<FlattenedState | null>(null);
 
   // Language preference - stored in localStorage
   const [language, setLanguage] = useState<Language>(() => {
@@ -1425,7 +1421,7 @@ function PhotoGridEditor({
       
       // Always oldest first - a photobook should read as a chronological
       // story regardless of the source album's own sort setting in Immich.
-      const albumOrder = "asc";
+      const albumOrder = AssetOrder.Asc;
 
       // Step 1: Get all time buckets for this album
       const timebuckets = await getTimeBuckets({
@@ -1452,8 +1448,11 @@ function PhotoGridEditor({
           const numAssets = bucketData.id.length;
           for (let i = 0; i < numAssets; i++) {
             const asset: any = {};
-            for (const key in bucketData) {
-              asset[key] = bucketData[key][i];
+            // The bucket response is columnar (one array per field);
+            // transpose it into one object per asset.
+            const columns = bucketData as unknown as Record<string, unknown[]>;
+            for (const key in columns) {
+              asset[key] = columns[key][i];
             }
             allAssets.push(asset as AssetResponseDto);
           }
@@ -1645,7 +1644,7 @@ function PhotoGridEditor({
     setReorderDragState({ draggedAssetId: assetId, pan });
   };
 
-  const { handleUndo, handleResetCard, handleResetOrdering, handleFlatten, handleResetAll } =
+  const { handleUndo, handleFlatten, handleResetAll } =
     useEditHistory({
       history,
       setHistory,
