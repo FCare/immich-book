@@ -169,8 +169,6 @@ export interface AlbumConfig extends GlobalConfig {
   backCoverTextSize: number;
   // When there's no back cover photo, whether the text mounts on a
   // white card (matching the rest of the scrapbook) or sits directly
-  // on the page background with no card at all.
-  backCoverPlainText: boolean;
   // Whether the front/back cover photos are also left out of the
   // interior pages - on by default, since printing the same photo twice
   // (once on its cover, again inside the book) is rarely wanted.
@@ -255,7 +253,6 @@ export async function loadAlbumConfig(albumId: string): Promise<AlbumConfig> {
     backCoverFrameSize: null,
     backCoverText: "",
     backCoverTextSize: 20,
-    backCoverPlainText: false,
     excludeCoverPhotosFromPages: true,
   };
 

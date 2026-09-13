@@ -295,7 +295,6 @@ export interface BuildPdfDocumentParams {
   backCoverLayout: CoverLayout;
   backCoverText: string;
   backCoverTextSize: number;
-  backCoverPlainText: boolean;
   fontSize: number;
   coverLayout: CoverLayout;
   coverTitle: string;
@@ -346,7 +345,6 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
     backCoverLayout,
     backCoverText,
     backCoverTextSize,
-    backCoverPlainText,
     fontSize,
     coverLayout,
     coverTitle,
@@ -509,30 +507,6 @@ export function buildPdfDocument(params: BuildPdfDocumentParams) {
         {backCoverLayout === "photo-title" &&
           (() => {
             const hasImage = !!backCoverImageBlob;
-            // Plain text has no photo to mount, so no card/mat either -
-            // it just sits on the page background, centered on the
-            // whole page.
-            if (!hasImage && backCoverPlainText) {
-              const plainWidth = coverPageWidth * 0.7;
-              return (
-                <View
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: (coverPageWidth - plainWidth) / 2,
-                    width: plainWidth,
-                    height: coverPageHeight,
-                    display: "flex",
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  {backCoverNote(SCRAPBOOK.ink, captionTextBoxHeight)}
-                </View>
-              );
-            }
-
             // Card mounted flat (no tilt/tape), centered on the whole
             // page, so it reads as a closing note rather than another
             // scrapbook page. The preview draws this card whenever the

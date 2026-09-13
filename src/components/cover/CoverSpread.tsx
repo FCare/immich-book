@@ -44,7 +44,6 @@ export interface CoverSpreadProps {
     target: NewAssetTarget,
   ) => void;
   backCoverLayout: CoverLayout;
-  backCoverPlainText: boolean;
   backCoverText: string;
   setBackCoverText: (text: string) => void;
   backCoverTextSize: number;
@@ -82,7 +81,6 @@ export function CoverSpread({
   handleReorderPointerDown,
   performNewAssetPlacement,
   backCoverLayout,
-  backCoverPlainText,
   backCoverText,
   setBackCoverText,
   backCoverTextSize,
@@ -232,54 +230,6 @@ export function CoverSpread({
           {backCoverLayout === "photo-title" &&
             (backCoverImageUrl || backCoverText) &&
             (() => {
-              // Plain text has no photo to mount, so no card/mat either
-              // - it just sits on the page background, centered on the
-              // whole page. Honoured by the standalone preview and by
-              // the PDF's separated-cover path; this view used to ignore
-              // it and draw the card anyway.
-              if (!backCoverImageUrl && backCoverPlainText) {
-                const plainWidth = displayWidth * scale * 0.7;
-                return (
-                  <input
-                    value={backCoverText}
-                    onFocus={(e) => {
-                      e.target.dataset.initialValue = backCoverText;
-                    }}
-                    onChange={(e) => setBackCoverText(e.target.value)}
-                    onBlur={(e) => {
-                      const prevText = e.target.dataset.initialValue || "";
-                      const newText = e.target.value.trim();
-                      if (prevText !== newText) {
-                        setHistory((prev) => [
-                          {
-                            type: "edit-back-cover-text",
-                            prevText,
-                            newText,
-                            timestamp: Date.now(),
-                          },
-                          ...prev,
-                        ]);
-                      }
-                    }}
-                    placeholder={t(language, "backCoverTextPlaceholder")}
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="absolute text-center bg-transparent focus:outline-none focus:bg-white/40 rounded"
-                    style={{
-                      top: 0,
-                      left: `${(displayWidth * scale - plainWidth) / 2}px`,
-                      width: `${plainWidth}px`,
-                      height: `${displayHeight * scale}px`,
-                      fontFamily: "Caveat",
-                      fontWeight: 500,
-                      fontSize: `${backCoverTextSize * scale}px`,
-                      color: SCRAPBOOK.ink,
-                    }}
-                  />
-                );
-              }
-
               // A small centered card, matching BackCoverStandalone.tsx's
               // "photo-title" layout exactly (this used to be the front
               // cover's full mat convention instead - inconsistent with

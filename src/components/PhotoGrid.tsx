@@ -1030,9 +1030,6 @@ function PhotoGridEditor({
     initialConfig.backCoverText,
   );
   const [backCoverTextSize, setBackCoverTextSize] = useState(initialConfig.backCoverTextSize);
-  const [backCoverPlainText, setBackCoverPlainText] = useState(
-    initialConfig.backCoverPlainText,
-  );
   // Always exclude cover photos from pages - simpler UX
   const excludeCoverPhotosFromPages = true;
   // Which settings tab is showing - purely local UI state, not worth
@@ -1349,7 +1346,6 @@ function PhotoGridEditor({
       backCoverFrameSize,
       backCoverText,
       backCoverTextSize,
-      backCoverPlainText,
       excludeCoverPhotosFromPages: true, // Always true - simpler UX
     };
     // Save config (without assets snapshot - that's saved separately after resolving placeholders)
@@ -1394,7 +1390,6 @@ function PhotoGridEditor({
     backCoverFrameSize,
     backCoverText,
     backCoverTextSize,
-    backCoverPlainText,
     excludeCoverPhotosFromPages,
     textCardCounts,
     textCardContents,
@@ -2398,8 +2393,7 @@ function PhotoGridEditor({
         backCoverFrameSize,
         backCoverText,
         backCoverTextSize,
-        backCoverPlainText,
-        excludeCoverPhotosFromPages: true, // Always true - simpler UX
+          excludeCoverPhotosFromPages: true, // Always true - simpler UX
       };
       saveAlbumConfig(album.id, config, updatedAssets);
     }, 100);
@@ -2525,7 +2519,7 @@ function PhotoGridEditor({
             manuallyMovedIds: Array.from(manuallyMovedIds),
             showCover, coverTitle, coverAssetId, coverLayout,
             backCoverAssetId, backCoverLayout,
-            backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
+            backCoverText, excludeCoverPhotosFromPages,
           };
           saveAlbumConfig(album.id, config, updatedAssets);
         }, 100);
@@ -2568,7 +2562,7 @@ function PhotoGridEditor({
             manuallyMovedIds: Array.from(manuallyMovedIds),
             showCover, coverTitle, coverAssetId, coverLayout,
             backCoverAssetId, backCoverLayout,
-            backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
+            backCoverText, excludeCoverPhotosFromPages,
           };
           saveAlbumConfig(album.id, config, updatedAssets);
         }, 100);
@@ -3124,8 +3118,7 @@ function PhotoGridEditor({
                     backCoverLayout,
                     backCoverFrameSize,
                     backCoverText,
-                    backCoverPlainText,
-                    excludeCoverPhotosFromPages,
+                                  excludeCoverPhotosFromPages,
                   };
                   saveAlbumConfig(album.id, config, updatedAssets);
                 }, 100);
@@ -3276,8 +3269,7 @@ function PhotoGridEditor({
         backCoverFrameSize,
         backCoverText,
         backCoverTextSize,
-        backCoverPlainText,
-        fontSize,
+          fontSize,
         coverLayout,
         coverFrameSize,
         coverTitle,
@@ -3590,7 +3582,7 @@ function PhotoGridEditor({
                   href={pdfUrl}
                   download={`${sanitizeFileName(album.albumName)}.pdf`}
                   title={t(language, "downloadPdf")}
-                  className="w-9 h-9 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 flex items-center justify-center transition-colors"
+                  className="w-9 h-9 rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 flex items-center justify-center transition-colors"
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -3601,6 +3593,37 @@ function PhotoGridEditor({
                     strokeWidth="2.2"
                   >
                     <path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+                  </svg>
+                </a>
+              )}
+              {/* Opens the generated file in a new tab rather than
+                  embedding it under the editor: what you open is the
+                  export as it stood when you clicked, which an inline
+                  viewer couldn't promise - nothing cleared it when the
+                  book changed, so it kept showing a stale PDF beneath a
+                  preview that had moved on. A blob: URL opens fine from
+                  a link click (only window.open() gets popup-blocked),
+                  and the tab survives the URL being revoked on the next
+                  generation, so two exports can be compared side by
+                  side. */}
+              {pdfUrl && !isGeneratingPdf && (
+                <a
+                  href={pdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={t(language, "viewPdf")}
+                  className="w-9 h-9 rounded-lg bg-sky-700 text-white hover:bg-sky-800 flex items-center justify-center transition-colors"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="15"
+                    height="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                  >
+                    <path d="M1.5 12S5 5.5 12 5.5 22.5 12 22.5 12 19 18.5 12 18.5 1.5 12 1.5 12z" />
+                    <circle cx="12" cy="12" r="3" />
                   </svg>
                 </a>
               )}
@@ -3903,8 +3926,6 @@ function PhotoGridEditor({
               backCoverLayout={backCoverLayout}
               setBackCoverLayout={setBackCoverLayout}
               backCoverAsset={backCoverAsset}
-              backCoverPlainText={backCoverPlainText}
-              setBackCoverPlainText={setBackCoverPlainText}
               backCoverTextSize={backCoverTextSize}
               setBackCoverTextSize={setBackCoverTextSize}
             />
@@ -3931,9 +3952,21 @@ function PhotoGridEditor({
                   <a
                     href={pdfUrl}
                     download={`${sanitizeFileName(album.albumName)}.pdf`}
-                    className="px-5 py-2 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-semibold shadow-sm transition-colors text-center"
+                    className="px-5 py-2 rounded-full bg-emerald-700 text-white hover:bg-emerald-800 text-sm font-semibold shadow-sm transition-colors text-center"
                   >
                     {t(language, "downloadPdf")}
+                  </a>
+                )}
+                {/* See the matching link in the collapsed rail for why
+                    this opens a tab instead of embedding a viewer. */}
+                {pdfUrl && !isGeneratingPdf && (
+                  <a
+                    href={pdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-5 py-2 rounded-full bg-sky-700 text-white hover:bg-sky-800 text-sm font-semibold shadow-sm transition-colors text-center"
+                  >
+                    {t(language, "viewPdf")}
                   </a>
                 )}
               </div>
@@ -4109,7 +4142,6 @@ function PhotoGridEditor({
               handleReorderPointerDown={handleReorderPointerDown}
               performNewAssetPlacement={performNewAssetPlacement}
               backCoverLayout={backCoverLayout}
-              backCoverPlainText={backCoverPlainText}
               backCoverText={backCoverText}
               setBackCoverText={setBackCoverText}
               backCoverTextSize={backCoverTextSize}
@@ -4834,7 +4866,7 @@ function PhotoGridEditor({
                                   manuallyMovedIds: Array.from(manuallyMovedIds),
                                   showCover, coverTitle, coverAssetId, coverLayout,
                                   backCoverAssetId, backCoverLayout,
-                                  backCoverText, backCoverPlainText, excludeCoverPhotosFromPages,
+                                  backCoverText, excludeCoverPhotosFromPages,
                                 };
                                 saveAlbumConfig(album.id, config, updatedAssets);
                               }, 100);
@@ -5035,7 +5067,6 @@ function PhotoGridEditor({
               performNewAssetPlacement={performNewAssetPlacement}
               backCoverLayout={backCoverLayout}
               immichConfig={immichConfig}
-              backCoverPlainText={backCoverPlainText}
               backCoverTextSize={backCoverTextSize}
             />
             </div>
@@ -5048,18 +5079,6 @@ function PhotoGridEditor({
         </p>
       )}
 
-      {pdfUrl && (
-        <div
-          className="w-full mt-4 px-4 sm:px-0"
-          style={{ height: "calc(100vh - 200px)", minHeight: "400px" }}
-        >
-          <iframe
-            src={pdfUrl}
-            title="Generated PDF"
-            className="w-full h-full border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm dark:shadow-black/40"
-          />
-        </div>
-      )}
         </div> {/* Close scrollable wrapper */}
 
         {/* Bottom Panel - Pages with Placeholders */}

@@ -31,8 +31,6 @@ export interface SidebarCoverSettingsProps {
   backCoverLayout: CoverLayout;
   setBackCoverLayout: (layout: CoverLayout) => void;
   backCoverAsset: AssetResponseDto | null;
-  backCoverPlainText: boolean;
-  setBackCoverPlainText: (next: boolean) => void;
   backCoverTextSize: number;
   setBackCoverTextSize: (n: number) => void;
 }
@@ -62,8 +60,6 @@ export function SidebarCoverSettings({
   backCoverLayout,
   setBackCoverLayout,
   backCoverAsset,
-  backCoverPlainText,
-  setBackCoverPlainText,
   backCoverTextSize,
   setBackCoverTextSize,
 }: SidebarCoverSettingsProps) {
@@ -198,7 +194,7 @@ export function SidebarCoverSettings({
       </div>
       <div>
         <span className="block text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">
-          {t(language, "layout")}
+          {t(language, "coverLayout")}
         </span>
         <div className="flex flex-wrap gap-1.5">
           {COVER_LAYOUTS.map((layout) => (
@@ -286,14 +282,6 @@ export function SidebarCoverSettings({
             </p>
           </div>
         )}
-      {backCoverLayout === "photo-title" && (
-        <ToggleSwitch
-          checked={backCoverPlainText}
-          onChange={setBackCoverPlainText}
-          label={t(language, "plainBackCoverText")}
-          sublabel={t(language, "plainBackCoverTextHint")}
-        />
-      )}
     </div>
   );
 }

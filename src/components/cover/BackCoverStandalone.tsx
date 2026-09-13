@@ -43,7 +43,6 @@ export interface BackCoverStandaloneProps {
   ) => void;
   backCoverLayout: CoverLayout;
   immichConfig: ImmichConfig;
-  backCoverPlainText: boolean;
   backCoverTextSize: number;
 }
 
@@ -68,7 +67,6 @@ export function BackCoverStandalone({
   performNewAssetPlacement,
   backCoverLayout,
   immichConfig,
-  backCoverPlainText,
   backCoverTextSize,
 }: BackCoverStandaloneProps) {
   const displayWidth = toPoints(validPageWidth);
@@ -216,54 +214,6 @@ export function BackCoverStandalone({
             const imageUrl = backCoverAsset
               ? `${immichConfig.baseUrl}/assets/${backCoverAsset.id}/thumbnail?size=preview`
               : null;
-
-            // Plain text has no photo to mount, so no
-            // card/mat either - it just sits on the page
-            // background, centered on the whole page.
-            if (!imageUrl && backCoverPlainText) {
-              const plainWidth = displayWidth * 0.7;
-              return (
-                <input
-                  type="text"
-                  value={backCoverText}
-                  onFocus={(e) => {
-                    e.target.dataset.initialValue = backCoverText;
-                  }}
-                  onChange={(e) =>
-                    setBackCoverText(e.target.value)
-                  }
-                  onBlur={(e) => {
-                    const prevText = e.target.dataset.initialValue || "";
-                    const newText = e.target.value.trim();
-                    if (prevText !== newText) {
-                      setHistory((prev) => [
-                        {
-                          type: "edit-back-cover-text",
-                          prevText,
-                          newText,
-                          timestamp: Date.now(),
-                        },
-                        ...prev,
-                      ]);
-                    }
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  className="absolute text-center bg-transparent focus:outline-none focus:bg-white/40 rounded"
-                  style={{
-                    top: 0,
-                    left: (displayWidth - plainWidth) / 2,
-                    width: plainWidth,
-                    height: displayHeight,
-                    fontFamily: "Caveat",
-                    fontWeight: 500,
-                    fontSize: `${backCoverTextSize}px`,
-                    color: SCRAPBOOK.ink,
-                  }}
-                />
-              );
-            }
 
             // Card mounted flat (no tilt), centered on the
             // whole page, so it reads as a closing note. The numbers
