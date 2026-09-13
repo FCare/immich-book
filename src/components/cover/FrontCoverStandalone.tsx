@@ -229,10 +229,25 @@ export function FrontCoverStandalone({
                     src={imageUrl}
                     alt=""
                     data-reorder-asset-id="cover"
-                    className={`w-full h-full object-contain ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
-                    style={{ touchAction: "none" }}
+                    // Cropped to fill the mat window, around the photo's
+                    // focal point - the frame is a rectangle the user
+                    // sizes freely, and matPaddingPt above goes out of
+                    // its way to keep the mat border even on all four
+                    // sides, which fitting the whole photo inside
+                    // immediately undid: a photo whose ratio doesn't
+                    // match the frame's left a border several times
+                    // wider on two sides. This is also what the PDF
+                    // prints (see buildPdfDocument's cover blocks).
+                    className={`w-full h-full object-cover ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
+                    style={{
+                      touchAction: "none",
+                      objectPosition: focalPointToCss(coverFocalPoint),
+                    }}
                     onPointerDown={(e) => {
-                      if (!selectedNewAsset) handleReorderPointerDown("cover", e);
+                      // Croppable now that the photo is cropped: dragging
+                      // pans the focal point instead of doing nothing, so
+                      // a crop the user didn't want isn't final.
+                      if (!selectedNewAsset) handleReorderPointerDown("cover", e, true);
                     }}
                     onClick={(e) => {
                       if (selectedNewAsset && coverAsset) {

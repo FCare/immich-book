@@ -498,7 +498,9 @@ export function CoverSpread({
             ...pageBackgroundCss(pageBackground),
           }}
           onPointerDown={(e) => {
-            if (!selectedNewAsset) handleReorderPointerDown("cover", e, coverLayout === "full-bleed");
+            // Every layout that crops its photo is pannable - only
+            // "text-only" has no photo to pan.
+            if (!selectedNewAsset) handleReorderPointerDown("cover", e, coverLayout !== "text-only");
           }}
           onClick={() => {
             if (selectedNewAsset && coverAsset) {
@@ -579,10 +581,16 @@ export function CoverSpread({
                       padding: `${matPaddingPx}px`,
                     }}
                   >
+                    {/* Cropped to fill the mat window around the focal
+                        point, as the standalone preview and the PDF both
+                        do - see FrontCoverStandalone for why. */}
                     <img
                       src={coverImageUrl}
                       alt="Front cover"
-                      className="w-full h-full object-contain"
+                      className="w-full h-full object-cover"
+                      style={{
+                        objectPosition: focalPointToCss(coverFocalPoint),
+                      }}
                     />
                   </div>
                   <div
