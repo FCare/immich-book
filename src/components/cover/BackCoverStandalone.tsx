@@ -153,6 +153,9 @@ export function BackCoverStandalone({
               left: bleedPreviewPt,
               width: displayWidth,
               height: displayHeight,
+              // Above the content, so a full-bleed photo painted into
+              // the bleed margin doesn't hide the cut line.
+              zIndex: 1,
             }}
            />
          )}
@@ -401,25 +404,40 @@ export function BackCoverStandalone({
             const imageUrl = `${immichConfig.baseUrl}/assets/${backCoverAsset.id}/thumbnail?size=preview`;
             return (
               <>
+                {/* Bleeds past the trim on all four sides, as the PDF
+                    does - see FrontCoverStandalone for why the preview
+                    used to show a ring of page background here. */}
                 <img
                   src={imageUrl}
                   alt=""
-                  className="absolute inset-0 w-full h-full object-cover"
+                  className="absolute object-cover max-w-none"
                   style={{
+                    top: -bleedPreviewPt,
+                    left: -bleedPreviewPt,
+                    width: displayWidth + bleedPreviewPt * 2,
+                    height: displayHeight + bleedPreviewPt * 2,
                     objectPosition: focalPointToCss(backCoverFocalPoint),
                   }}
                 />
                 <div
-                  className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                  className="absolute pointer-events-none"
                   style={{
-                    height: "28%",
+                    left: -bleedPreviewPt,
+                    bottom: -bleedPreviewPt,
+                    width: displayWidth + bleedPreviewPt * 2,
+                    height: displayHeight * 0.28 + bleedPreviewPt,
                     background:
                       "linear-gradient(to top, rgba(0,0,0,0.55), transparent)",
                   }}
+                />
+                <div
+                  className="absolute inset-x-0 bottom-0 flex items-center justify-center pointer-events-none"
+                  style={{ height: displayHeight * 0.28 }}
                 >
                   {backCoverTextInput(
                     backCoverTextSize,
                     "#FFFFFF",
+                    "pointer-events-auto",
                   )}
                 </div>
               </>

@@ -119,6 +119,12 @@ export function CoverSpread({
     ? `${immichConfig.baseUrl}/assets/${backCoverAsset.id}/thumbnail?size=preview`
     : null;
 
+  // On a separated cover the two panels bleed outwards only: the front
+  // panel's left edge and the back panel's right edge butt against the
+  // spine, where there is nothing to trim. Same split the PDF makes
+  // (renderBackCoverContent's "outer" bleed mode).
+  const bleedPx = bleedPreviewPt * scale;
+
   return (
     <div
       className="relative flex-shrink-0 shadow-lg mx-auto"
@@ -410,17 +416,28 @@ export function CoverSpread({
               <img
                 src={backCoverImageUrl}
                 alt="Back cover"
-                className="absolute inset-0 w-full h-full object-cover"
+                className="absolute object-cover max-w-none"
                 style={{
+                  top: -bleedPx,
+                  left: -bleedPx,
+                  width: `${displayWidth * scale + bleedPx}px`,
+                  height: `${displayHeight * scale + bleedPx * 2}px`,
                   objectPosition: focalPointToCss(backCoverFocalPoint),
                 }}
               />
               <div
-                className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                className="absolute pointer-events-none"
                 style={{
-                  height: "28%",
+                  left: -bleedPx,
+                  bottom: -bleedPx,
+                  width: `${displayWidth * scale + bleedPx}px`,
+                  height: `${displayHeight * scale * 0.28 + bleedPx}px`,
                   background: "linear-gradient(to top, rgba(0,0,0,0.55), transparent)",
                 }}
+              />
+              <div
+                className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+                style={{ height: `${displayHeight * scale * 0.28}px` }}
               >
                 <input
                   value={backCoverText}
@@ -662,15 +679,28 @@ export function CoverSpread({
               <img
                 src={coverImageUrl}
                 alt="Front cover"
-                className="absolute inset-0 w-full h-full object-cover"
-                style={{ objectPosition: focalPointToCss(coverFocalPoint) }}
+                className="absolute object-cover max-w-none"
+                style={{
+                  top: -bleedPx,
+                  left: 0,
+                  width: `${displayWidth * scale + bleedPx}px`,
+                  height: `${displayHeight * scale + bleedPx * 2}px`,
+                  objectPosition: focalPointToCss(coverFocalPoint),
+                }}
+              />
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  left: 0,
+                  bottom: -bleedPx,
+                  width: `${displayWidth * scale + bleedPx}px`,
+                  height: `${displayHeight * scale * 0.28 + bleedPx}px`,
+                  background: "linear-gradient(to top, rgba(0,0,0,0.55), transparent)",
+                }}
               />
               <div
                 className="absolute inset-x-0 bottom-0 flex items-center justify-center"
-                style={{
-                  height: "28%",
-                  background: "linear-gradient(to top, rgba(0,0,0,0.55), transparent)",
-                }}
+                style={{ height: `${displayHeight * scale * 0.28}px` }}
               >
                 <input
                   value={coverTitle}

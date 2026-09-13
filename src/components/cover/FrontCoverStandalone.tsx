@@ -148,6 +148,9 @@ export function FrontCoverStandalone({
               left: bleedPreviewPt,
               width: displayWidth,
               height: displayHeight,
+              // Above the content, so a full-bleed photo painted into
+              // the bleed margin doesn't hide the cut line.
+              zIndex: 1,
             }}
           />
         )}
@@ -295,12 +298,27 @@ export function FrontCoverStandalone({
 
         {coverLayout === "full-bleed" && imageUrl && (
           <>
+            {/* Bleeds past the trim on all four sides, exactly as the
+                PDF does. The preview used to stop the photo at the trim
+                line, so a bled cover showed a ring of page background
+                around it that the exported file never had. The dashed
+                trim line is lifted above the photo so it still marks
+                where the printer will actually cut.
+
+                 max-w-none is load-bearing: Tailwind's preflight sets img{max-width:100%}, which
+                 caps the element at the width of its containing block -
+                 the trim-sized box - and would silently clip the bleed
+                 back off. An inline width can't outrank a max-width. */}
             <img
               src={imageUrl}
               alt=""
               data-reorder-asset-id="cover"
-              className={`absolute inset-0 w-full h-full object-cover ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
+              className={`absolute object-cover max-w-none ${selectedNewAsset ? "cursor-pointer hover:opacity-80 transition-opacity" : "cursor-move"} ${isCoverSwapSelected ? "ring-4 ring-indigo-500 ring-offset-2" : ""}`}
               style={{
+                top: -bleedPreviewPt,
+                left: -bleedPreviewPt,
+                width: displayWidth + bleedPreviewPt * 2,
+                height: displayHeight + bleedPreviewPt * 2,
                 touchAction: "none",
                 objectPosition: focalPointToCss(coverFocalPoint),
               }}
@@ -314,15 +332,26 @@ export function FrontCoverStandalone({
                 }
               }}
             />
+            {/* The scrim bleeds with the photo, while the title stays
+                inside the trim area where it will actually be read -
+                same split as the PDF. pointer-events-none so the scrim
+                doesn't swallow a drag meant to pan the photo. */}
             <div
-              className="absolute inset-x-0 bottom-0 flex items-center justify-center"
+              className="absolute pointer-events-none"
               style={{
-                height: "28%",
+                left: -bleedPreviewPt,
+                bottom: -bleedPreviewPt,
+                width: displayWidth + bleedPreviewPt * 2,
+                height: displayHeight * 0.28 + bleedPreviewPt,
                 background:
                   "linear-gradient(to top, rgba(0,0,0,0.55), transparent)",
               }}
+            />
+            <div
+              className="absolute inset-x-0 bottom-0 flex items-center justify-center pointer-events-none"
+              style={{ height: displayHeight * 0.28 }}
             >
-              {titleInput(coverTextSize, "#FFFFFF")}
+              {titleInput(coverTextSize, "#FFFFFF", "pointer-events-auto")}
             </div>
           </>
         )}
