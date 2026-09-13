@@ -1289,6 +1289,67 @@ function PhotoGridEditor({
       });
   }, [assets, changesDetected, album.id, initialConfig]);
 
+  // The one place AlbumConfig is assembled. Every field, read from
+  // current state - callers pass `overrides` only for values they have
+  // just computed and not yet committed to state.
+  //
+  // This used to be spelled out by hand at each of the six save sites,
+  // and four of them had drifted: they omitted between 9 and 11 fields
+  // (the spine settings, separatedCover, setAsideAssetIds, coverTextSize
+  // and both frame sizes). That is not cosmetic - the backend replaces
+  // the whole row (`config = excluded.config`, see put_photobook), so a
+  // save that omits a field erases it, and the next load silently falls
+  // back to the default. Swapping one interior photo was enough to wipe
+  // a book's spine title and its resized cover frames.
+  const buildAlbumConfig = (
+    overrides: Partial<AlbumConfig> = {},
+  ): AlbumConfig => ({
+    printerId,
+    pageWidth,
+    pageHeight,
+    margin,
+    spacing,
+    filterVideos,
+    bleedEnabled,
+    bleed,
+    showDates,
+    showCaptions,
+    fontSize,
+    pageBackground,
+    cardStyle,
+    customOrdering,
+    layoutVariants: Object.fromEntries(layoutVariants),
+    pageCounts: Object.fromEntries(pageCounts),
+    pageCaptions: Object.fromEntries(pageCaptions),
+    cardCaptions: Object.fromEntries(cardCaptions),
+    focalPoints: Object.fromEntries(focalPoints),
+    boundaryOverrides: Object.fromEntries(boundaryOverrides),
+    axisOverrides: Object.fromEntries(axisOverrides),
+    textCardCounts: Object.fromEntries(textCardCounts),
+    textCardContents: Object.fromEntries(textCardContents),
+    slotOverrides: Object.fromEntries(slotOverrides),
+    manuallyMovedIds: Array.from(manuallyMovedIds),
+    setAsideAssetIds: Array.from(setAsideAssetIds),
+    showCover,
+    separatedCover,
+    spineWidth,
+    spineColor,
+    spineTextColor,
+    spineTextSize,
+    spineTitle,
+    coverTitle,
+    coverTextSize,
+    coverAssetId,
+    coverLayout,
+    coverFrameSize,
+    backCoverAssetId,
+    backCoverLayout,
+    backCoverFrameSize,
+    backCoverText,
+    backCoverTextSize,
+    excludeCoverPhotosFromPages,
+    ...overrides,
+  });
   // Save config to localStorage whenever it changes (with clamped values)
   useEffect(() => {
     // Only save if all values are valid
@@ -1302,52 +1363,7 @@ function PhotoGridEditor({
       return;
     }
 
-    const config: AlbumConfig = {
-      printerId,
-      pageWidth,
-      pageHeight,
-      margin,
-      spacing,
-      filterVideos: false, // Never filter videos - simpler UX
-      bleedEnabled,
-      bleed,
-      showDates,
-      showCaptions,
-      fontSize,
-      pageBackground,
-      cardStyle,
-      customOrdering,
-      layoutVariants: Object.fromEntries(layoutVariants),
-      pageCounts: Object.fromEntries(pageCounts),
-      pageCaptions: Object.fromEntries(pageCaptions),
-      cardCaptions: Object.fromEntries(cardCaptions),
-      focalPoints: Object.fromEntries(focalPoints),
-      boundaryOverrides: Object.fromEntries(boundaryOverrides),
-      axisOverrides: Object.fromEntries(axisOverrides),
-      textCardCounts: Object.fromEntries(textCardCounts),
-      textCardContents: Object.fromEntries(textCardContents),
-      slotOverrides: Object.fromEntries(slotOverrides),
-      manuallyMovedIds: Array.from(manuallyMovedIds),
-      setAsideAssetIds: Array.from(setAsideAssetIds),
-      showCover: true, // Always true - simpler UX
-      separatedCover,
-      spineWidth,
-      spineColor,
-      spineTextColor,
-      spineTextSize,
-      spineTitle,
-      coverTitle,
-      coverTextSize,
-      coverAssetId,
-      coverLayout,
-      coverFrameSize,
-      backCoverAssetId,
-      backCoverLayout,
-      backCoverFrameSize,
-      backCoverText,
-      backCoverTextSize,
-      excludeCoverPhotosFromPages: true, // Always true - simpler UX
-    };
+    const config = buildAlbumConfig();
     // Save config (without assets snapshot - that's saved separately after resolving placeholders)
     saveAlbumConfig(album.id, config);
   }, [
@@ -2349,52 +2365,19 @@ function PhotoGridEditor({
     ]);
 
     setTimeout(() => {
-      const config: AlbumConfig = {
-        printerId,
-        pageWidth,
-        pageHeight,
-        margin,
-        spacing,
-        filterVideos: false, // Never filter videos - simpler UX
-        bleedEnabled,
-        bleed,
-        showDates,
-        showCaptions,
-        fontSize,
-        pageBackground,
-        cardStyle,
-        customOrdering,
+      // The page-insert reflow has these eight in hand but hasn't
+      // committed them to state yet, so they override what the builder
+      // would read back.
+      const config = buildAlbumConfig({
         layoutVariants: Object.fromEntries(nextLayoutVariants),
         pageCounts: Object.fromEntries(nextPageCounts),
         pageCaptions: Object.fromEntries(nextPageCaptions),
-        cardCaptions: Object.fromEntries(cardCaptions),
-        focalPoints: Object.fromEntries(focalPoints),
         boundaryOverrides: Object.fromEntries(nextBoundaryOverrides),
         axisOverrides: Object.fromEntries(nextAxisOverrides),
         textCardCounts: Object.fromEntries(nextTextCardCounts),
         textCardContents: Object.fromEntries(nextTextCardContents),
         slotOverrides: Object.fromEntries(nextSlotOverrides),
-        manuallyMovedIds: Array.from(manuallyMovedIds),
-        setAsideAssetIds: Array.from(setAsideAssetIds),
-        showCover: true, // Always true - simpler UX
-        separatedCover,
-        spineWidth,
-        spineColor,
-        spineTextColor,
-        spineTextSize,
-        spineTitle,
-        coverTitle,
-        coverTextSize,
-        coverAssetId,
-        coverLayout,
-        coverFrameSize,
-        backCoverAssetId,
-        backCoverLayout,
-        backCoverFrameSize,
-        backCoverText,
-        backCoverTextSize,
-          excludeCoverPhotosFromPages: true, // Always true - simpler UX
-      };
+      });
       saveAlbumConfig(album.id, config, updatedAssets);
     }, 100);
   };
@@ -2502,25 +2485,7 @@ function PhotoGridEditor({
           ...prev,
         ]);
         setTimeout(() => {
-          const config: AlbumConfig = {
-            printerId, pageWidth, pageHeight, margin, spacing,
-            filterVideos, bleedEnabled, bleed, showDates, showCaptions,
-            fontSize, pageBackground, cardStyle, customOrdering,
-            layoutVariants: Object.fromEntries(layoutVariants),
-            pageCounts: Object.fromEntries(pageCounts),
-            pageCaptions: Object.fromEntries(pageCaptions),
-            cardCaptions: Object.fromEntries(cardCaptions),
-            focalPoints: Object.fromEntries(focalPoints),
-            boundaryOverrides: Object.fromEntries(boundaryOverrides),
-            axisOverrides: Object.fromEntries(axisOverrides),
-            textCardCounts: Object.fromEntries(textCardCounts),
-            textCardContents: Object.fromEntries(textCardContents),
-            slotOverrides: Object.fromEntries(slotOverrides),
-            manuallyMovedIds: Array.from(manuallyMovedIds),
-            showCover, coverTitle, coverAssetId, coverLayout,
-            backCoverAssetId, backCoverLayout,
-            backCoverText, excludeCoverPhotosFromPages,
-          };
+          const config = buildAlbumConfig();
           saveAlbumConfig(album.id, config, updatedAssets);
         }, 100);
         break;
@@ -2545,25 +2510,7 @@ function PhotoGridEditor({
           ...prev,
         ]);
         setTimeout(() => {
-          const config: AlbumConfig = {
-            printerId, pageWidth, pageHeight, margin, spacing,
-            filterVideos, bleedEnabled, bleed, showDates, showCaptions,
-            fontSize, pageBackground, cardStyle, customOrdering,
-            layoutVariants: Object.fromEntries(layoutVariants),
-            pageCounts: Object.fromEntries(pageCounts),
-            pageCaptions: Object.fromEntries(pageCaptions),
-            cardCaptions: Object.fromEntries(cardCaptions),
-            focalPoints: Object.fromEntries(focalPoints),
-            boundaryOverrides: Object.fromEntries(boundaryOverrides),
-            axisOverrides: Object.fromEntries(axisOverrides),
-            textCardCounts: Object.fromEntries(textCardCounts),
-            textCardContents: Object.fromEntries(textCardContents),
-            slotOverrides: Object.fromEntries(slotOverrides),
-            manuallyMovedIds: Array.from(manuallyMovedIds),
-            showCover, coverTitle, coverAssetId, coverLayout,
-            backCoverAssetId, backCoverLayout,
-            backCoverText, excludeCoverPhotosFromPages,
-          };
+          const config = buildAlbumConfig();
           saveAlbumConfig(album.id, config, updatedAssets);
         }, 100);
         break;
@@ -3083,43 +3030,7 @@ function PhotoGridEditor({
                 // Save snapshot to backend
                 setTimeout(() => {
                   console.log(`Saving snapshot after insert...`);
-                  const config: AlbumConfig = {
-                    printerId,
-                    pageWidth,
-                    pageHeight,
-                    margin,
-                    spacing,
-                    filterVideos,
-                    bleedEnabled,
-                    bleed,
-                    showDates,
-                    showCaptions,
-                    fontSize,
-                    pageBackground,
-                    cardStyle,
-                    customOrdering,
-                    layoutVariants: Object.fromEntries(layoutVariants),
-                    pageCounts: Object.fromEntries(pageCounts),
-                    pageCaptions: Object.fromEntries(pageCaptions),
-                    cardCaptions: Object.fromEntries(cardCaptions),
-                    focalPoints: Object.fromEntries(focalPoints),
-                    boundaryOverrides: Object.fromEntries(boundaryOverrides),
-                    axisOverrides: Object.fromEntries(axisOverrides),
-                    textCardCounts: Object.fromEntries(textCardCounts),
-                    textCardContents: Object.fromEntries(textCardContents),
-                    slotOverrides: Object.fromEntries(slotOverrides),
-                    manuallyMovedIds: Array.from(manuallyMovedIds),
-                    showCover,
-                    coverTitle,
-                    coverAssetId,
-                    coverLayout,
-                    coverFrameSize,
-                    backCoverAssetId,
-                    backCoverLayout,
-                    backCoverFrameSize,
-                    backCoverText,
-                                  excludeCoverPhotosFromPages,
-                  };
+                  const config = buildAlbumConfig();
                   saveAlbumConfig(album.id, config, updatedAssets);
                 }, 100);
                 
@@ -4849,25 +4760,7 @@ function PhotoGridEditor({
                               
                               // Save snapshot async
                               setTimeout(() => {
-                                const config: AlbumConfig = {
-                                  printerId, pageWidth, pageHeight, margin, spacing,
-                                  filterVideos, bleedEnabled, bleed, showDates, showCaptions,
-                                  fontSize, pageBackground, cardStyle, customOrdering,
-                                  layoutVariants: Object.fromEntries(layoutVariants),
-                                  pageCounts: Object.fromEntries(pageCounts),
-                                  pageCaptions: Object.fromEntries(pageCaptions),
-                                  cardCaptions: Object.fromEntries(cardCaptions),
-                                  focalPoints: Object.fromEntries(focalPoints),
-                                  boundaryOverrides: Object.fromEntries(boundaryOverrides),
-                                  axisOverrides: Object.fromEntries(axisOverrides),
-                                  textCardCounts: Object.fromEntries(textCardCounts),
-                                  textCardContents: Object.fromEntries(textCardContents),
-                                  slotOverrides: Object.fromEntries(slotOverrides),
-                                  manuallyMovedIds: Array.from(manuallyMovedIds),
-                                  showCover, coverTitle, coverAssetId, coverLayout,
-                                  backCoverAssetId, backCoverLayout,
-                                  backCoverText, excludeCoverPhotosFromPages,
-                                };
+                                const config = buildAlbumConfig();
                                 saveAlbumConfig(album.id, config, updatedAssets);
                               }, 100);
                             }}
